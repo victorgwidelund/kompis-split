@@ -1,0 +1,19 @@
+services:
+  kompis-split:
+    image: ghcr.io/victorgwidelund/kompis-split:latest
+    container_name: kompis-split
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      DB_PATH: /data/kompis-split.db
+      APP_PASSWORD: "${APP_PASSWORD:?Set APP_PASSWORD in the Compose Manager environment tab}"
+      COOKIE_SECRET: "${COOKIE_SECRET:?Set COOKIE_SECRET in the Compose Manager environment tab}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+    volumes:
+      - /mnt/user/kompis_split/data:/data
+    labels:
+      net.unraid.docker.managed: "composeman"
+      net.unraid.docker.webui: "http://[IP]:[PORT:8787]/"

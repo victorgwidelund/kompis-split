@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f3eb" />
+    <meta name="description" content="Split trip expenses with friends and settle up with Swish." />
+    <title>Kompis Split</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <section id="login-screen" class="login-screen hidden" aria-labelledby="login-title">
+      <div class="login-art" aria-hidden="true">
+        <span class="orbit orbit-one"></span><span class="orbit orbit-two"></span>
+        <div class="receipt-card">
+          <p>Sälen weekend</p><strong>4 286 kr</strong><small>All sorted.</small>
+        </div>
+      </div>
+      <form id="login-form" class="login-card">
+        <div class="brand-mark">KS</div>
+        <p class="eyebrow">Kompis Split</p>
+        <h1 id="login-title">Money sorted.<br />Friendship intact.</h1>
+        <p class="muted">Enter the shared password to see your trips.</p>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required autofocus /></label>
+        <button class="button primary wide" type="submit">Open the app <span>→</span></button>
+        <p id="login-error" class="form-error" role="alert"></p>
+      </form>
+    </section>
+
+    <div id="app" class="app-shell hidden">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">KS</span><span>Kompis<br /><strong>Split</strong></span></div>
+        <button id="new-trip-button" class="button dark wide"><span>＋</span> New trip</button>
+        <div class="side-heading"><span>Your trips</span><span id="trip-count" class="count">0</span></div>
+        <nav id="trip-list" class="trip-list" aria-label="Trips"></nav>
+        <div class="sidebar-footer">
+          <div class="security-dot"></div><div><strong>Private & self-hosted</strong><small>Your data stays on your server</small></div>
+          <button id="logout-button" class="icon-button" aria-label="Sign out" title="Sign out">↗</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="mobile-header">
+          <div class="brand"><span class="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></div>
+          <button id="mobile-new-trip" class="icon-button dark" aria-label="New trip">＋</button>
+        </header>
+        <section id="welcome" class="welcome">
+          <p class="eyebrow">Start fresh</p>
+          <h1>Where are you<br />heading next?</h1>
+          <p>Create a trip, add your friends, and let the app keep every krona fair.</p>
+          <button id="welcome-new-trip" class="button primary">Create your first trip <span>→</span></button>
+          <div class="welcome-cards" aria-hidden="true">
+            <div class="mini-card tilt-left"><span>🏡</span><strong>Cabin</strong><small>Shared fairly</small></div>
+            <div class="mini-card tilt-right"><span>🚆</span><strong>Train</strong><small>Paid by Alex</small></div>
+            <div class="mini-card tilt-more"><span>🍝</span><strong>Dinner</strong><small>Split 4 ways</small></div>
+          </div>
+        </section>
+
+        <section id="trip-view" class="trip-view hidden">
+          <header class="trip-header">
+            <div>
+              <button id="back-to-trips" class="mobile-back">← Trips</button>
+              <p id="trip-date" class="eyebrow">TRIP</p>
+              <h1 id="trip-name">Trip name</h1>
+            </div>
+            <div class="header-actions">
+              <button id="add-person-button" class="button ghost">Add friend</button>
+              <button id="add-expense-button" class="button primary">＋ Add expense</button>
+            </div>
+          </header>
+
+          <nav class="tabs" aria-label="Trip views">
+            <button class="tab active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="expenses">Expenses</button>
+            <button class="tab" data-tab="settle">Settle up <span id="settlement-count" class="tab-count">0</span></button>
+            <button class="tab" data-tab="people">People</button>
+          </nav>
+
+          <div id="tab-overview" class="tab-panel">
+            <div class="summary-grid">
+              <article class="hero-stat coral">
+                <span class="stat-icon">↗</span><p>Total spent</p><strong id="total-spent">0 kr</strong><small id="expense-count">No expenses yet</small>
+              </article>
+              <article class="hero-stat cobalt">
+                <span class="stat-icon">◎</span><p>To settle</p><strong id="to-settle">0 kr</strong><small id="settle-caption">Everyone is even</small>
+              </article>
+              <article class="member-stat">
+                <p>Travelling together</p><div id="avatar-stack" class="avatar-stack"></div><strong id="people-count">0 friends</strong>
+                <button id="summary-add-person" class="text-button">Add someone →</button>
+              </article>
+            </div>
+            <div class="dashboard-grid">
+              <section class="panel">
+                <div class="panel-title"><div><p class="eyebrow">The latest</p><h2>Recent expenses</h2></div><button class="text-button" data-go-tab="expenses">View all →</button></div>
+                <div id="recent-expenses" class="expense-list"></div>
+              </section>
+              <section class="panel balance-panel">
+                <div class="panel-title"><div><p class="eyebrow">At a glance</p><h2>Balances</h2></div></div>
+                <div id="balance-list" class="balance-list"></div>
+                <button class="button dark wide" data-go-tab="settle">See who pays whom <span>→</span></button>
+              </section>
+            </div>
+          </div>
+
+          <div id="tab-expenses" class="tab-panel hidden">
+            <section class="panel full-panel">
+              <div class="panel-title"><div><p class="eyebrow">Every krona</p><h2>All expenses</h2></div><button id="expenses-add-button" class="button dark">＋ Add expense</button></div>
+              <div id="all-expenses" class="expense-list roomy"></div>
+            </section>
+          </div>
+
+          <div id="tab-settle" class="tab-panel hidden">
+            <div class="settle-intro"><p class="eyebrow">The shortest route to even</p><h2>Settle with fewer payments.</h2><p>We combine everyone’s expenses so your group only makes the payments that matter.</p></div>
+            <div id="settlement-list" class="settlement-grid"></div>
+            <section class="panel payment-history"><div class="panel-title"><div><p class="eyebrow">Done & dusted</p><h2>Recorded payments</h2></div></div><div id="payment-list" class="expense-list"></div></section>
+          </div>
+
+          <div id="tab-people" class="tab-panel hidden">
+            <section class="panel full-panel">
+              <div class="panel-title"><div><p class="eyebrow">The crew</p><h2>Friends on this trip</h2></div><button id="people-add-button" class="button dark">＋ Add friend</button></div>
+              <div id="people-list" class="people-grid"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="trip-dialog">
+      <form id="trip-form" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">A new adventure</p><h2>Create a trip</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
+        <label>Trip name<input name="name" placeholder="e.g. Sälen weekend" maxlength="80" required /></label>
+        <div class="form-row"><label>Starts<input name="startDate" type="date" /></label><label>Ends<input name="endDate" type="date" /></label></div>
+        <p class="form-error" role="alert"></p>
+        <button class="button primary wide" type="submit">Create trip <span>→</span></button>
+      </form>
+    </dialog>
+
+    <dialog id="person-dialog">
+      <form id="person-form" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">Make room</p><h2>Add a friend</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
+        <label>Name<input name="name" placeholder="Friend’s name" maxlength="60" required /></label>
+        <label>Swish number <input name="swishPhone" inputmode="tel" placeholder="070 123 45 67" /><small>Optional — needed to prefill Swish payments to them.</small></label>
+        <p class="form-error" role="alert"></p>
+        <button class="button primary wide" type="submit">Add to the trip <span>→</span></button>
+      </form>
+    </dialog>
+
+    <dialog id="expense-dialog">
+      <form id="expense-form" class="dialog-card wide-dialog">
+        <div class="dialog-header"><div><p class="eyebrow">Add it to the tab</p><h2>New expense</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
+        <div class="form-row unequal"><label class="grow">What was it?<input name="title" placeholder="e.g. Groceries" maxlength="100" required /></label><label>Amount (SEK)<input name="amount" type="number" min="0.01" max="10000000" step="0.01" placeholder="0.00" required /></label></div>
+        <div class="form-row"><label>Paid by<select name="payerId" required></select></label><label>Date<input name="expenseDate" type="date" required /></label><label>Category<select name="category"><option value="food">Food & drink</option><option value="travel">Travel</option><option value="stay">Accommodation</option><option value="fun">Activities</option><option value="other">Other</option></select></label></div>
+        <fieldset><legend>Split it</legend><div class="segmented"><label><input type="radio" name="splitMode" value="equal" checked /><span>Equally</span></label><label><input type="radio" name="splitMode" value="percentage" /><span>Percentage</span></label><label><input type="radio" name="splitMode" value="exact" /><span>Exact SEK</span></label><label><input type="radio" name="splitMode" value="shares" /><span>Shares</span></label></div></fieldset>
+        <div id="split-people" class="split-people"></div>
+        <div id="split-summary" class="split-summary">Select the friends who shared this expense.</div>
+        <p class="form-error" role="alert"></p>
+        <button class="button primary wide" type="submit">Add expense <span>→</span></button>
+      </form>
+    </dialog>
+
+    <dialog id="payment-dialog">
+      <form id="payment-form" class="dialog-card">
+        <div class="dialog-header"><div><p class="eyebrow">Payment sent?</p><h2>Record payment</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
+        <input name="fromId" type="hidden" /><input name="toId" type="hidden" />
+        <p id="payment-route" class="payment-route"></p>
+        <label>Amount (SEK)<input name="amount" type="number" min="0.01" step="0.01" required /></label>
+        <label>Note<input name="note" maxlength="120" placeholder="Swish payment" /></label>
+        <p class="form-error" role="alert"></p>
+        <button class="button primary wide" type="submit">Mark as paid <span>✓</span></button>
+      </form>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
