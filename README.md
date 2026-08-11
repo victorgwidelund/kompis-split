@@ -1,94 +1,105 @@
 # Kompis Split
 
-A small, self-hosted expense splitter for trips with friends. It keeps data in a local SQLite file, handles rounding down to the öre, simplifies repayments, and opens Swish with payment details filled in.
+En liten självhostad app för att dela resekostnader med vänner. Frontend är vanlig HTML/CSS/JavaScript. Backend är Node.js 24 med TypeScript och PostgreSQL 17. Alla pengar lagras som heltalsöre.
 
-## What is included
+## Funktioner
 
-- Multiple trips with dates and participants
-- Swish number per participant
-- Equal, percentage, exact-amount, and weighted-share splits
-- Integer öre accounting so totals always reconcile
-- Simplified settlement suggestions
-- One-tap Swish app-to-app payment links and copied payment details as a fallback
-- Recorded repayments that immediately recalculate balances
-- Shared-password protection
-- Responsive phone and desktop interface
-- SQLite persistence and a health endpoint
-- Docker and Docker Compose configuration for Unraid
+- Personliga konton, hashade lösenord och utgående serverlagrade sessioner
+- Hashade inbjudningstoken med 14 dagars giltighet
+- Serverkontrollerad åtkomst per resa: ägare, administratör eller medlem
+- Sökbara användare, kontakter och gästdeltagare
+- Aktiva och arkiverade resor utan att ekonomiska poster försvinner
+- Lika, procentuell, exakt och viktad deterministisk fördelning
+- Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
+- PostgreSQL-healthcheck och dagliga komprimerade `pg_dump`-backuper
 
-## Run on Unraid with Compose
+## Installation på Unraid
 
-Node.js does **not** need to be installed on Unraid. Docker builds the app from the official `node:24-alpine` image, which already contains Node.js.
+Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compose.
 
-1. Extract the ZIP so this app folder is located at `/mnt/user/kompis_split/app`.
-2. Edit `/mnt/user/kompis_split/app/compose.yaml` and replace `change-this-password` with a long, private password.
-3. Open the Unraid terminal and run:
+1. Lägg repot/stackfilen i `/mnt/user/kompis_split/app/`.
+2. Skapa dessa miljövariabler i Compose Manager:
 
-   ```sh
-   cd /mnt/user/kompis_split/app
-   docker compose up -d --build
+   ```dotenv
+   APP_PASSWORD=ett-långt-slumpmässigt-installationslösenord
+   COOKIE_SECRET=minst-32-slumpmässiga-tecken
+   POSTGRES_PASSWORD=ett-annat-långt-slumpmässigt-lösenord
+   COOKIE_SECURE=false
+   TRUST_PROXY=false
+   SESSION_DAYS=30
+   BACKUP_RETENTION_DAYS=14
+   KOMPIS_SPLIT_IMAGE=ghcr.io/victorgwidelund/kompis-split:sha-abcdef0
    ```
 
-4. Open `http://YOUR-UNRAID-IP:8787`.
+3. Välj **Compose Up** och öppna `http://DIN-UNRAID-IP:8787`.
+4. Skapa första administratören med `APP_PASSWORD`.
 
-The database is stored at `/mnt/user/kompis_split/data/kompis-split.db` on the Unraid host. Back up that file together with its `-wal` and `-shm` companions while the container is stopped, or back up the whole `kompis_split` share using your usual Unraid backup workflow.
+PostgreSQL publicerar ingen port på Unraid. Endast appen finns på port 8787. Beständig data och backup ligger utanför containrarna:
 
-## Automatic updates from GitHub
+```text
+/mnt/user/kompis_split/postgres/
+/mnt/user/kompis_split/backups/
+```
 
-Every push to `main` runs the tests and publishes a fresh multi-platform image to `ghcr.io/victorgwidelund/kompis-split:latest`. The included `compose.yaml` pulls that image instead of rebuilding source code on Unraid.
+Den gamla demo- SQLite-filen under `/mnt/user/kompis_split/data/` används inte av version 2 och kan ligga kvar tills du själv väljer att ta bort den.
 
-In Compose Manager, set these values in the stack's **Environment** tab instead of writing secrets into the Compose file:
+## Uppdatering via GitHub
+
+En push till `main` kör TypeScript-kontroll, finansiella tester, API-test mot PostgreSQL och Compose-validering. Därefter byggs multi-arch-images i GHCR.
+
+Produktionsstacken kräver en uttrycklig `sha-<commit>`-tagg och använder inte `latest`. När workflowen är grön ändrar du `KOMPIS_SPLIT_IMAGE` till den nya taggen och väljer **Pull & Up**. Behåll föregående tagg för rollback av appen; databasvolymen påverkas inte av imagebytet.
+
+## Reverse proxy och HTTPS
+
+Exponera inte port 8787 direkt mot internet. Använd VPN eller en HTTPS-reverse-proxy. Bakom en betrodd proxy:
 
 ```dotenv
-APP_PASSWORD=your-private-login-password
-COOKIE_SECRET=a-long-random-secret-value
-COOKIE_SECURE=false
+COOKIE_SECURE=true
+TRUST_PROXY=true
 ```
 
-To update after a new image finishes building, choose **Force Update** or **Pull & Up** in Compose Manager. The SQLite database is mounted separately and is not replaced by container updates.
+Proxyn ska vidarebefordra `Host` eller `X-Forwarded-Host`. `TRUST_PROXY=true` får bara användas när all trafik kommer genom din betrodda proxy.
 
-If `docker compose` is not available in your Unraid terminal, install the **Docker Compose Manager** plugin from Community Applications, add `/mnt/user/kompis_split/app/compose.yaml` as a stack, and choose **Compose Up**.
+## Backup och återställning
 
-## Reverse proxy and HTTPS
+`postgres-backup` gör omedelbart och därefter dagligen en PostgreSQL custom-format-backup. Retention styrs av `BACKUP_RETENTION_DAYS`. Kopiera även `/mnt/user/kompis_split/backups` till en annan disk eller maskin via ditt vanliga Unraid-backupflöde.
 
-If friends will use the app away from your home network, put it behind your existing Unraid reverse proxy, use HTTPS, and set this in `compose.yaml`:
+Testa återställning på en separat databas:
 
-```yaml
-COOKIE_SECURE: "true"
+```sh
+createdb -h SERVER -U kompis_split kompis_split_restore_test
+pg_restore -h SERVER -U kompis_split --dbname=kompis_split_restore_test --clean --if-exists /path/to/kompis-split-TIMESTAMP.dump
 ```
 
-Do not expose port 8787 directly to the public internet. A VPN such as Tailscale is the simplest private-access option. The shared password is intentionally lightweight access control for a trusted friend group, not a multi-user identity system.
+Kontrollera sedan tabeller, antal resor/utgifter och saldon innan en produktionsåterställning. Återställ aldrig över en databas som används. Stoppa appen, ta en ny backup av nuvarande läge och återställ först därefter.
 
-## Swish integration
+## Swish
 
-This version uses Swish's app-to-app payment flow for person-to-person settlement. When the recipient has a Swish number saved, **Open Swish** launches the mobile app with recipient, amount, and trip name prefilled. The sender still reviews and approves the payment inside Swish. On devices where the Swish URL cannot open, the app copies human-readable payment details instead.
+Nuvarande funktion öppnar Swish app-to-app och räknar aldrig en öppnad länk som betalningsbevis. Användaren registrerar betalningen manuellt efteråt. Detta är inte Swish Commerce API; framtida certifikat och nycklar ska endast ligga på servern och bara använda dokumenterad Swish-funktionalitet.
 
-This is deliberately different from the Swish Commerce API. Automated payment-status callbacks require a business Swish Commerce agreement, merchant number, client certificate, and a public HTTPS callback endpoint. Those credentials should never be placed in the browser. A Commerce adapter can be added to the server later if you obtain that agreement.
+## Konfiguration
 
-## Configuration
-
-| Variable | Default | Purpose |
+| Variabel | Standard | Syfte |
 | --- | --- | --- |
-| `PORT` | `8787` | HTTP port inside the container |
-| `DB_PATH` | `./data/kompis-split.db` | SQLite database location |
-| `APP_PASSWORD` | empty | Shared app password; always set this on Unraid |
-| `COOKIE_SECRET` | derived | Optional stable secret for session signing |
-| `COOKIE_SECURE` | `false` | Set to `true` when the public URL uses HTTPS |
+| `PORT` | `8787` | Appens HTTP-port |
+| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | satta av Compose | PostgreSQL-anslutning |
+| `DATABASE_URL` | tom | Alternativ anslutningssträng för lokal utveckling/test |
+| `DB_POOL_SIZE` | `10` | Max antal anslutningar från appen |
+| `APP_PASSWORD` | obligatorisk i Compose | Skyddar skapandet av första kontot |
+| `COOKIE_SECRET` | obligatorisk i Compose | HMAC-nyckel för sessions-ID |
+| `COOKIE_SECURE` | `false` | Ska vara `true` bakom publik HTTPS |
+| `TRUST_PROXY` | `false` | Ska bara vara `true` bakom betrodd proxy |
+| `SESSION_DAYS` | `30` | Sessionernas livslängd |
+| `BACKUP_RETENTION_DAYS` | `14` | Retention för dagliga dumpfiler |
+| `KOMPIS_SPLIT_IMAGE` | obligatorisk | Testad `sha-`-tagg från GHCR |
 
-## Local development
+## Lokal utveckling
 
-Node.js 24 or newer is the only requirement. No third-party packages are needed.
+Kräver Node.js 24, pnpm 11 och en PostgreSQL-databas:
 
 ```sh
-APP_PASSWORD=dev-password node src/server.mjs
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm test
+DATABASE_URL=postgresql://user:password@localhost:5432/kompis_split pnpm dev
 ```
-
-Open `http://localhost:8787`. Run the split-engine tests with:
-
-```sh
-node --test
-```
-
-## Data model
-
-Trips contain participants, expenses, each expense's individual shares, and recorded payments. Money is stored as integer öre. Settlement suggestions are derived from the complete ledger each time a trip is loaded, so deleting an expense or undoing a payment safely recalculates the result.
