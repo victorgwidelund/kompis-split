@@ -16,6 +16,10 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
 - Frivilliga datum för både resor och utgifter
 - Egna, arkiverbara utgiftskategorier samt kvitton direkt under utgiften
+- Lokal svensk kvittoavläsning som föreslår restaurang/plats, totalbelopp, datum och kategori
+- Mobilanpassade formulärfält som inte automatiskt zoomar in på iPhone
+- Egen statistikvy för kategorier, restauranger/platser, betalare och månadsutveckling
+- Fristående Snabbnota: skanna kvittorader, dela en säker länk och låt alla bocka av mat och dryck i realtid
 - PostgreSQL-healthcheck och dagliga komprimerade `pg_dump`-backuper
 
 ## Installation på Unraid
@@ -55,6 +59,12 @@ Produktionsstacken följer den publicerade `latest`-imagen. När workflowen är 
 
 Appen visar ett enkelt releasenummer, exempelvis `Version 1.1`. Funktionsreleaser höjs stegvis till `1.2`, `1.3` och så vidare via `version` i `package.json`. Commit-taggarna används fortfarande i bakgrunden för exakt rollback.
 
+## Snabbnota
+
+Snabbnota är separat från resor och passar en restaurangnota där alla vill välja exakt vad de åt eller drack. Skaparen fotograferar kvittot, granskar de OCR-avlästa raderna och delar en tidsbegränsad länk eller QR-kod. Inloggade deltagare markerar sina egna rader och ser varandras markeringar via en realtidsanslutning till samma server. Om flera delar en rad fördelas den deterministiskt på heltalsöre. Skaparen kan avsluta och återöppna notan; data och kvittobild ligger i PostgreSQL och följer med i ordinarie backup.
+
+OCR kan misstolka en kvittorad. Skaparen måste därför alltid kontrollera namn, antal, radsummor och totalsumma innan snabbnotan skapas. Skillnaden mellan kvittots total och de avlästa raderna visas tydligt som ej fördelad.
+
 ## Reverse proxy och HTTPS
 
 Exponera inte port 8787 direkt mot internet. Använd VPN eller en HTTPS-reverse-proxy. Bakom en betrodd proxy:
@@ -71,6 +81,8 @@ Proxyn ska vidarebefordra `Host` eller `X-Forwarded-Host`. `TRUST_PROXY=true` f�
 `postgres-backup` gör omedelbart och därefter dagligen en PostgreSQL custom-format-backup. Retention styrs av `BACKUP_RETENTION_DAYS`. Kopiera även `/mnt/user/kompis_split/backups` till en annan disk eller maskin via ditt vanliga Unraid-backupflöde.
 
 Kvitton lagras i PostgreSQL och följer därför med i samma backup. JPG, PNG, WebP och PDF stöds, högst 8 MB per fil och fem filer per utgift. När en arkiverad resa flyttas till papperskorgen raderas dess kvittofiler permanent; utgifter, betalningar och audit-logg behålls så att den ekonomiska historiken fortfarande kan granskas och resan återställas.
+
+När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen läser bilden lokalt på Unraid-servern och fyller i redigerbara förslag; kvittobilden skickas inte till någon extern OCR-tjänst. Kontrollera alltid belopp, datum och namn innan utgiften sparas. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
 
 Testa återställning på en separat databas:
 

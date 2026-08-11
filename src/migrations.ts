@@ -1,6 +1,6 @@
 import { pool } from "./database.js";
 
-export const migrationVersions = [1, 2, 3] as const;
+export const migrationVersions = [1, 2, 3, 4] as const;
 
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -203,6 +203,61 @@ export async function applyMigrations(): Promise<void> {
     await client.query(
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [3, "trip-trash-categories-receipts-and-friend-invites"],
+    );
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quick_tabs (
+        id BIGSERIAL PRIMARY KEY,
+        name TEXT NOT NULL CHECK(char_length(name) BETWEEN 1 AND 100),
+        merchant TEXT CHECK(merchant IS NULL OR char_length(merchant) <= 100),
+        receipt_date DATE,
+        total_cents BIGINT NOT NULL CHECK(total_cents > 0),
+        receipt_mime_type TEXT,
+        receipt_content BYTEA,
+        created_by BIGINT NOT NULL REFERENCES users(id),
+        closed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS quick_tab_access (
+        quick_tab_id BIGINT NOT NULL REFERENCES quick_tabs(id) ON DELETE CASCADE,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','member')),
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (quick_tab_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS quick_tab_items (
+        id BIGSERIAL PRIMARY KEY,
+        quick_tab_id BIGINT NOT NULL REFERENCES quick_tabs(id) ON DELETE CASCADE,
+        name TEXT NOT NULL CHECK(char_length(name) BETWEEN 1 AND 100),
+        amount_cents BIGINT NOT NULL CHECK(amount_cents > 0),
+        position INTEGER NOT NULL CHECK(position >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS quick_tab_claims (
+        item_id BIGINT NOT NULL REFERENCES quick_tab_items(id) ON DELETE CASCADE,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        claimed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (item_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS quick_tab_invitations (
+        id BIGSERIAL PRIMARY KEY,
+        quick_tab_id BIGINT NOT NULL REFERENCES quick_tabs(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        invited_by BIGINT NOT NULL REFERENCES users(id),
+        expires_at TIMESTAMPTZ NOT NULL,
+        max_uses INTEGER NOT NULL DEFAULT 30 CHECK(max_uses BETWEEN 1 AND 100),
+        use_count INTEGER NOT NULL DEFAULT 0 CHECK(use_count >= 0 AND use_count <= max_uses),
+        revoked_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_quick_tab_access_user ON quick_tab_access(user_id, quick_tab_id);
+      CREATE INDEX IF NOT EXISTS idx_quick_tab_items_tab ON quick_tab_items(quick_tab_id, position, id);
+      CREATE INDEX IF NOT EXISTS idx_quick_tab_claims_user ON quick_tab_claims(user_id, item_id);
+      CREATE INDEX IF NOT EXISTS idx_quick_tab_invites_hash ON quick_tab_invitations(token_hash);
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [4, "standalone-realtime-quick-tabs"],
     );
     await client.query("COMMIT");
   } catch (error) {
