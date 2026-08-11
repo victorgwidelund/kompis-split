@@ -174,6 +174,7 @@ async function requireAccess(tripId: number, userId: number, roles: string[] | n
 async function requireActiveTrip(tripId: number) {
   const trip = await db.prepare("SELECT * FROM trips WHERE id = ?").get<any>(tripId);
   if (!trip) throw new HttpError(404, "Resan finns inte");
+  if (trip.deleted_at) throw new HttpError(404, "Resan finns inte");
   if (trip.archived_at) throw new HttpError(409, "Återställ resan innan du gör ändringar");
 }
 
@@ -191,7 +192,7 @@ async function assertTripParticipant(tripId: number, participantId: number) {
 
 async function loadTrip(id: number, userId: number) {
   const trip = await db.prepare("SELECT * FROM trips WHERE id = ?").get<any>(id);
-  if (!trip) return null;
+  if (!trip || trip.deleted_at) return null;
   const role = await requireAccess(id, userId);
   const participantRows = await db.prepare("SELECT * FROM participants WHERE trip_id = ? ORDER BY id").all<any>(id);
   const participants = participantRows.map((person) => ({
@@ -212,7 +213,7 @@ async function loadTrip(id: number, userId: number) {
   const totals = simplifyDebts(participants, expenses, payments);
   return {
     id: trip.id, name: trip.name, startDate: trip.start_date, endDate: trip.end_date,
-    createdAt: trip.created_at, archivedAt: trip.archived_at, role, participants, expenses, payments,
+    createdAt: trip.created_at, archivedAt: trip.archived_at, deletedAt: trip.deleted_at, role, participants, expenses, payments,
     balances: totals.balances, settlements: totals.settlements,
     totalCents: expenses.reduce((sum, expense) => sum + expense.amountCents, 0),
   };
@@ -224,7 +225,8 @@ async function dashboard(userId: number) {
       (SELECT COUNT(*) FROM participants p WHERE p.trip_id = t.id) participant_count,
       (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e WHERE e.trip_id = t.id AND e.voided_at IS NULL) total_cents
     FROM trip_access ta JOIN trips t ON t.id = ta.trip_id
-    WHERE ta.user_id = ? ORDER BY (t.archived_at IS NOT NULL), COALESCE(t.start_date, t.created_at::date) DESC, t.id DESC
+    WHERE ta.user_id = ? AND t.deleted_at IS NULL
+    ORDER BY (t.archived_at IS NOT NULL), COALESCE(t.start_date, t.created_at::date) DESC, t.id DESC
   `).all<any>(userId);
   const trips = await Promise.all(rows.map(async (row) => {
     const full = await loadTrip(row.id, userId);
@@ -243,7 +245,7 @@ async function dashboard(userId: number) {
     JOIN trips t ON t.id = e.trip_id
     JOIN trip_access ta ON ta.trip_id = t.id AND ta.user_id = ?
     JOIN participants p ON p.id = e.payer_id
-    WHERE e.voided_at IS NULL AND t.archived_at IS NULL
+    WHERE e.voided_at IS NULL AND t.archived_at IS NULL AND t.deleted_at IS NULL
     ORDER BY e.expense_date DESC NULLS LAST, e.id DESC LIMIT 12
   `).all<any>(userId)).map((item) => ({
     id: item.id, tripId: item.trip_id, tripName: item.trip_name, title: item.title,
@@ -263,14 +265,15 @@ async function adminOverview() {
     SELECT
       (SELECT COUNT(*) FROM users) user_count,
       (SELECT COUNT(*) FROM users WHERE is_disabled = FALSE) active_user_count,
-      (SELECT COUNT(*) FROM trips WHERE archived_at IS NULL) active_trip_count,
-      (SELECT COUNT(*) FROM trips) trip_count,
-      (SELECT COALESCE(SUM(amount_cents), 0) FROM expenses WHERE voided_at IS NULL) total_cents
+      (SELECT COUNT(*) FROM trips WHERE archived_at IS NULL AND deleted_at IS NULL) active_trip_count,
+      (SELECT COUNT(*) FROM trips WHERE deleted_at IS NULL) trip_count,
+      (SELECT COUNT(*) FROM trips WHERE deleted_at IS NOT NULL) deleted_trip_count,
+      (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e JOIN trips t ON t.id = e.trip_id WHERE e.voided_at IS NULL AND t.deleted_at IS NULL) total_cents
   `).get<any>();
   const users = (await db.prepare(`
     SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, u.created_at,
-      (SELECT COUNT(*) FROM trip_access ta WHERE ta.user_id = u.id) trip_count,
-      (SELECT COUNT(*) FROM trips t WHERE t.created_by = u.id) created_trip_count
+      (SELECT COUNT(*) FROM trip_access ta JOIN trips t ON t.id = ta.trip_id WHERE ta.user_id = u.id AND t.deleted_at IS NULL) trip_count,
+      (SELECT COUNT(*) FROM trips t WHERE t.created_by = u.id AND t.deleted_at IS NULL) created_trip_count
     FROM users u ORDER BY u.is_admin DESC, u.is_disabled, lower(u.display_name), u.id
   `).all<any>()).map((item) => ({
     ...publicUser(item), isDisabled: Boolean(item.is_disabled), createdAt: item.created_at,
@@ -285,7 +288,7 @@ async function adminOverview() {
     ORDER BY (t.archived_at IS NOT NULL), t.created_at DESC, t.id DESC
   `).all<any>()).map((item) => ({
     id: item.id, name: item.name, startDate: item.start_date, endDate: item.end_date,
-    archivedAt: item.archived_at, createdAt: item.created_at, ownerName: item.owner_name,
+    archivedAt: item.archived_at, deletedAt: item.deleted_at, createdAt: item.created_at, ownerName: item.owner_name,
     memberCount: Number(item.member_count), expenseCount: Number(item.expense_count), totalCents: Number(item.total_cents),
   }));
   const activity = (await db.prepare(`
@@ -302,7 +305,7 @@ async function adminOverview() {
   return {
     stats: {
       userCount: Number(stats.user_count), activeUserCount: Number(stats.active_user_count),
-      activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), totalCents: Number(stats.total_cents),
+      activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), deletedTripCount: Number(stats.deleted_trip_count), totalCents: Number(stats.total_cents),
     }, users, trips, activity,
   };
 }
@@ -312,7 +315,7 @@ async function invitationByToken(token: string) {
   return await db.prepare(`
     SELECT i.*, t.name trip_name, u.display_name inviter_name
     FROM invitations i JOIN trips t ON t.id = i.trip_id JOIN users u ON u.id = i.invited_by
-    WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < i.max_uses
+    WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < i.max_uses AND t.deleted_at IS NULL
   `).get<any>(sha256(token)) || null;
 }
 
@@ -511,10 +514,26 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/archive$/);
   if (request.method === "POST" && match) {
     const tripId = Number(match[1]); await requireAccess(tripId, user.id, ["owner", "admin"]);
+    const existing = await db.prepare("SELECT deleted_at FROM trips WHERE id = ?").get<any>(tripId);
+    if (!existing || existing.deleted_at) return json(response, 404, { error: "Resan finns inte" });
     const body = await readJson(request);
     await db.prepare("UPDATE trips SET archived_at = ? WHERE id = ?").run(body.archived === false ? null : new Date().toISOString(), tripId);
     await audit(user.id, tripId, body.archived === false ? "trip.restored" : "trip.archived", "trip", tripId);
     return json(response, 200, { trip: await loadTrip(tripId, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/trips\/(\d+)\/trash$/);
+  if (request.method === "POST" && match) {
+    const tripId = Number(match[1]); await requireAccess(tripId, user.id, ["owner", "admin"]);
+    const trip = await db.prepare("SELECT id, archived_at, deleted_at FROM trips WHERE id = ?").get<any>(tripId);
+    if (!trip) return json(response, 404, { error: "Resan finns inte" });
+    const body = await readJson(request);
+    const restoring = body.deleted === false;
+    if (!restoring && !trip.archived_at) throw new HttpError(409, "Arkivera resan innan du tar bort den");
+    await db.prepare("UPDATE trips SET deleted_at = ?, deleted_by = ? WHERE id = ?")
+      .run(restoring ? null : new Date().toISOString(), restoring ? null : user.id, tripId);
+    await db.prepare("UPDATE invitations SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP) WHERE trip_id = ?").run(tripId);
+    await audit(user.id, tripId, restoring ? "trip.undeleted" : "trip.deleted", "trip", tripId);
+    return json(response, 200, { ok: true });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/invitations$/);
   if (request.method === "POST" && match) {

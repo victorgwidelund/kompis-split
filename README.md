@@ -10,7 +10,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Sökbara användare, kontakter och gästdeltagare
 - Vänner direkt på startsidan
 - Globalt adminläge för alla användare, resor, kontostatusar och senaste aktivitet
-- Aktiva och arkiverade resor utan att ekonomiska poster försvinner
+- Aktiva och arkiverade resor samt återställningsbar papperskorg utan att ekonomiska poster försvinner
 - Lika, procentuell, exakt och viktad deterministisk fördelning
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
 - Frivilliga datum för både resor och utgifter
@@ -43,13 +43,15 @@ PostgreSQL publicerar ingen port på Unraid. Endast appen finns på port 8787. B
 /mnt/user/kompis_split/backups/
 ```
 
-Den gamla demo- SQLite-filen under `/mnt/user/kompis_split/data/` används inte av version 2 och kan ligga kvar tills du själv väljer att ta bort den.
+Den gamla demo-SQLite-filen under `/mnt/user/kompis_split/data/` används inte längre och kan ligga kvar tills du själv väljer att ta bort den.
 
 ## Uppdatering via GitHub
 
 En push till `main` kör TypeScript-kontroll, finansiella tester, API-test mot PostgreSQL och Compose-validering. Därefter byggs multi-arch-images i GHCR.
 
 Produktionsstacken följer den publicerade `latest`-imagen. När workflowen är grön väljer du bara **Pull & Up** i Compose Manager; Compose-filen behöver inte redigeras. Varje publicering får även en oföränderlig `sha-<commit>`-tagg. Spara föregående fungerande tagg så att du vid behov kan använda den tillfälligt för rollback; databasvolymen påverkas inte av imagebytet.
+
+Appen visar ett enkelt releasenummer, exempelvis `Version 1.1`. Funktionsreleaser höjs stegvis till `1.2`, `1.3` och så vidare via `version` i `package.json`. Commit-taggarna används fortfarande i bakgrunden för exakt rollback.
 
 ## Reverse proxy och HTTPS
 

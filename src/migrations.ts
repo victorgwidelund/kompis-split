@@ -1,6 +1,6 @@
 import { pool } from "./database.js";
 
-export const migrationVersions = [1, 2] as const;
+export const migrationVersions = [1, 2, 3] as const;
 
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -27,6 +27,8 @@ const schema = `
     end_date DATE,
     created_by BIGINT REFERENCES users(id),
     archived_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
+    deleted_by BIGINT REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK(end_date IS NULL OR start_date IS NULL OR end_date >= start_date)
   );
@@ -144,6 +146,13 @@ export async function applyMigrations(): Promise<void> {
     await client.query(
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [2, "global-admin-and-optional-expense-date"],
+    );
+    await client.query("ALTER TABLE trips ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
+    await client.query("ALTER TABLE trips ADD COLUMN IF NOT EXISTS deleted_by BIGINT REFERENCES users(id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_trips_visible ON trips(id) WHERE deleted_at IS NULL");
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [3, "recoverable-trip-trash"],
     );
     await client.query("COMMIT");
   } catch (error) {

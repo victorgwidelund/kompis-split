@@ -21,7 +21,7 @@ function canVoid(createdBy) { return canManageTrip() || Number(createdBy) === Nu
 function emptyState(title, text) { return `<div class="empty"><strong>${title}</strong>${text}</div>`; }
 function renderVersion() {
   const full = String(state.version || "dev");
-  const short = full.startsWith("sha-") ? full.slice(0, 11) : full;
+  const short = full.startsWith("sha-") ? full.slice(0, 11) : full.replace(/^v/, "");
   $$(".app-version").forEach((element) => { element.textContent = element.classList.contains("mobile-version") ? short : `Version ${short}`; element.title = `Installerad appversion: ${full}`; });
 }
 
@@ -194,6 +194,8 @@ const activityLabels = {
   "trip.created": "Resa skapades",
   "trip.archived": "Resa arkiverades",
   "trip.restored": "Resa återställdes",
+  "trip.deleted": "Resa flyttades till papperskorgen",
+  "trip.undeleted": "Resa återställdes från papperskorgen",
   "participant.added": "Person lades till",
   "expense.created": "Utgift skapades",
   "expense.updated": "Utgift redigerades",
@@ -224,13 +226,20 @@ function renderAdmin() {
   $("#admin-user-count").textContent = data.stats.userCount;
   $("#admin-active-users").textContent = `${data.stats.activeUserCount} aktiva`;
   $("#admin-trip-count").textContent = data.stats.tripCount;
-  $("#admin-active-trips").textContent = `${data.stats.activeTripCount} aktiva`;
+  $("#admin-active-trips").textContent = `${data.stats.activeTripCount} aktiva · ${data.stats.deletedTripCount || 0} borttagna`;
   $("#admin-total-spent").textContent = formatMoney(data.stats.totalCents);
   $("#admin-users").innerHTML = data.users.length ? data.users.map((user, index) => {
     const self = Number(user.id) === Number(state.user.id);
     return `<article class="admin-row ${user.isDisabled ? "disabled-row" : ""}">${avatar(user, index)}<div class="admin-row-main"><strong>${escapeHtml(user.name)} ${user.isAdmin ? '<span class="role-badge">Admin</span>' : ""}</strong><small>${escapeHtml(user.email)} · ${user.tripCount} resor · konto ${formatDate(user.createdAt)}</small></div><div class="admin-actions"><button class="button ghost small-button" data-admin-toggle="${user.id}" data-next-admin="${!user.isAdmin}" ${self ? "disabled" : ""}>${user.isAdmin ? "Ta bort admin" : "Gör till admin"}</button><button class="button ghost small-button ${user.isDisabled ? "positive" : "danger"}" data-user-disable="${user.id}" data-next-disabled="${!user.isDisabled}" ${self ? "disabled" : ""}>${user.isDisabled ? "Aktivera" : "Inaktivera"}</button></div></article>`;
   }).join("") : emptyState("Inga användare", "Användarkonton visas här.");
-  $("#admin-trips").innerHTML = data.trips.length ? data.trips.map((trip, index) => `<article class="admin-row"><span class="trip-emoji">${["✦", "⌁", "◇", "◉"][index % 4]}</span><div class="admin-row-main"><strong>${escapeHtml(trip.name)} ${trip.archivedAt ? '<span class="role-badge muted-badge">Arkiverad</span>' : ""}</strong><small>${escapeHtml(trip.ownerName || "Okänd ägare")} · ${trip.memberCount} medlemmar · ${trip.expenseCount} utgifter · ${formatMoney(trip.totalCents)}</small></div><div class="admin-actions"><button class="button ghost small-button" data-admin-open-trip="${trip.id}">Öppna</button><button class="button ghost small-button" data-admin-archive-trip="${trip.id}" data-next-archived="${!trip.archivedAt}">${trip.archivedAt ? "Återställ" : "Arkivera"}</button></div></article>`).join("") : emptyState("Inga resor", "Alla resor visas här när de skapas.");
+  $("#admin-trips").innerHTML = data.trips.length ? data.trips.map((trip, index) => {
+    const deleted = Boolean(trip.deletedAt);
+    const badge = deleted ? '<span class="role-badge danger-badge">Borttagen</span>' : trip.archivedAt ? '<span class="role-badge muted-badge">Arkiverad</span>' : "";
+    const actions = deleted
+      ? `<button class="button ghost small-button positive" data-admin-trash-trip="${trip.id}" data-next-deleted="false">Återställ</button>`
+      : `<button class="button ghost small-button" data-admin-open-trip="${trip.id}">Öppna</button><button class="button ghost small-button" data-admin-archive-trip="${trip.id}" data-next-archived="${!trip.archivedAt}">${trip.archivedAt ? "Återställ" : "Arkivera"}</button>`;
+    return `<article class="admin-row ${deleted ? "disabled-row" : ""}"><span class="trip-emoji">${["✦", "⌁", "◇", "◉"][index % 4]}</span><div class="admin-row-main"><strong>${escapeHtml(trip.name)} ${badge}</strong><small>${escapeHtml(trip.ownerName || "Okänd ägare")} · ${trip.memberCount} medlemmar · ${trip.expenseCount} utgifter · ${formatMoney(trip.totalCents)}</small></div><div class="admin-actions">${actions}</div></article>`;
+  }).join("") : emptyState("Inga resor", "Alla resor visas här när de skapas.");
   $("#admin-activity").innerHTML = data.activity.length ? data.activity.map((item) => `<article class="activity-row"><span class="activity-dot"></span><div><strong>${escapeHtml(activityLabels[item.action] || item.action)}</strong><small>${escapeHtml(item.actorName || "Systemet")}${item.tripName ? ` · ${escapeHtml(item.tripName)}` : ""} · ${formatDate(item.createdAt)}</small></div></article>`).join("") : emptyState("Ingen aktivitet", "Administrativa och ekonomiska händelser visas här.");
 }
 
@@ -263,6 +272,7 @@ function renderTrip() {
   $("#trip-archive-note").classList.toggle("hidden", !archived);
   $("#archive-button").classList.toggle("hidden", !manager);
   $("#archive-button").textContent = archived ? "Återställ resa" : "Arkivera";
+  $("#delete-trip-button").classList.toggle("hidden", !manager || !archived);
   $("#invite-button").classList.toggle("hidden", !manager || archived);
   $("#add-person-button").classList.toggle("hidden", !manager || archived);
   $("#summary-add-person").classList.toggle("hidden", !manager || archived);
@@ -442,6 +452,8 @@ document.addEventListener("click", async (event) => {
   const adminOpenTrip = event.target.closest("[data-admin-open-trip]"); if (adminOpenTrip) return selectTrip(Number(adminOpenTrip.dataset.adminOpenTrip));
   const adminArchiveTrip = event.target.closest("[data-admin-archive-trip]");
   if (adminArchiveTrip && confirm(adminArchiveTrip.dataset.nextArchived === "true" ? "Arkivera resan? Alla ekonomiska poster bevaras." : "Återställ resan?")) { try { await api(`/api/trips/${adminArchiveTrip.dataset.adminArchiveTrip}/archive`, { method: "POST", body: JSON.stringify({ archived: adminArchiveTrip.dataset.nextArchived === "true" }) }); await loadDashboard(); await showAdmin(); toast("Resan uppdaterades"); } catch (error) { toast(error.message); } return; }
+  const adminTrashTrip = event.target.closest("[data-admin-trash-trip]");
+  if (adminTrashTrip && confirm("Återställ resan från papperskorgen?")) { try { await api(`/api/trips/${adminTrashTrip.dataset.adminTrashTrip}/trash`, { method: "POST", body: JSON.stringify({ deleted: false }) }); await loadDashboard(); await showAdmin(); toast("Resan återställdes"); } catch (error) { toast(error.message); } return; }
   const tripLink = event.target.closest("[data-trip-id]"); if (tripLink) return selectTrip(Number(tripLink.dataset.tripId));
   const tab = event.target.closest("[data-tab]"); if (tab) return setTab(tab.dataset.tab);
   const goTab = event.target.closest("[data-go-tab]"); if (goTab) return setTab(goTab.dataset.goTab);
@@ -485,6 +497,13 @@ $("#archive-button").addEventListener("click", async () => {
   const restoring = Boolean(state.trip.archivedAt);
   if (!confirm(restoring ? "Återställ resan och tillåt nya ändringar?" : "Arkivera resan? Alla utgifter och saldon bevaras.")) return;
   try { await api(`/api/trips/${state.trip.id}/archive`, { method: "POST", body: JSON.stringify({ archived: !restoring }) }); await loadDashboard(); if (restoring) await selectTrip(state.trip.id); else showDashboard(); toast(restoring ? "Resan återställdes" : "Resan arkiverades"); }
+  catch (error) { toast(error.message); }
+});
+
+$("#delete-trip-button").addEventListener("click", async () => {
+  if (!state.trip?.archivedAt) return toast("Arkivera resan först");
+  if (!confirm("Ta bort resan från alla vanliga vyer? Utgifter och betalningar sparas säkert och admin kan återställa den.")) return;
+  try { await api(`/api/trips/${state.trip.id}/trash`, { method: "POST", body: JSON.stringify({ deleted: true }) }); await loadDashboard(); showDashboard(); toast("Resan flyttades till papperskorgen"); }
   catch (error) { toast(error.message); }
 });
 

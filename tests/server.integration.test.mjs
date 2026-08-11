@@ -33,7 +33,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       COOKIE_SECRET: "integration-cookie-secret-at-least-32-bytes",
       COOKIE_SECURE: "false",
       TRUST_PROXY: "false",
-      APP_VERSION: "sha-testversion123",
+      APP_VERSION: "1.1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -60,7 +60,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
 
     const initial = await request("/api/session");
     assert.equal(initial.payload.needsSetup, true);
-    assert.equal(initial.payload.version, "sha-testversion123");
+    assert.equal(initial.payload.version, "1.1");
 
     const rejectedOrigin = await request("/api/setup", { method: "POST", origin: "https://evil.example", body: {} });
     assert.equal(rejectedOrigin.response.status, 403);
@@ -141,6 +141,19 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.ok(archived.payload.trip.archivedAt);
     const blockedWrite = await request(`/api/trips/${tripId}/payments`, { method: "POST", cookie: ownerCookie, body: { fromId: memberParticipant.id, toId: ownerParticipant.id, amount: "1" } });
     assert.equal(blockedWrite.response.status, 409);
+    const memberCannotTrash = await request(`/api/trips/${tripId}/trash`, { method: "POST", cookie: memberCookie, body: { deleted: true } });
+    assert.equal(memberCannotTrash.response.status, 403);
+    const trashed = await request(`/api/trips/${tripId}/trash`, { method: "POST", cookie: ownerCookie, body: { deleted: true } });
+    assert.equal(trashed.response.status, 200);
+    const dashboardWithoutTrash = await request("/api/dashboard", { cookie: ownerCookie });
+    assert.equal(dashboardWithoutTrash.payload.trips.length, 0);
+    const hiddenTrip = await request(`/api/trips/${tripId}`, { cookie: ownerCookie });
+    assert.equal(hiddenTrip.response.status, 404);
+    const overviewWithTrash = await request("/api/admin", { cookie: ownerCookie });
+    assert.ok(overviewWithTrash.payload.trips.find((item) => item.id === tripId).deletedAt);
+    assert.equal(overviewWithTrash.payload.stats.deletedTripCount, 1);
+    const untrashed = await request(`/api/trips/${tripId}/trash`, { method: "POST", cookie: ownerCookie, body: { deleted: false } });
+    assert.equal(untrashed.response.status, 200);
     const restored = await request(`/api/trips/${tripId}/archive`, { method: "POST", cookie: ownerCookie, body: { archived: false } });
     assert.equal(restored.payload.trip.archivedAt, null);
 
@@ -179,9 +192,10 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number(revision.previous.amountCents), 10001);
   assert.deepEqual(revision.previous.shares.map((share) => Number(share.amountCents)), [5001, 5000]);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('trip.deleted', 'trip.undeleted')")).rows[0].count), 2);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 2);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 3);
   await verification.end();
   await admin.query(`DROP DATABASE ${databaseName} WITH (FORCE)`);
   await admin.end();
