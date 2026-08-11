@@ -352,16 +352,18 @@ async function recognizeWithOllama(content: Buffer, verification = false) {
   } catch { return null; }
 }
 
-let workerPromise: Promise<Worker> | null = null;
-let queue: Promise<void> = Promise.resolve();
+const localWorkerCount = Math.min(4, Math.max(1, Number(process.env.RECEIPT_OCR_WORKERS) || 2));
+const workerPromises: Array<Promise<Worker> | undefined> = Array(localWorkerCount);
+const queues: Promise<void>[] = Array.from({ length: localWorkerCount }, () => Promise.resolve());
+let nextWorker = 0;
 
-async function receiptWorker() {
-  workerPromise ||= createWorker("swe", OEM.LSTM_ONLY, {
+async function receiptWorker(index: number) {
+  workerPromises[index] ||= createWorker("swe", OEM.LSTM_ONLY, {
     langPath: swedishLanguage.langPath,
     gzip: swedishLanguage.gzip,
     cacheMethod: "none",
   });
-  return workerPromise;
+  return workerPromises[index]!;
 }
 
 export type ReceiptCrop = { left: number; top: number; width: number; height: number; screenshotPreview: boolean };
@@ -447,8 +449,9 @@ async function recognizePass(worker: Worker, content: Buffer, pageMode: PSM, rot
 }
 
 async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepareReceiptImages>>) {
-  const job = queue.then(async () => {
-    const worker = await receiptWorker();
+  const workerIndex = nextWorker++ % localWorkerCount;
+  const job = queues[workerIndex]!.then(async () => {
+    const worker = await receiptWorker(workerIndex);
     const passes: ReceiptPass[] = [await recognizePass(worker, images.grayscale, PSM.SINGLE_BLOCK, false)];
     const first = passes[0]!;
     const firstTotal = amountCents(first.suggestion.amount);
@@ -458,7 +461,7 @@ async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepare
     }
     return { ...combineReceiptPasses(passes), passes: passes.length };
   });
-  queue = job.then(() => undefined, () => undefined);
+  queues[workerIndex] = job.then(() => undefined, () => undefined);
   return job;
 }
 
@@ -490,7 +493,7 @@ export async function recognizeReceipt(content: Buffer) {
 }
 
 export async function closeReceiptOcr() {
-  const worker = workerPromise ? await workerPromise.catch(() => null) : null;
-  workerPromise = null;
-  if (worker) await worker.terminate();
+  const workers = await Promise.all(workerPromises.map((worker) => worker?.catch(() => null) || null));
+  workerPromises.fill(undefined);
+  await Promise.all(workers.map((worker) => worker?.terminate()));
 }

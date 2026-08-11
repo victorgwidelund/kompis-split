@@ -42,6 +42,7 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    OLLAMA_MODEL=qwen3-vl:4b
    OLLAMA_OCR_TIMEOUT_MS=60000
    OLLAMA_ACCURATE_RETRY=true
+   RECEIPT_OCR_WORKERS=2
    ```
 
 4. Välj **Compose Up**. Första starten laddar ner Qwen3-VL-modellen på cirka 3,3 GB och kan därför ta några minuter.
@@ -125,6 +126,7 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `OLLAMA_MODEL` | `qwen3-vl:4b` | Lokal 4,44B visionmodell i Q4_K_M, cirka 3,3 GB och vald för GTX 1080 Ti |
 | `OLLAMA_OCR_TIMEOUT_MS` | `60000` | Maximal väntetid i millisekunder per lokal AI-kontroll innan Tesseract-resultatet används |
 | `OLLAMA_ACCURATE_RETRY` | `true` | Kör en extra AI-kontroll endast när den första tolkningen inte summerar exakt |
+| `RECEIPT_OCR_WORKERS` | `2` | Antal parallella Tesseract-arbetare; två matchar AI-parallelliteten och serverns 40 CPU-trådar |
 
 ## Lokal utveckling
 

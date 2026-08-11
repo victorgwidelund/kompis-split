@@ -185,12 +185,14 @@ test("invalid and future dates are not suggested", () => {
   assert.equal(suggestion.category, "stay");
 });
 
-test("the bundled Swedish OCR model works without an external service", { timeout: 30_000 }, async () => {
+test("two bundled Swedish OCR workers can process receipts concurrently", { timeout: 30_000 }, async () => {
   try {
     const blankImage = await sharp({ create: { width: 320, height: 120, channels: 3, background: "white" } }).png().toBuffer();
-    const result = await recognizeReceipt(blankImage);
-    assert.equal(result.suggestion.amount, null);
-    assert.equal(result.suggestion.category, "other");
+    const results = await Promise.all([recognizeReceipt(blankImage), recognizeReceipt(blankImage)]);
+    for (const result of results) {
+      assert.equal(result.suggestion.amount, null);
+      assert.equal(result.suggestion.category, "other");
+    }
   } finally {
     await closeReceiptOcr();
   }
