@@ -189,6 +189,7 @@ const activityLabels = {
   "trip.restored": "Resa återställdes",
   "participant.added": "Person lades till",
   "expense.created": "Utgift skapades",
+  "expense.updated": "Utgift redigerades",
   "expense.voided": "Utgift togs bort från beräkningen",
   "payment.created": "Betalning registrerades",
   "payment.voided": "Betalning togs bort från beräkningen",
@@ -274,8 +275,8 @@ function renderTrip() {
 
 function expenseRow(expense, allowAction = true) {
   const payer = person(expense.payerId);
-  const remove = allowAction && canVoid(expense.createdBy) && !state.trip.archivedAt;
-  return `<article class="expense-row"><span class="category-icon">${categories[expense.category] || categories.other}</span><div class="expense-main"><strong>${escapeHtml(expense.title)}</strong><small>${escapeHtml(payer?.name || "Okänd")} betalade · ${formatDate(expense.expenseDate, "Inget datum")} · delat mellan ${expense.shares.length}</small></div><div class="expense-amount">${formatMoney(expense.amountCents)}</div>${remove ? `<button class="delete-button" data-delete-expense="${expense.id}" aria-label="Ta bort ${escapeHtml(expense.title)} från beräkningen" title="Ta bort från beräkningen">×</button>` : ""}</article>`;
+  const canEdit = allowAction && canVoid(expense.createdBy) && !state.trip.archivedAt;
+  return `<article class="expense-row"><span class="category-icon">${categories[expense.category] || categories.other}</span><div class="expense-main"><strong>${escapeHtml(expense.title)}</strong><small>${escapeHtml(payer?.name || "Okänd")} betalade · ${formatDate(expense.expenseDate, "Inget datum")} · delat mellan ${expense.shares.length}</small></div><div class="expense-amount">${formatMoney(expense.amountCents)}</div>${canEdit ? `<div class="expense-actions"><button class="edit-button" data-edit-expense="${expense.id}" aria-label="Redigera ${escapeHtml(expense.title)}" title="Redigera utgiften">Redigera</button><button class="delete-button" data-delete-expense="${expense.id}" aria-label="Ta bort ${escapeHtml(expense.title)} från beräkningen" title="Ta bort från beräkningen">×</button></div>` : ""}</article>`;
 }
 
 function renderExpenses() {
@@ -342,22 +343,39 @@ async function openPersonDialog() {
   catch (error) { toast(error.message); }
 }
 
-function openExpenseDialog() {
+function openExpenseDialog(expense = null) {
   if (!state.trip?.participants.length) { toast("Lägg till minst en person först"); return openPersonDialog(); }
   const form = $("#expense-form"); form.reset();
+  form.dataset.expenseId = expense?.id || "";
   form.elements.payerId.innerHTML = state.trip.participants.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
-  renderSplitPeople(); openDialog("expense-dialog");
+  $("#expense-dialog-eyebrow").textContent = expense ? "Uppdatera notan" : "Lägg till på notan";
+  $("#expense-dialog-title").textContent = expense ? "Redigera utgift" : "Ny utgift";
+  $("#expense-submit-label").textContent = expense ? "Spara ändringar" : "Lägg till utgift";
+  if (expense) {
+    form.elements.title.value = expense.title;
+    form.elements.amount.value = (Number(expense.amountCents) / 100).toFixed(2);
+    form.elements.payerId.value = String(expense.payerId);
+    form.elements.expenseDate.value = expense.expenseDate || "";
+    form.elements.category.value = expense.category;
+    form.elements.splitMode.value = expense.splitMode === "equal" ? "equal" : "exact";
+  }
+  renderSplitPeople(expense?.shares || null); openDialog("expense-dialog");
 }
 
-function renderSplitPeople() {
+function renderSplitPeople(presetShares = null) {
   const form = $("#expense-form"); const mode = form.elements.splitMode.value; const count = state.trip.participants.length; const amountOre = Math.round(Number(form.elements.amount.value || 0) * 100);
+  const preset = new Map((presetShares || []).map((share) => [Number(share.participantId), Number(share.amountCents)]));
   function defaultValue(index) {
     if (mode === "shares") return "1";
     if (mode === "percentage") { const base = Math.floor(10000 / count) / 100; return (index === count - 1 ? 100 - base * (count - 1) : base).toFixed(2); }
     if (mode === "exact" && amountOre > 0) { const base = Math.floor(amountOre / count); const ore = index === 0 ? base + (amountOre - base * count) : base; return (ore / 100).toFixed(2); }
     return "";
   }
-  $("#split-people").innerHTML = state.trip.participants.map((item, index) => `<label class="split-person"><input type="checkbox" name="splitPerson" value="${item.id}" checked />${avatar(item, index)}<span>${escapeHtml(item.name)}</span>${mode === "equal" ? "<span></span>" : `<input class="value-input" name="splitValue-${item.id}" type="number" min="0" step="${mode === "shares" ? "0.1" : "0.01"}" value="${defaultValue(index)}" aria-label="${mode} för ${escapeHtml(item.name)}" />`}</label>`).join("");
+  $("#split-people").innerHTML = state.trip.participants.map((item, index) => {
+    const selected = !presetShares || preset.has(Number(item.id));
+    const value = presetShares && mode === "exact" && selected ? (preset.get(Number(item.id)) / 100).toFixed(2) : defaultValue(index);
+    return `<label class="split-person ${selected ? "selected" : ""}"><input type="checkbox" name="splitPerson" value="${item.id}" ${selected ? "checked" : ""} />${avatar(item, index)}<span>${escapeHtml(item.name)}</span>${mode === "equal" ? "<span></span>" : `<input class="value-input" name="splitValue-${item.id}" type="number" min="0" step="${mode === "shares" ? "0.1" : "0.01"}" value="${value}" aria-label="${mode} för ${escapeHtml(item.name)}" />`}</label>`;
+  }).join("");
   updateSplitSummary();
 }
 
@@ -429,6 +447,12 @@ document.addEventListener("click", async (event) => {
   }
   const deleteExpense = event.target.closest("[data-delete-expense]");
   if (deleteExpense && confirm("Ta bort utgiften från beräkningen? Originalposten sparas i historiken.")) { try { await api(`/api/expenses/${deleteExpense.dataset.deleteExpense}`, { method: "DELETE", body: "{}" }); await refreshTrip(); toast("Utgiften togs bort från beräkningen"); } catch (error) { toast(error.message); } return; }
+  const editExpense = event.target.closest("[data-edit-expense]");
+  if (editExpense) {
+    const expense = state.trip.expenses.find((item) => Number(item.id) === Number(editExpense.dataset.editExpense));
+    if (expense) openExpenseDialog(expense);
+    return;
+  }
   const deletePayment = event.target.closest("[data-delete-payment]");
   if (deletePayment && confirm("Ta bort betalningen från beräkningen? Originalposten sparas i historiken.")) { try { await api(`/api/payments/${deletePayment.dataset.deletePayment}`, { method: "DELETE", body: "{}" }); await refreshTrip(); toast("Betalningen togs bort från beräkningen"); } catch (error) { toast(error.message); } return; }
   const swish = event.target.closest("[data-swish-from]");
@@ -448,7 +472,7 @@ $("#admin-back-button").addEventListener("click", () => showDashboard());
 $("#admin-refresh-button").addEventListener("click", () => showAdmin().catch((error) => toast(error.message)));
 [$("#new-trip-button"), $("#mobile-new-trip"), $("#dashboard-new-trip")].forEach((button) => button.addEventListener("click", () => { $("#trip-form").reset(); openDialog("trip-dialog"); }));
 [$("#add-person-button"), $("#summary-add-person"), $("#people-add-button")].forEach((button) => button.addEventListener("click", openPersonDialog));
-[$("#add-expense-button"), $("#expenses-add-button")].forEach((button) => button.addEventListener("click", openExpenseDialog));
+[$("#add-expense-button"), $("#expenses-add-button")].forEach((button) => button.addEventListener("click", () => openExpenseDialog()));
 
 $("#archive-button").addEventListener("click", async () => {
   const restoring = Boolean(state.trip.archivedAt);
@@ -476,13 +500,21 @@ $("#person-form").addEventListener("submit", async (event) => {
   catch (error) { showFormError(form, error); }
 });
 
-$("#expense-form").addEventListener("change", (event) => { if (event.target.name === "splitMode") renderSplitPeople(); else updateSplitSummary(); });
+$("#expense-form").addEventListener("change", (event) => {
+  if (event.target.name === "splitMode") renderSplitPeople();
+  else {
+    if (event.target.name === "splitPerson") event.target.closest(".split-person")?.classList.toggle("selected", event.target.checked);
+    updateSplitSummary();
+  }
+});
 $("#expense-form").addEventListener("input", updateSplitSummary);
 $("#expense-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.currentTarget; const data = Object.fromEntries(new FormData(form)); const selected = $$("input[name='splitPerson']:checked", form);
   data.entries = selected.map((checkbox) => ({ participantId: Number(checkbox.value), value: data[`splitValue-${checkbox.value}`] ?? 1 }));
   Object.keys(data).filter((key) => key.startsWith("splitValue-") || key === "splitPerson").forEach((key) => delete data[key]);
-  try { await api(`/api/trips/${state.trip.id}/expenses`, { method: "POST", body: JSON.stringify(data) }); form.closest("dialog").close(); await refreshTrip(); toast("Utgiften delades exakt på öret"); }
+  const expenseId = form.dataset.expenseId;
+  const path = expenseId ? `/api/expenses/${expenseId}` : `/api/trips/${state.trip.id}/expenses`;
+  try { await api(path, { method: expenseId ? "PATCH" : "POST", body: JSON.stringify(data) }); form.closest("dialog").close(); await refreshTrip(); toast(expenseId ? "Utgiften uppdaterades" : "Utgiften delades exakt på öret"); }
   catch (error) { showFormError(form, error); }
 });
 

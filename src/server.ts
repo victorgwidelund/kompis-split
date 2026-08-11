@@ -179,7 +179,7 @@ async function requireActiveTrip(tripId: number) {
 async function requireRecordWriteAccess(tripId: number, userId: number, createdBy: number) {
   const role = await requireAccess(tripId, userId);
   if (!['owner', 'admin'].includes(role) && Number(createdBy) !== Number(userId)) {
-    throw new HttpError(403, "Du kan bara ta bort poster som du själv har lagt till");
+    throw new HttpError(403, "Du kan bara ändra poster som du själv har lagt till");
   }
 }
 
@@ -570,6 +570,45 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     return json(response, 201, { trip: await loadTrip(tripId, user.id) });
   }
   match = url.pathname.match(/^\/api\/expenses\/(\d+)$/);
+  if (request.method === "PATCH" && match) {
+    const expense = await db.prepare("SELECT * FROM expenses WHERE id = ? AND voided_at IS NULL").get<any>(Number(match[1]));
+    if (!expense) return json(response, 404, { error: "Utgiften finns inte" });
+    await requireRecordWriteAccess(expense.trip_id, user.id, expense.created_by);
+    await requireActiveTrip(expense.trip_id);
+    const body = await readJson(request);
+    const payerId = Number(body.payerId);
+    await assertTripParticipant(expense.trip_id, payerId);
+    const amountCents = parseAmount(body.amount);
+    const entries: Array<{ participantId: number; value: unknown }> = Array.isArray(body.entries)
+      ? body.entries.map((entry: any) => ({ participantId: Number(entry.participantId), value: entry.value }))
+      : [];
+    await Promise.all(entries.map((entry) => assertTripParticipant(expense.trip_id, entry.participantId)));
+    if (new Set(entries.map((entry) => entry.participantId)).size !== entries.length) throw new Error("Varje deltagare får bara finnas en gång");
+    const splitMode = String(body.splitMode || "equal");
+    const amounts = calculateShares(amountCents, splitMode, entries);
+    const title = cleanText(body.title, "Beskrivning", 100);
+    const expenseDate = validDate(body.expenseDate);
+    const category = cleanText(body.category || "other", "Kategori", 30);
+    const previousShares = await db.prepare("SELECT participant_id, amount_cents FROM expense_shares WHERE expense_id = ? ORDER BY participant_id").all<any>(expense.id);
+    await db.transaction(async () => {
+      await db.prepare(`
+        UPDATE expenses SET payer_id = ?, title = ?, amount_cents = ?, expense_date = ?, category = ?, split_mode = ?
+        WHERE id = ? AND voided_at IS NULL
+      `).run(payerId, title, amountCents, expenseDate, category, splitMode, expense.id);
+      await db.prepare("DELETE FROM expense_shares WHERE expense_id = ?").run(expense.id);
+      const insertShare = db.prepare("INSERT INTO expense_shares (expense_id, participant_id, amount_cents) VALUES (?, ?, ?)");
+      for (const [index, entry] of entries.entries()) await insertShare.run(expense.id, entry.participantId, amounts[index]);
+      await audit(user.id, expense.trip_id, "expense.updated", "expense", expense.id, {
+        previous: {
+          payerId: expense.payer_id, title: expense.title, amountCents: expense.amount_cents,
+          expenseDate: expense.expense_date, category: expense.category, splitMode: expense.split_mode,
+          shares: previousShares.map((share) => ({ participantId: share.participant_id, amountCents: share.amount_cents })),
+        },
+        current: { payerId, title, amountCents, expenseDate, category, splitMode, shares: entries.map((entry, index) => ({ participantId: entry.participantId, amountCents: amounts[index] })) },
+      });
+    });
+    return json(response, 200, { trip: await loadTrip(expense.trip_id, user.id) });
+  }
   if (request.method === "DELETE" && match) {
     const expense = await db.prepare("SELECT * FROM expenses WHERE id = ? AND voided_at IS NULL").get<any>(Number(match[1]));
     if (!expense) return json(response, 404, { error: "Utgiften finns inte" }); await requireRecordWriteAccess(expense.trip_id, user.id, expense.created_by);

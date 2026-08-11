@@ -110,6 +110,23 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(expense.payload.trip.expenses[0].expenseDate, null);
     assert.deepEqual(expense.payload.trip.expenses[0].shares.map((share) => share.amountCents), [5001, 5000]);
 
+    const memberCannotEdit = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
+      method: "PATCH",
+      cookie: memberCookie,
+      body: { title: "Manipulerad", amount: "75", payerId: memberParticipant.id, category: "other", splitMode: "equal", entries: [{ participantId: ownerParticipant.id, value: 1 }, { participantId: memberParticipant.id, value: 1 }] },
+    });
+    assert.equal(memberCannotEdit.response.status, 403);
+    const edited = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
+      method: "PATCH",
+      cookie: ownerCookie,
+      body: { title: "Middag uppdaterad", amount: "120.01", payerId: memberParticipant.id, expenseDate: "2026-12-11", category: "food", splitMode: "exact", entries: [{ participantId: ownerParticipant.id, value: "60.01" }, { participantId: memberParticipant.id, value: "60.00" }] },
+    });
+    assert.equal(edited.response.status, 200, JSON.stringify(edited.payload));
+    assert.equal(edited.payload.trip.totalCents, 12001);
+    assert.equal(edited.payload.trip.expenses[0].title, "Middag uppdaterad");
+    assert.equal(edited.payload.trip.expenses[0].payerId, memberParticipant.id);
+    assert.deepEqual(edited.payload.trip.expenses[0].shares.map((share) => share.amountCents), [6001, 6000]);
+
     const memberCannotVoid = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, { method: "DELETE", cookie: memberCookie, body: {} });
     assert.equal(memberCannotVoid.response.status, 403);
 
@@ -155,9 +172,13 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
 
   const verification = new pg.Client({ connectionString: databaseUrl.toString() });
   await verification.connect();
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.updated'")).rows[0].count), 1);
+  const revision = (await verification.query("SELECT payload_json FROM audit_log WHERE action = 'expense.updated'")).rows[0].payload_json;
+  assert.equal(Number(revision.previous.amountCents), 10001);
+  assert.deepEqual(revision.previous.shares.map((share) => Number(share.amountCents)), [5001, 5000]);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
-  assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag'")).rows[0].voided, true);
-  assert.equal((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag'")).rows[0].expense_date, null);
+  assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
+  assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 2);
   await verification.end();
   await admin.query(`DROP DATABASE ${databaseName} WITH (FORCE)`);
