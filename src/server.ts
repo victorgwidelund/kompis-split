@@ -21,6 +21,7 @@ const cookieSecure = process.env.COOKIE_SECURE === "true";
 const cookieSecret = process.env.COOKIE_SECRET || createHash("sha256").update(appPassword || "local-development-only").digest("hex");
 const trustProxy = process.env.TRUST_PROXY === "true";
 const sessionDays = integerEnvironment("SESSION_DAYS", 30, 1, 365);
+const appVersion = String(process.env.APP_VERSION || "dev").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 80) || "dev";
 if (process.env.NODE_ENV === "production" && cookieSecret.length < 32) throw new Error("COOKIE_SECRET måste vara minst 32 tecken i produktion");
 await applyMigrations();
 
@@ -369,7 +370,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   const userCount = Number((await db.prepare("SELECT COUNT(*) count FROM users").get<any>())?.count);
 
   if (request.method === "GET" && url.pathname === "/api/session") {
-    return json(response, 200, { authenticated: Boolean(user), needsSetup: userCount === 0, user: user ? publicUser(user) : null });
+    return json(response, 200, { authenticated: Boolean(user), needsSetup: userCount === 0, version: appVersion, user: user ? publicUser(user) : null });
   }
   if (request.method === "POST" && url.pathname === "/api/invitations/preview") {
     const body = await readJson(request);
@@ -646,7 +647,7 @@ const server = createServer(async (request, response) => {
   try {
     if (url.pathname === "/health") {
       if (!await databaseReady()) throw new Error("Databasen är inte tillgänglig");
-      return json(response, 200, { ok: true });
+      return json(response, 200, { ok: true, version: appVersion });
     }
     if (url.pathname.startsWith("/api/")) return await handleApi(request, response, url);
     if (!["GET", "HEAD"].includes(request.method || "GET")) return json(response, 405, { error: "Metoden stöds inte" });

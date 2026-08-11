@@ -1,4 +1,4 @@
-const state = { user: null, dashboard: null, trips: [], trip: null, admin: null, tab: "overview", inviteToken: "", invitation: null };
+const state = { user: null, dashboard: null, trips: [], trip: null, admin: null, tab: "overview", inviteToken: "", invitation: null, version: "dev" };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const money = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 2 });
@@ -19,6 +19,11 @@ function escapeHtml(value) { const div = document.createElement("div"); div.text
 function canManageTrip() { return ["owner", "admin"].includes(state.trip?.role); }
 function canVoid(createdBy) { return canManageTrip() || Number(createdBy) === Number(state.user?.id); }
 function emptyState(title, text) { return `<div class="empty"><strong>${title}</strong>${text}</div>`; }
+function renderVersion() {
+  const full = String(state.version || "dev");
+  const short = full.startsWith("sha-") ? full.slice(0, 11) : full;
+  $$(".app-version").forEach((element) => { element.textContent = element.classList.contains("mobile-version") ? short : `Version ${short}`; element.title = `Installerad appversion: ${full}`; });
+}
 
 let toastTimer;
 function toast(message) {
@@ -109,6 +114,8 @@ async function init() {
     state.inviteToken = inviteTokenFromHash();
     if (state.inviteToken) await loadInvitation();
     const session = await api("/api/session");
+    state.version = session.version || "dev";
+    renderVersion();
     if (!session.authenticated) return showAuth(session.needsSetup);
     await finishAuthentication(session.user);
   } catch (error) { toast(error.message); }
