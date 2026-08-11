@@ -230,6 +230,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(disabled.response.status, 200);
     const disabledSession = await request("/api/dashboard", { cookie: memberCookie });
     assert.equal(disabledSession.response.status, 401);
+  } catch (error) {
+    await admin.end().catch(() => {});
+    throw error;
   } finally {
     const exited = new Promise((resolve) => child.once("exit", resolve));
     child.kill("SIGTERM");

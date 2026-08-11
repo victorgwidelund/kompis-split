@@ -396,14 +396,14 @@ async function statistics(userId: number) {
     LIMIT 12
   `).all<any>(userId);
   const trendRows = await db.prepare(`
-    SELECT month, expense_count, total_cents FROM (
-      SELECT to_char(date_trunc('month', COALESCE(e.expense_date, e.created_at::date)), 'YYYY-MM') month,
+    SELECT month_key, expense_count, total_cents FROM (
+      SELECT to_char(date_trunc('month', COALESCE(e.expense_date, e.created_at::date)), 'YYYY-MM') AS month_key,
         COUNT(*) expense_count, SUM(e.amount_cents) total_cents
       ${visibleExpense} ${visibleFilter}
       GROUP BY date_trunc('month', COALESCE(e.expense_date, e.created_at::date))
       ORDER BY date_trunc('month', COALESCE(e.expense_date, e.created_at::date)) DESC
       LIMIT 12
-    ) recent_months ORDER BY month
+    ) recent_months ORDER BY month_key
   `).all<any>(userId);
   const mapTotals = (row: any) => ({
     ...row,
@@ -420,7 +420,7 @@ async function statistics(userId: number) {
     categories: categoryRows.map(mapTotals),
     merchants: merchantRows.map(mapTotals),
     payers: payerRows.map((row) => ({ ...mapTotals(row), userId: row.user_id, user_id: undefined })),
-    trend: trendRows.map(mapTotals),
+    trend: trendRows.map((row) => ({ ...mapTotals(row), month: row.month_key, month_key: undefined })),
   };
 }
 
