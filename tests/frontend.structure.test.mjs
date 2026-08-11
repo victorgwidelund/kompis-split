@@ -20,6 +20,8 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /id="statistics-payers"/);
   assert.match(html, /id="quick-tab-view"/);
   assert.match(html, /id="quick-tab-dialog"/);
+  assert.match(html, /id="quick-guest-form"/);
+  assert.match(html, /id="quick-guest-form"[\s\S]*name="name"[\s\S]*name="swishPhone"/);
   assert.match(html, /id="quick-tab-receipt-input"/);
   assert.match(html, /id="quick-tab-receipt-input"[^>]*accept="image\/\*"/);
   assert.match(html, /id="expense-receipt-input"[^>]*accept="image\/\*"/);

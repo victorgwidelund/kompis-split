@@ -44,6 +44,9 @@ h2 { margin-bottom: 4px; font-size: 25px; }
 .icon-button.dark { background: var(--ink); color: white; }
 
 .app-shell { min-height: 100vh; }
+.app-shell.guest-mode .sidebar, .app-shell.guest-mode .mobile-header { display: none; }
+.app-shell.guest-mode .main { margin-left: 0; padding-top: 28px; }
+.app-shell.guest-mode #quick-tab-back { display: none; }
 .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 10; display: flex; width: 260px; flex-direction: column; padding: 30px 22px 22px; border-right: 1px solid var(--line); background: rgba(245, 240, 232, .96); backdrop-filter: blur(14px); }
 .brand { display: flex; align-items: center; gap: 11px; font: 600 17px/1.05 "Manrope", sans-serif; }
 .brand-button { padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }

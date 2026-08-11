@@ -1,4 +1,4 @@
-const state = { user: null, dashboard: null, trips: [], trip: null, quickTabs: [], quickTab: null, admin: null, statistics: null, categories: [], tab: "overview", inviteToken: "", invitation: null, version: "dev" };
+const state = { user: null, guest: null, dashboard: null, trips: [], trip: null, quickTabs: [], quickTab: null, admin: null, statistics: null, categories: [], tab: "overview", inviteToken: "", invitation: null, version: "dev" };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const money = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 2 });
@@ -84,6 +84,8 @@ function setAuthMode(mode) {
     $("#auth-subtitle").textContent = state.invitation?.kind === "friend" ? "Skapa ditt konto för att lägga till vännen." : state.invitation?.kind === "quick_tab" ? "Skapa ditt konto för att bocka av din del av notan." : "Skapa ditt eget konto för att gå med i resan.";
   } else if (mode === "login" && state.invitation) {
     $("#auth-subtitle").textContent = state.invitation.kind === "friend" ? "Logga in så sparas ni som vänner." : state.invitation.kind === "quick_tab" ? "Logga in så öppnas snabbnotan." : "Logga in så läggs resan till på ditt konto.";
+  } else if (mode === "quick-guest") {
+    $("#auth-subtitle").textContent = "Ange bara namn och nummer för att bocka av din del.";
   }
 }
 
@@ -97,11 +99,12 @@ function showAuth(needsSetup) {
     : state.invitation.kind === "quick_tab"
       ? `<strong>${escapeHtml(state.invitation.inviterName)}</strong> vill att du bockar av din del av <strong>${escapeHtml(state.invitation.quickTabName)}</strong>.`
       : `<strong>${escapeHtml(state.invitation.inviterName)}</strong> har bjudit in dig till <strong>${escapeHtml(state.invitation.tripName)}</strong>.`;
-  $("#show-register-button").classList.toggle("hidden", !state.invitation);
+  $("#show-register-button").classList.toggle("hidden", !state.invitation || state.invitation.kind === "quick_tab");
   if (needsSetup) {
     $("#auth-subtitle").textContent = "Skapa det första administratörskontot. Dina befintliga resor bevaras.";
     setAuthMode("setup");
-  } else if (state.invitation) setAuthMode("register");
+  } else if (state.invitation?.kind === "quick_tab") setAuthMode("quick-guest");
+  else if (state.invitation) setAuthMode("register");
   else {
     $("#auth-subtitle").textContent = "Logga in för att se dina resor.";
     setAuthMode("login");
@@ -131,12 +134,18 @@ async function init() {
     const session = await api("/api/session");
     state.version = session.version || "dev";
     renderVersion();
+    const guestQuickTabId = Number(location.hash.match(/^#quick-tab-(\d+)$/)?.[1]);
+    if (!session.authenticated && !state.invitation && guestQuickTabId) {
+      try { return await enterQuickTabGuest(guestQuickTabId); } catch { /* Visa vanlig inloggning om gästsessionen har gått ut. */ }
+    }
     if (!session.authenticated) return showAuth(session.needsSetup);
     await finishAuthentication(session.user);
   } catch (error) { toast(error.message); }
 }
 
 async function enterApp() {
+  state.guest = null;
+  $("#app").classList.remove("guest-mode");
   $("#login-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#sidebar-user-name").textContent = state.user.name;
@@ -152,6 +161,15 @@ async function enterApp() {
   else if (location.hash === "#statistics") await showStatistics();
   else if (location.hash === "#admin" && state.user.isAdmin) await showAdmin();
   else showDashboard(false);
+}
+
+async function enterQuickTabGuest(quickTabId, guest = null) {
+  state.user = null;
+  state.guest = guest || { quickTabId };
+  $("#login-screen").classList.add("hidden");
+  $("#app").classList.add("guest-mode");
+  $("#app").classList.remove("hidden");
+  await showQuickTab(quickTabId);
 }
 
 async function loadCategories() {
@@ -236,11 +254,11 @@ function renderQuickTab() {
   $("#quick-tab-invite-button").classList.toggle("hidden", tab.role !== "owner" || Boolean(tab.closedAt));
   $("#quick-tab-receipt-link").classList.toggle("hidden", !tab.hasReceipt);
   $("#quick-tab-items").innerHTML = tab.items.length ? tab.items.map((item) => {
-    const mine = item.claims.some((claim) => Number(claim.userId) === Number(tab.currentUserId));
+    const mine = item.claims.some((claim) => claim.viewerKey === tab.currentViewerKey);
     const claimants = item.claims.length ? item.claims.map((claim) => `<span>${escapeHtml(claim.name)}</span>`).join("") : `<small>Ingen har valt ännu</small>`;
     return `<label class="claim-row ${mine ? "mine" : ""} ${tab.closedAt ? "closed" : ""}"><input type="checkbox" data-quick-claim="${item.id}" ${mine ? "checked" : ""} ${tab.closedAt ? "disabled" : ""} /><span class="claim-check">✓</span><span class="claim-copy"><strong>${escapeHtml(item.name)}</strong><span class="claimants">${claimants}</span></span><b>${formatMoney(item.amountCents)}</b></label>`;
   }).join("") : emptyState("Inga kvittorader", "Skaparen behöver lägga till minst en rad.");
-  $("#quick-tab-person-totals").innerHTML = tab.personTotals.map((personTotal, index) => `<article class="quick-person-row">${avatar(personTotal, index)}<span><strong>${escapeHtml(personTotal.name)}</strong><small>${Number(personTotal.userId) === Number(tab.currentUserId) ? "Du" : "Deltagare"}</small></span><b>${formatMoney(personTotal.amountCents)}</b></article>`).join("");
+  $("#quick-tab-person-totals").innerHTML = tab.personTotals.map((personTotal, index) => `<article class="quick-person-row">${avatar(personTotal, index)}<span><strong>${escapeHtml(personTotal.name)}</strong><small>${personTotal.viewerKey === tab.currentViewerKey ? "Du" : "Deltagare"}${personTotal.swishPhone ? ` · ${escapeHtml(personTotal.swishPhone)}` : ""}</small></span><b>${formatMoney(personTotal.amountCents)}</b></article>`).join("");
 }
 
 async function refreshQuickTab() {
@@ -638,6 +656,16 @@ $("#register-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.currentTarget; const data = Object.fromEntries(new FormData(form)); data.inviteToken = state.inviteToken;
   try { const payload = await api("/api/register", { method: "POST", body: JSON.stringify(data) }); form.reset(); state.inviteToken = ""; state.invitation = null; await finishAuthentication(payload.user, payload.tripId, payload.quickTabId); }
   catch (error) { showFormError(form, error); }
+});
+
+$("#quick-guest-form").addEventListener("submit", async (event) => {
+  event.preventDefault(); const form = event.currentTarget;
+  const data = { ...Object.fromEntries(new FormData(form)), token: state.inviteToken };
+  try {
+    const payload = await api("/api/quick-tabs/guest-join", { method: "POST", body: JSON.stringify(data) });
+    form.reset(); state.inviteToken = ""; state.invitation = null;
+    await enterQuickTabGuest(payload.quickTabId, payload.guest);
+  } catch (error) { showFormError(form, error); }
 });
 
 $("#show-login-button").addEventListener("click", () => setAuthMode("login"));
