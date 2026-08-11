@@ -553,6 +553,8 @@ function updateQuickItemSummary() {
 
 function openQuickTabDialog() {
   const form = $("#quick-tab-form"); form.reset(); pendingQuickTabReceipt = null;
+  $("#quick-tab-camera-input").value = "";
+  $("#quick-tab-receipt-input").value = "";
   $("#quick-tab-receipt-status").className = "receipt-status";
   $("#quick-tab-receipt-status").textContent = "Inget kvitto valt ännu.";
   renderQuickItemEditor(); openDialog("quick-tab-dialog");
@@ -562,8 +564,7 @@ function resetExpenseReceipt() {
   pendingExpenseReceipt = null;
   if (pendingExpenseReceiptUrl) URL.revokeObjectURL(pendingExpenseReceiptUrl);
   pendingExpenseReceiptUrl = "";
-  const input = $("#expense-receipt-input");
-  if (input) input.value = "";
+  [$("#expense-camera-input"), $("#expense-receipt-input")].forEach((input) => { if (input) input.value = ""; });
   $("#expense-receipt-preview")?.classList.add("hidden");
   $("#expense-receipt-image")?.removeAttribute("src");
   const status = $("#expense-receipt-status");
@@ -776,7 +777,7 @@ $("#quick-add-item").addEventListener("click", () => { $("#quick-item-editor").i
 $("#quick-item-editor").addEventListener("input", updateQuickItemSummary);
 $("#quick-tab-form").elements.total.addEventListener("input", updateQuickItemSummary);
 
-$("#quick-tab-receipt-input").addEventListener("change", async (event) => {
+async function analyzeQuickTabReceipt(event) {
   const file = event.currentTarget.files?.[0]; if (!file) return;
   const status = $("#quick-tab-receipt-status");
   if (file.size > 8 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) { status.className = "receipt-status warning"; status.textContent = "Välj en JPG-, PNG- eller WebP-bild på högst 8 MB."; return; }
@@ -788,10 +789,14 @@ $("#quick-tab-receipt-input").addEventListener("change", async (event) => {
     if (suggestion.amount) form.elements.total.value = suggestion.amount;
     if (suggestion.expenseDate) form.elements.receiptDate.value = suggestion.expenseDate;
     renderQuickItemEditor(suggestion.items || []);
-    status.className = "receipt-status success";
-    status.textContent = suggestion.items?.length ? `${suggestion.items.length} kvittorader hittades. Kontrollera namn, antal och summor.` : "Inga säkra rader hittades. Lägg till rätterna manuellt.";
+    const engine = payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR";
+    status.className = `receipt-status ${payload.needsReview ? "warning" : "success"}`;
+    status.textContent = suggestion.items?.length
+      ? `${suggestion.items.length} kvittorader hittades med ${engine}.${payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}`
+      : "Inga säkra rader hittades. Lägg till rätterna manuellt.";
   } catch (error) { status.className = "receipt-status warning"; status.textContent = `${error.message} Du kan fortfarande fylla i raderna manuellt.`; }
-});
+}
+[$("#quick-tab-camera-input"), $("#quick-tab-receipt-input")].forEach((input) => input.addEventListener("change", analyzeQuickTabReceipt));
 
 document.addEventListener("change", async (event) => {
   const claim = event.target.closest?.("[data-quick-claim]");
@@ -823,7 +828,7 @@ $("#quick-tab-close-button").addEventListener("click", async () => {
   catch (error) { toast(error.message); }
 });
 
-$("#expense-receipt-input").addEventListener("change", async (event) => {
+async function analyzeExpenseReceipt(event) {
   const input = event.currentTarget;
   const file = input.files?.[0];
   if (!file) return;
@@ -849,13 +854,15 @@ $("#expense-receipt-input").addEventListener("change", async (event) => {
     updateSplitSummary();
     const found = [suggestion.title, suggestion.amount, suggestion.expenseDate].filter(Boolean).length;
     status.className = `receipt-status ${found ? "success" : "warning"}`;
-    status.textContent = found ? `Förslag ifyllda (${payload.confidence || 0}% läskvalitet). Kontrollera namn, belopp och datum innan du sparar.` : "Kvittot bifogas, men texten kunde inte läsas tydligt. Fyll i uppgifterna manuellt.";
+    const engine = payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR";
+    status.textContent = found ? `Förslag ifyllda med ${engine} (${payload.confidence || 0}% läskvalitet).${payload.needsReview ? " Tolkningarna skiljer sig, så kontrollera extra noga." : " Kontrollera namn, belopp och datum innan du sparar."}` : "Kvittot bifogas, men texten kunde inte läsas tydligt. Fyll i uppgifterna manuellt.";
   } catch (error) {
     if (pendingExpenseReceipt !== file) return;
     status.className = "receipt-status warning";
     status.textContent = `${error.message} Kvittot kan fortfarande bifogas om du fyller i uppgifterna manuellt.`;
   }
-});
+}
+[$("#expense-camera-input"), $("#expense-receipt-input")].forEach((input) => input.addEventListener("change", analyzeExpenseReceipt));
 $("#clear-expense-receipt").addEventListener("click", resetExpenseReceipt);
 $("#expense-dialog").addEventListener("close", resetExpenseReceipt);
 

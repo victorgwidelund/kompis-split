@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { closeReceiptOcr, parseReceiptText, recognizeReceipt } from "../dist/receipt-ocr.js";
+import { closeReceiptOcr, combineReceiptPasses, parseOllamaReceipt, parseReceiptText, recognizeReceipt } from "../dist/receipt-ocr.js";
 
 function blankBitmap(width = 320, height = 120) {
   const rowSize = Math.ceil((width * 3) / 4) * 4;
@@ -70,6 +70,42 @@ test("phone photos with OCR borders and decimal quantities preserve receipt rows
     { name: "Valenciamandlar burk", quantity: 1, amount: "80.00" },
     { name: "Heineken Draft", quantity: 6, amount: "540.00" },
   ]);
+});
+
+test("wrapped receipt totals and OCR zero glyphs preserve a beer line", () => {
+  const suggestion = parseReceiptText(`
+    FRAMSIDAN
+    1.OO Chipspåse 49.OO
+    6.OO Heineken Draft (9O.OO)
+    54O.OO
+    Total 589.OO
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Chipspåse", quantity: 1, amount: "49.00" },
+    { name: "Heineken Draft", quantity: 6, amount: "540.00" },
+  ]);
+  assert.equal(suggestion.amount, "589.00");
+});
+
+test("local AI receipt output is validated and merged by exact öre", () => {
+  const ai = parseOllamaReceipt({
+    merchant: "Framsidan", date: "2026-05-26", total: 669,
+    items: [{ name: "Heineken Draft", quantity: 6, amount: 540 }],
+  }, new Date("2026-05-27T12:00:00Z"));
+  assert.ok(ai);
+  const tesseract = {
+    text: "", confidence: 59,
+    suggestion: {
+      title: "Framsidan", amount: "669.00", expenseDate: "2026-05-26", category: "food",
+      items: [
+        { name: "Chipspåse FS", quantity: 1, amount: "49.00" },
+        { name: "Valenciamandlar burk", quantity: 1, amount: "80.00" },
+      ],
+    },
+  };
+  const combined = combineReceiptPasses([ai, tesseract]);
+  assert.equal(combined.suggestion.items.reduce((sum, item) => sum + Number(item.amount), 0), 669);
+  assert.deepEqual(combined.suggestion.items.map((item) => item.name), ["Chipspåse FS", "Valenciamandlar burk", "Heineken Draft"]);
 });
 
 test("receipt parser handles European dates and ignores headings as merchants", () => {

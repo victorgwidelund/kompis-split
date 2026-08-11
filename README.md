@@ -16,7 +16,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
 - Frivilliga datum för både resor och utgifter
 - Egna, arkiverbara utgiftskategorier samt kvitton direkt under utgiften
-- Lokal svensk kvittoavläsning som föreslår restaurang/plats, totalbelopp, datum och kategori
+- Lokal svensk kvittoavläsning med GLM-OCR, bildförbehandling och Tesseract-reserv som föreslår restaurang/plats, totalbelopp, datum, kategori och artikelrader
 - Mobilanpassade formulärfält som inte automatiskt zoomar in på iPhone
 - Egen statistikvy för kategorier, restauranger/platser, betalare och månadsutveckling
 - Fristående Snabbnota: skanna kvittorader, dela en säker länk och låt alla bocka av mat och dryck i realtid
@@ -27,7 +27,8 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compose.
 
 1. Lägg repot/stackfilen i `/mnt/user/kompis_split/app/`.
-2. Skapa dessa miljövariabler i Compose Manager:
+2. Installera Unraids Nvidia Driver-plugin och kontrollera att GTX 1080 Ti är synlig för Docker.
+3. Skapa dessa miljövariabler i Compose Manager:
 
    ```dotenv
    APP_PASSWORD=ett-långt-slumpmässigt-installationslösenord
@@ -37,23 +38,25 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    TRUST_PROXY=false
    SESSION_DAYS=30
    BACKUP_RETENTION_DAYS=14
+   OLLAMA_MODEL=glm-ocr:q8_0
    ```
 
-3. Välj **Compose Up** och öppna `http://DIN-UNRAID-IP:8787`.
-4. Skapa första administratören med `APP_PASSWORD`.
+4. Välj **Compose Up**. Första starten laddar ner GLM-OCR-modellen och kan därför ta några minuter.
+5. Öppna `http://DIN-UNRAID-IP:8787` och skapa första administratören med `APP_PASSWORD`.
 
 PostgreSQL publicerar ingen port på Unraid. Endast appen finns på port 8787. Beständig data och backup ligger utanför containrarna:
 
 ```text
 /mnt/user/kompis_split/postgres/
 /mnt/user/kompis_split/backups/
+/mnt/user/kompis_split/ollama/
 ```
 
 Den gamla demo-SQLite-filen under `/mnt/user/kompis_split/data/` används inte längre och kan ligga kvar tills du själv väljer att ta bort den.
 
 ## Uppdatering via GitHub
 
-En push till `main` kör TypeScript-kontroll, finansiella tester, API-test mot PostgreSQL och Compose-validering. Därefter byggs multi-arch-images i GHCR.
+En push eller pull request kör TypeScript-kontroll, finansiella tester, API-test mot PostgreSQL, ett riktigt containerbygge och Compose-validering. Efter en godkänd push till `main` byggs multi-arch-images i GHCR.
 
 Produktionsstacken följer den publicerade `latest`-imagen. När workflowen är grön väljer du bara **Pull & Up** i Compose Manager; Compose-filen behöver inte redigeras. Varje publicering får även en oföränderlig `sha-<commit>`-tagg. Spara föregående fungerande tagg så att du vid behov kan använda den tillfälligt för rollback; databasvolymen påverkas inte av imagebytet.
 
@@ -82,7 +85,7 @@ Proxyn ska vidarebefordra `Host` eller `X-Forwarded-Host`. `TRUST_PROXY=true` f�
 
 Kvitton lagras i PostgreSQL och följer därför med i samma backup. JPG, PNG, WebP och PDF stöds, högst 8 MB per fil och fem filer per utgift. När en arkiverad resa flyttas till papperskorgen raderas dess kvittofiler permanent; utgifter, betalningar och audit-logg behålls så att den ekonomiska historiken fortfarande kan granskas och resan återställas.
 
-När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen läser bilden lokalt på Unraid-servern och fyller i redigerbara förslag; kvittobilden skickas inte till någon extern OCR-tjänst. Kontrollera alltid belopp, datum och namn innan utgiften sparas. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
+När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen skickar bilden över det interna Compose-nätverket till den lokala GLM-OCR-modellen och jämför resultatet med Tesseract och exakt öresmatematik. Bilden lämnar aldrig Unraid-servern. Om Ollama eller GPU:n inte är tillgänglig används Tesseract automatiskt. Kontrollera alltid belopp, datum, namn och artikelrader innan du sparar. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
 
 Testa återställning på en separat databas:
 
@@ -115,6 +118,8 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `TRUST_PROXY` | `false` | Ska bara vara `true` bakom betrodd proxy |
 | `SESSION_DAYS` | `30` | Sessionernas livslängd |
 | `BACKUP_RETENTION_DAYS` | `14` | Retention för dagliga dumpfiler |
+| `OLLAMA_URL` | `http://ollama:11434` i Compose | Intern adress till lokal dokument-AI; exponeras inte publikt |
+| `OLLAMA_MODEL` | `glm-ocr:q8_0` | Kvantiserad lokal OCR-modell, vald för GTX 1080 Ti-kompatibilitet |
 
 ## Lokal utveckling
 

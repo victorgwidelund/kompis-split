@@ -1,4 +1,37 @@
 services:
+  ollama:
+    image: ollama/ollama:0.32.0
+    container_name: kompis-split-ollama
+    restart: unless-stopped
+    gpus: all
+    environment:
+      OLLAMA_KEEP_ALIVE: "10m"
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes:
+      - /mnt/user/kompis_split/ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  ollama-model:
+    image: ollama/ollama:0.32.0
+    container_name: kompis-split-ollama-model
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/ollama"]
+    command: ["pull", "${OLLAMA_MODEL:-glm-ocr:q8_0}"]
+    security_opt:
+      - no-new-privileges:true
+
   postgres:
     image: postgres:17.10-alpine3.22
     container_name: kompis-split-postgres
@@ -42,6 +75,8 @@ services:
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       TRUST_PROXY: "${TRUST_PROXY:-false}"
       SESSION_DAYS: "${SESSION_DAYS:-30}"
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-glm-ocr:q8_0}"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
