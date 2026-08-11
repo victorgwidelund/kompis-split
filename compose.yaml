@@ -79,6 +79,7 @@ services:
       SESSION_DAYS: "${SESSION_DAYS:-30}"
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: "${OLLAMA_MODEL:-glm-ocr:q8_0}"
+      OLLAMA_OCR_TIMEOUT_MS: "${OLLAMA_OCR_TIMEOUT_MS:-45000}"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m

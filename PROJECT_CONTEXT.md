@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-11  
-Appversion: 1.6.0
+Appversion: 1.7.0
 Databasschema: migration 6
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -25,7 +25,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 - Databas: PostgreSQL 17, endast tillgänglig inne i Compose-nätverket.
 - Databasåtkomst: `pg` med frågeadapter i `src/database.ts`.
 - Migreringar: ordnade, framåtriktade migreringar i `src/migrations.ts`, registrerade i `schema_migrations`.
-- OCR: lokal GLM-OCR via en intern Ollama-container, kompletterad med Sharp-bildförbehandling och Tesseract.js med svensk språkmodell som oberoende reserv.
+- OCR: lokal GLM-OCR via en intern Ollama-container, kompletterad med automatisk beskärning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. GLM-OCR och Tesseract körs parallellt efter en gemensam bildförbehandling.
 - Realtid: Server-Sent Events för snabbnota.
 - Pakethanterare: pnpm 11.16.0.
 - Produktion: Docker Compose på Unraid och publicerad image i GitHub Container Registry.
@@ -105,6 +105,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.7.0 beskär automatiskt bort iPhone-förhandsvisning, verktygsfält och tomma bildmarginaler innan kvittot skalas upp. GLM-OCR använder modellens dokumenterade textigenkänningsläge och kör parallellt med Tesseract, med 45 sekunders konfigurerbar timeout (`OLLAMA_OCR_TIMEOUT_MS`). Parsern bevarar kompakta antal som `3x` och `7x` och filtrerar betalningsrader.
 - Version 1.6.0 lägger till antalval på snabbnoter, deterministisk öresfördelning per vald mängd och en Swish-knapp till snabbnotans skapare. Befintliga rader migreras säkert som antal 1.
 - Compose använder `runtime: nvidia` för kompatibilitet med Unraid Compose Manager i stället för det nyare `gpus`-fältet.
 - Version 1.5.0 lägger till helt lokal GLM-OCR via Ollama, adaptiv flerpass-OCR, bildnormalisering och bättre hantering av radbrytningar och teckenfel i belopp.
