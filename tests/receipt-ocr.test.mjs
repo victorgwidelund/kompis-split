@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { closeReceiptOcr, combineReceiptPasses, parseOllamaReceipt, parseReceiptText, prepareReceiptImages, recognizeReceipt } from "../dist/receipt-ocr.js";
+import { closeReceiptOcr, combineReceiptPasses, ollamaReceiptRequest, parseOllamaReceipt, parseReceiptText, prepareReceiptImages, recognizeReceipt } from "../dist/receipt-ocr.js";
+
+test("Ollama receipt requests disable thinking and cap structured output", () => {
+  const request = ollamaReceiptRequest(Buffer.from("test-image"));
+  assert.equal(request.think, false);
+  assert.equal(request.stream, false);
+  assert.equal(request.options.num_predict, 768);
+  assert.equal(request.format.properties.items.maxItems, 40);
+});
 
 test("Swedish receipt fields are extracted as editable suggestions", () => {
   const suggestion = parseReceiptText(`
@@ -110,6 +118,9 @@ test("iPhone preview chrome and margins are cropped before OCR", async () => {
   assert.ok(prepared.crop.left > 140);
   assert.ok(prepared.crop.width < 330);
   assert.ok(prepared.crop.top >= 140);
+  const aiMetadata = await sharp(prepared.ai).metadata();
+  assert.ok((aiMetadata.width || 0) <= 1024);
+  assert.ok((aiMetadata.height || 0) <= 2048);
 });
 
 test("phone photos with OCR borders and decimal quantities preserve receipt rows", () => {
