@@ -50,6 +50,14 @@
           <p class="form-error" role="alert"></p>
           <button id="show-login-button" class="text-button" type="button">Har du redan konto? Logga in</button>
         </form>
+
+        <form id="quick-guest-form" class="auth-form hidden">
+          <label>Ditt namn<input name="name" maxlength="60" autocomplete="name" required /></label>
+          <label>Mobil- eller Swish-nummer<input name="swishPhone" inputmode="tel" autocomplete="tel" placeholder="070 123 45 67" required /></label>
+          <button class="button primary wide" type="submit">Öppna snabbnotan <span>→</span></button>
+          <p class="form-error" role="alert"></p>
+          <small class="muted">Inget konto eller lösenord behövs. Åtkomsten gäller bara den här snabbnotan.</small>
+        </form>
         <small class="app-version auth-version" title="Installerad appversion">Version …</small>
       </div>
     </section>

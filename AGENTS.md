@@ -41,3 +41,4 @@
 - Preserve backwards compatibility and user data by default.
 - Do not implement destructive migrations. Take and verify a backup before deploying schema changes.
 - Run syntax/lint checks, financial and integration tests, migration-upgrade tests, Compose validation, and the container healthcheck before release.
+- Treat `PROJECT_CONTEXT.md` as the living technical memory for this repository. Read it before material work and update it in the same change whenever the app version, architecture, schema, deployment, security model, major features, known limitations, or release process changes. Never place secrets or personal data in it.

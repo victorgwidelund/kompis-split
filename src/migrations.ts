@@ -1,6 +1,6 @@
 import { pool } from "./database.js";
 
-export const migrationVersions = [1, 2, 3, 4] as const;
+export const migrationVersions = [1, 2, 3, 4, 5] as const;
 
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -258,6 +258,37 @@ export async function applyMigrations(): Promise<void> {
     await client.query(
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [4, "standalone-realtime-quick-tabs"],
+    );
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quick_tab_guests (
+        id BIGSERIAL PRIMARY KEY,
+        quick_tab_id BIGINT NOT NULL REFERENCES quick_tabs(id) ON DELETE CASCADE,
+        display_name TEXT NOT NULL CHECK(char_length(display_name) BETWEEN 1 AND 60),
+        swish_phone TEXT NOT NULL CHECK(char_length(swish_phone) BETWEEN 8 AND 24),
+        session_id TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE quick_tab_claims ADD COLUMN IF NOT EXISTS guest_id BIGINT REFERENCES quick_tab_guests(id) ON DELETE CASCADE;
+      ALTER TABLE quick_tab_claims DROP CONSTRAINT IF EXISTS quick_tab_claims_pkey;
+      ALTER TABLE quick_tab_claims ALTER COLUMN user_id DROP NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_tab_claims_user_unique ON quick_tab_claims(item_id, user_id) WHERE user_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_tab_claims_guest_unique ON quick_tab_claims(item_id, guest_id) WHERE guest_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_quick_tab_guests_tab ON quick_tab_guests(quick_tab_id, created_at, id);
+      CREATE INDEX IF NOT EXISTS idx_quick_tab_guests_session ON quick_tab_guests(session_id, expires_at);
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quick_tab_claims_one_identity') THEN
+          ALTER TABLE quick_tab_claims ADD CONSTRAINT quick_tab_claims_one_identity
+            CHECK ((user_id IS NOT NULL)::integer + (guest_id IS NOT NULL)::integer = 1);
+        END IF;
+      END $$
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [5, "accountless-quick-tab-guests"],
     );
     await client.query("COMMIT");
   } catch (error) {
