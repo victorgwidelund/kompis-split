@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-11  
-Appversion: 1.4.0  
+Appversion: 1.5.0
 Databasschema: migration 5
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -25,7 +25,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 - Databas: PostgreSQL 17, endast tillgänglig inne i Compose-nätverket.
 - Databasåtkomst: `pg` med frågeadapter i `src/database.ts`.
 - Migreringar: ordnade, framåtriktade migreringar i `src/migrations.ts`, registrerade i `schema_migrations`.
-- OCR: Tesseract.js med bundlad svensk språkmodell; behandling sker i backend.
+- OCR: lokal GLM-OCR via en intern Ollama-container, kompletterad med Sharp-bildförbehandling och Tesseract.js med svensk språkmodell som oberoende reserv.
 - Realtid: Server-Sent Events för snabbnota.
 - Pakethanterare: pnpm 11.16.0.
 - Produktion: Docker Compose på Unraid och publicerad image i GitHub Container Registry.
@@ -39,6 +39,7 @@ Bevara denna arkitektur om inte en större förändring uttryckligen har godkän
 - PostgreSQL: `postgres:17.10-alpine3.22`, utan publicerad host-port.
 - Beständig databas: `/mnt/user/kompis_split/postgres`.
 - Automatiska dump-backuper: `/mnt/user/kompis_split/backups`, normalt 14 dagars retention.
+- Lokala Ollama-modeller: `/mnt/user/kompis_split/ollama`; tjänsten har ingen publicerad host-port och använder GTX 1080 Ti via Nvidia-runtime.
 - Appcontainern är read-only, saknar Linux capabilities och använder `/tmp` som begränsad tmpfs.
 - Produktionsåtkomst ska gå via HTTPS-reverse proxy. `COOKIE_SECURE=true` och `TRUST_PROXY=true` används när proxyn är korrekt konfigurerad.
 - Hemligheter sätts i Unraid Compose Manager eller ignorerad `.env`, aldrig i Git.
@@ -62,7 +63,7 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 - Utgifter och betalningar är huvudboken. Saldon beräknas från den och lagras inte som separat sanning.
 - Finansiella poster mjukraderas eller reverseras så att historiken bevaras.
 - Resor kan arkiveras och mjukraderas. Kvittofiler kopplade till en borttagen resa tas bort enligt appens nuvarande dataskyddsbeteende.
-- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot.
+- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot. GLM-OCR och Tesseract jämförs, och avvikande totalsummor markeras för extra kontroll.
 
 ## Databasmigreringar
 
@@ -96,12 +97,15 @@ Krav före release:
 2. `pnpm run lint`
 3. `pnpm test`
 4. `docker compose config --quiet` där Docker finns
-5. Grön GitHub Actions-körning med PostgreSQL-integrationstest
+5. Grön GitHub Actions-körning med PostgreSQL-integrationstest och containerbygge
 
-En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*`-tagg. Pull requests kör tester men publicerar inte produktionsimagen.
+En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*`-tagg. Pull requests kör tester, bygger appcontainern och validerar Compose men publicerar inte produktionsimagen.
 
 ## Senaste utvecklingsstatus
 
+- Version 1.5.0 lägger till helt lokal GLM-OCR via Ollama, adaptiv flerpass-OCR, bildnormalisering och bättre hantering av radbrytningar och teckenfel i belopp.
+- Kamera och bildbibliotek har separata knappar så att användaren alltid kan välja en befintlig bild om Chrome-kameran inte fungerar på enheten.
+- Ollama körs endast på det interna Compose-nätverket med den kvantiserade `glm-ocr:q8_0` för GTX 1080 Ti; appen faller automatiskt tillbaka till Tesseract om modellen inte är tillgänglig.
 - Version 1.4.0 innehåller förbättrad svensk kvittoradstolkning och kontolösa snabbnotegäster.
 - Setup-sessionens HTTP-svar skickas först efter att PostgreSQL-transaktionen har committats, vilket förhindrar en sporadisk 401 direkt efter första installationen.
 - PostgreSQL-integrationstest, TypeScript, lint och övriga tester är gröna för denna version.

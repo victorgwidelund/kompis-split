@@ -39,6 +39,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm test
+      - name: Build application container
+        run: docker build --build-arg APP_VERSION=1.5 -t kompis-split:test .
       - name: Validate Docker Compose
         env:
           APP_PASSWORD: compose-validation-password
