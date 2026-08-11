@@ -35,7 +35,7 @@ services:
     environment:
       OLLAMA_HOST: http://ollama:11434
     entrypoint: ["/bin/ollama"]
-    command: ["pull", "${OLLAMA_MODEL:-qwen3-vl:4b}"]
+    command: ["pull", "${OLLAMA_MODEL:-qwen3-vl:4b-instruct-q4_K_M}"]
     security_opt:
       - no-new-privileges:true
 
@@ -83,7 +83,7 @@ services:
       TRUST_PROXY: "${TRUST_PROXY:-false}"
       SESSION_DAYS: "${SESSION_DAYS:-30}"
       OLLAMA_URL: http://ollama:11434
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3-vl:4b}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3-vl:4b-instruct-q4_K_M}"
       OLLAMA_OCR_TIMEOUT_MS: "${OLLAMA_OCR_TIMEOUT_MS:-60000}"
       OLLAMA_OCR_MAX_TOKENS: "${OLLAMA_OCR_MAX_TOKENS:-768}"
       OLLAMA_ACCURATE_RETRY: "${OLLAMA_ACCURATE_RETRY:-true}"

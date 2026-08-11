@@ -7,8 +7,15 @@ test("Ollama receipt requests disable thinking and cap structured output", () =>
   const request = ollamaReceiptRequest(Buffer.from("test-image"));
   assert.equal(request.think, false);
   assert.equal(request.stream, false);
+  assert.equal(request.model, "qwen3-vl:4b-instruct-q4_K_M");
   assert.equal(request.options.num_predict, 768);
   assert.equal(request.format.properties.items.maxItems, 40);
+});
+
+test("an unreadable explicit total is not replaced by the largest item price", () => {
+  const suggestion = parseReceiptText("1x Asado 68,00\n1x Atun 69,00\nTOTALT (kr)");
+  assert.equal(suggestion.amount, null);
+  assert.deepEqual(suggestion.items.map((item) => item.amount), ["68.00", "69.00"]);
 });
 
 test("Swedish receipt fields are extracted as editable suggestions", () => {

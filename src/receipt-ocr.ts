@@ -4,7 +4,7 @@ import { createWorker, OEM, PSM, type Worker } from "tesseract.js";
 
 const require = createRequire(import.meta.url);
 const swedishLanguage = require("@tesseract.js-data/swe") as { langPath: string; gzip: boolean };
-const ollamaModel = String(process.env.OLLAMA_MODEL || "qwen3-vl:4b").trim();
+const ollamaModel = String(process.env.OLLAMA_MODEL || "qwen3-vl:4b-instruct-q4_K_M").trim();
 const ollamaMaxTokens = Math.min(1_536, Math.max(256, Number(process.env.OLLAMA_OCR_MAX_TOKENS) || 768));
 const ollamaUrl = (() => {
   const value = String(process.env.OLLAMA_URL || "").trim();
@@ -124,6 +124,7 @@ function receiptTotal(lines: string[]) {
     fallback.push(...amounts);
     if (totalWords.test(line) && !excludedTotalWords.test(line)) prioritized.push(...amounts);
   }
+  if (!prioritized.length && lines.some((line) => totalWords.test(line) && !excludedTotalWords.test(line))) return null;
   const candidates = prioritized.length ? prioritized : fallback;
   return candidates.length ? Math.max(...candidates) : null;
 }
@@ -397,7 +398,7 @@ async function recognizeWithOllama(content: Buffer, verification = false, cancel
       return attempt;
     }
     const payload = await response.json() as {
-      message?: { content?: unknown };
+      message?: { content?: unknown; thinking?: unknown };
       done_reason?: unknown;
       eval_count?: unknown;
       eval_duration?: unknown;
@@ -406,6 +407,7 @@ async function recognizeWithOllama(content: Buffer, verification = false, cancel
       load_duration?: unknown;
     };
     const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
+    const thinkingOnly = !text && typeof payload.message?.thinking === "string" && payload.message.thinking.trim().length > 0;
     const metrics = {
       doneReason: typeof payload.done_reason === "string" ? payload.done_reason : undefined,
       outputTokens: Number.isFinite(Number(payload.eval_count)) ? Number(payload.eval_count) : undefined,
@@ -415,7 +417,7 @@ async function recognizeWithOllama(content: Buffer, verification = false, cancel
       loadMs: Number.isFinite(Number(payload.load_duration)) ? Math.round(Number(payload.load_duration) / 1_000_000) : undefined,
     };
     if (!text) {
-      const attempt = { pass: null, status: "empty_response", durationMs: Date.now() - startedAt } satisfies AiAttempt;
+      const attempt = { pass: null, status: thinkingOnly ? "thinking_only" : "empty_response", durationMs: Date.now() - startedAt } satisfies AiAttempt;
       logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, ...metrics });
       return attempt;
     }
@@ -575,7 +577,7 @@ export async function prepareReceiptImages(content: Buffer) {
     .resize({ width: 1600, height: 3400, fit: "inside", withoutEnlargement: false });
   const [ai, grayscale, binary] = await Promise.all([
     base.clone().resize({ width: 1024, height: 2048, fit: "inside" }).normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.8 }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer(),
-    base.clone().grayscale().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.9 }).png().toBuffer(),
+    base.clone().grayscale().sharpen({ sigma: 0.45 }).png().toBuffer(),
     rectified ? Promise.resolve(rectified) : base.clone().grayscale().normalize({ lower: 2, upper: 98 }).threshold(180).png().toBuffer(),
   ]);
   return { ai, grayscale, binary, crop, rectified: Boolean(rectified) };
