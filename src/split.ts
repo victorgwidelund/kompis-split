@@ -19,6 +19,23 @@ export function allocateByWeights(totalCents: number, weights: number[]): number
   return result;
 }
 
+export function allocateItemQuantities(totalCents: number, itemQuantity: number, claims: Array<{ key: string; quantity: number }>) {
+  if (!Number.isInteger(itemQuantity) || itemQuantity < 1 || itemQuantity > 20) throw new Error("Item quantity must be between 1 and 20");
+  const ordered = [...claims].sort((first, second) => first.key.localeCompare(second.key));
+  if (new Set(ordered.map((claim) => claim.key)).size !== ordered.length) throw new Error("Claim keys must be unique");
+  if (ordered.some((claim) => !Number.isInteger(claim.quantity) || claim.quantity < 1 || claim.quantity > itemQuantity)) throw new Error("Claim quantity is invalid");
+  const claimedQuantity = ordered.reduce((sum, claim) => sum + claim.quantity, 0);
+  if (claimedQuantity > itemQuantity) throw new Error("Claimed quantity exceeds item quantity");
+  const unitAmounts = allocateByWeights(totalCents, Array.from({ length: itemQuantity }, () => 1));
+  const claimedCents = unitAmounts.slice(0, claimedQuantity).reduce((sum, amount) => sum + amount, 0);
+  const amounts = claimedQuantity ? allocateByWeights(claimedCents, ordered.map((claim) => claim.quantity)) : [];
+  return {
+    claimedQuantity,
+    claimedCents,
+    shares: ordered.map((claim, index) => ({ key: claim.key, quantity: claim.quantity, amountCents: amounts[index]! })),
+  };
+}
+
 export function calculateShares(totalCents: number, mode: string, entries: Array<{ value: unknown }>): number[] {
   if (!Array.isArray(entries) || entries.length === 0) throw new Error("Choose at least one participant");
   if (mode === "equal") return allocateByWeights(totalCents, entries.map(() => 1));

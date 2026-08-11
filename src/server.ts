@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
 import { closeReceiptOcr, recognizeReceipt } from "./receipt-ocr.js";
-import { allocateByWeights, calculateShares, simplifyDebts } from "./split.js";
+import { allocateItemQuantities, calculateShares, simplifyDebts } from "./split.js";
 
 const scrypt = promisify(scryptCallback);
 function integerEnvironment(name: string, fallback: number, minimum: number, maximum: number) {
@@ -571,7 +571,26 @@ function broadcastQuickTab(quickTabId: number) {
 async function quickTabAccess(quickTabId: number, userId: number) {
   const access = await db.prepare("SELECT role FROM quick_tab_access WHERE quick_tab_id = ? AND user_id = ?").get<any>(quickTabId, userId);
   if (!access) throw new HttpError(403, "Du har inte tillgång till snabbnotan");
-  return String(access.role);
+  return String(access.role) as "owner" | "member";
+}
+
+async function setQuickTabClaimQuantity(quickTabId: number, itemId: number, viewer: QuickTabViewer, quantity: number) {
+  if (!Number.isInteger(quantity) || quantity < 0 || quantity > 20) throw new HttpError(400, "Antalet måste vara mellan 0 och 20");
+  await db.transaction(async () => {
+    const item = await db.prepare("SELECT id, quantity FROM quick_tab_items WHERE id = ? AND quick_tab_id = ? FOR UPDATE").get<any>(itemId, quickTabId);
+    if (!item) throw new HttpError(404, "Kvittoraden finns inte");
+    const identityColumn = viewer.kind === "user" ? "user_id" : "guest_id";
+    const claimedByOthers = await db.prepare(`
+      SELECT COALESCE(SUM(quantity), 0) total FROM quick_tab_claims
+      WHERE item_id = ? AND (${identityColumn} IS NULL OR ${identityColumn} <> ?)
+    `).get<any>(itemId, viewer.id);
+    if (quantity + Number(claimedByOthers?.total || 0) > Number(item.quantity)) {
+      throw new HttpError(409, "Det finns inte så många kvar av den här raden");
+    }
+    await db.prepare(`DELETE FROM quick_tab_claims WHERE item_id = ? AND ${identityColumn} = ?`).run(itemId, viewer.id);
+    if (quantity > 0) await db.prepare(`INSERT INTO quick_tab_claims (item_id, ${identityColumn}, quantity) VALUES (?, ?, ?)`).run(itemId, viewer.id, quantity);
+    await db.prepare("UPDATE quick_tabs SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(quickTabId);
+  });
 }
 
 async function loadQuickTab(quickTabId: number, viewer: QuickTabViewer) {
@@ -587,38 +606,45 @@ async function loadQuickTab(quickTabId: number, viewer: QuickTabViewer) {
   `).all<any>(quickTabId, quickTabId)).map((member) => ({
     viewerKey: member.viewer_key, userId: member.user_id ? Number(member.user_id) : null,
     guestId: member.guest_id ? Number(member.guest_id) : null, name: member.name, role: member.role,
-    swishPhone: viewer.role === "owner" || member.viewer_key === viewer.key ? member.swish_phone : null,
+    swishPhone: viewer.role === "owner" || member.viewer_key === viewer.key || member.role === "owner" ? member.swish_phone : null,
   }));
-  const itemRows = await db.prepare("SELECT id, name, amount_cents, position FROM quick_tab_items WHERE quick_tab_id = ? ORDER BY position, id").all<any>(quickTabId);
+  const itemRows = await db.prepare("SELECT id, name, amount_cents, quantity, position FROM quick_tab_items WHERE quick_tab_id = ? ORDER BY position, id").all<any>(quickTabId);
   const claimRows = await db.prepare(`
-    SELECT c.item_id, c.user_id, c.guest_id, COALESCE(u.display_name, g.display_name) name,
+    SELECT c.item_id, c.user_id, c.guest_id, c.quantity, COALESCE(u.display_name, g.display_name) name,
       CASE WHEN c.user_id IS NOT NULL THEN CONCAT('u:', c.user_id) ELSE CONCAT('g:', c.guest_id) END viewer_key
     FROM quick_tab_claims c
     JOIN quick_tab_items i ON i.id = c.item_id
     LEFT JOIN users u ON u.id = c.user_id LEFT JOIN quick_tab_guests g ON g.id = c.guest_id
     WHERE i.quick_tab_id = ? ORDER BY c.item_id, viewer_key
   `).all<any>(quickTabId);
-  const claimsByItem = new Map<number, Array<{ viewerKey: string; name: string }>>();
+  const claimsByItem = new Map<number, Array<{ viewerKey: string; name: string; quantity: number }>>();
   for (const claim of claimRows) {
     const claims = claimsByItem.get(Number(claim.item_id)) || [];
-    claims.push({ viewerKey: claim.viewer_key, name: claim.name });
+    claims.push({ viewerKey: claim.viewer_key, name: claim.name, quantity: Number(claim.quantity) });
     claimsByItem.set(Number(claim.item_id), claims);
   }
   const totals = new Map<string, number>();
   const items = itemRows.map((item) => {
     const claims = claimsByItem.get(Number(item.id)) || [];
-    if (claims.length) {
-      const shares = allocateByWeights(Number(item.amount_cents), claims.map(() => 1));
-      claims.forEach((claim, index) => totals.set(claim.viewerKey, (totals.get(claim.viewerKey) || 0) + shares[index]!));
-    }
-    return { id: Number(item.id), name: item.name, amountCents: Number(item.amount_cents), claims };
+    const quantity = Number(item.quantity);
+    const allocation = allocateItemQuantities(Number(item.amount_cents), quantity, claims.map((claim) => ({ key: claim.viewerKey, quantity: claim.quantity })));
+    const claimedQuantity = allocation.claimedQuantity;
+    const claimedItemCents = allocation.claimedCents;
+    allocation.shares.forEach((share) => totals.set(share.key, (totals.get(share.key) || 0) + share.amountCents));
+    return {
+      id: Number(item.id), name: item.name, amountCents: Number(item.amount_cents), quantity,
+      unitAmountCents: Math.round(Number(item.amount_cents) / quantity), claimedQuantity,
+      availableQuantity: quantity - claimedQuantity, claimedCents: claimedItemCents, claims,
+    };
   });
-  const claimedCents = items.filter((item) => item.claims.length).reduce((sum, item) => sum + item.amountCents, 0);
+  const claimedCents = items.reduce((sum, item) => sum + item.claimedCents, 0);
+  const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  const claimedQuantity = items.reduce((sum, item) => sum + item.claimedQuantity, 0);
   return {
     id: Number(tab.id), name: tab.name, merchant: tab.merchant, receiptDate: tab.receipt_date,
     totalCents: Number(tab.total_cents), hasReceipt: Boolean(tab.has_receipt), createdBy: Number(tab.created_by),
     closedAt: tab.closed_at, createdAt: tab.created_at, role: viewer.role, currentViewerKey: viewer.key, members, items,
-    claimedCents, unclaimedCents: Math.max(0, Number(tab.total_cents) - claimedCents),
+    claimedCents, unclaimedCents: Math.max(0, Number(tab.total_cents) - claimedCents), totalQuantity, claimedQuantity,
     personTotals: members.map((member) => ({ ...member, amountCents: totals.get(member.viewerKey) || 0 })),
   };
 }
@@ -626,8 +652,8 @@ async function loadQuickTab(quickTabId: number, viewer: QuickTabViewer) {
 async function quickTabList(userId: number) {
   return (await db.prepare(`
     SELECT q.id, q.name, q.merchant, q.total_cents, q.closed_at, q.created_at, a.role,
-      (SELECT COUNT(*) FROM quick_tab_items i WHERE i.quick_tab_id = q.id) item_count,
-      (SELECT COUNT(*) FROM quick_tab_claims c JOIN quick_tab_items i ON i.id = c.item_id WHERE i.quick_tab_id = q.id AND c.user_id = ?) my_claim_count
+      (SELECT COALESCE(SUM(i.quantity), 0) FROM quick_tab_items i WHERE i.quick_tab_id = q.id) item_count,
+      (SELECT COALESCE(SUM(c.quantity), 0) FROM quick_tab_claims c JOIN quick_tab_items i ON i.id = c.item_id WHERE i.quick_tab_id = q.id AND c.user_id = ?) my_claim_count
     FROM quick_tab_access a JOIN quick_tabs q ON q.id = a.quick_tab_id
     WHERE a.user_id = ? ORDER BY (q.closed_at IS NOT NULL), q.created_at DESC
   `).all<any>(userId, userId)).map((tab) => ({
@@ -813,11 +839,8 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const tab = await db.prepare("SELECT closed_at FROM quick_tabs WHERE id = ?").get<any>(quickTabId);
     if (tab?.closed_at) throw new HttpError(409, "Snabbnotan är avslutad");
     const body = await readJson(request); const itemId = Number(body.itemId);
-    if (!await db.prepare("SELECT id FROM quick_tab_items WHERE id = ? AND quick_tab_id = ?").get(itemId, quickTabId)) throw new HttpError(404, "Kvittoraden finns inte");
-    const identityColumn = viewer.kind === "user" ? "user_id" : "guest_id";
-    if (body.claimed === false) await db.prepare(`DELETE FROM quick_tab_claims WHERE item_id = ? AND ${identityColumn} = ?`).run(itemId, viewer.id);
-    else await db.prepare(`INSERT INTO quick_tab_claims (item_id, ${identityColumn}) VALUES (?, ?) ON CONFLICT DO NOTHING`).run(itemId, viewer.id);
-    await db.prepare("UPDATE quick_tabs SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(quickTabId);
+    const quantity = body.quantity === undefined ? body.claimed === false ? 0 : 1 : Number(body.quantity);
+    await setQuickTabClaimQuantity(quickTabId, itemId, viewer, quantity);
     broadcastQuickTab(quickTabId);
     return json(response, 200, { quickTab: await loadQuickTab(quickTabId, viewer) });
   }
@@ -891,17 +914,15 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const totalCents = parseAmount(body.total);
     const rawItems = Array.isArray(body.items) ? body.items : [];
     if (!rawItems.length || rawItems.length > 60) throw new Error("Snabbnotan måste ha mellan 1 och 60 kvittorader");
-    const expanded: Array<{ name: string; amountCents: number }> = [];
+    const items: Array<{ name: string; amountCents: number; quantity: number }> = [];
     for (const raw of rawItems) {
       const name = cleanText(raw.name, "Radnamn", 100);
       const quantity = Number(raw.quantity || 1);
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) throw new Error("Antalet per rad måste vara mellan 1 och 20");
       const rowCents = parseAmount(raw.amount);
-      const units = allocateByWeights(rowCents, Array.from({ length: quantity }, () => 1));
-      units.forEach((amountCents, index) => expanded.push({ name: quantity > 1 ? `${name} ${index + 1}/${quantity}` : name, amountCents }));
+      items.push({ name, amountCents: rowCents, quantity });
     }
-    if (expanded.length > 100) throw new Error("Snabbnotan får ha högst 100 valbara poster");
-    if (expanded.reduce((sum, item) => sum + item.amountCents, 0) > totalCents) throw new Error("Kvittoradernas summa kan inte vara högre än hela notan");
+    if (items.reduce((sum, item) => sum + item.amountCents, 0) > totalCents) throw new Error("Kvittoradernas summa kan inte vara högre än hela notan");
     const token = randomBytes(24).toString("base64url");
     const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
     const quickTabId = await db.transaction(async () => {
@@ -909,10 +930,10 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
         .run(cleanText(body.name || body.merchant || "Snabbnota", "Namn", 100), body.merchant ? cleanText(body.merchant, "Plats", 100) : null, validDate(body.receiptDate), totalCents, user.id);
       const id = Number(result.lastInsertRowid);
       await db.prepare("INSERT INTO quick_tab_access (quick_tab_id, user_id, role) VALUES (?, ?, 'owner')").run(id, user.id);
-      const insert = db.prepare("INSERT INTO quick_tab_items (quick_tab_id, name, amount_cents, position) VALUES (?, ?, ?, ?)");
-      for (const [position, item] of expanded.entries()) await insert.run(id, item.name, item.amountCents, position);
+      const insert = db.prepare("INSERT INTO quick_tab_items (quick_tab_id, name, amount_cents, quantity, position) VALUES (?, ?, ?, ?, ?)");
+      for (const [position, item] of items.entries()) await insert.run(id, item.name, item.amountCents, item.quantity, position);
       await db.prepare("INSERT INTO quick_tab_invitations (quick_tab_id, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?)").run(id, sha256(token), user.id, expiresAt);
-      await audit(user.id, null, "quick_tab.created", "quick_tab", id, { totalCents, itemCount: expanded.length });
+      await audit(user.id, null, "quick_tab.created", "quick_tab", id, { totalCents, itemCount: items.length, unitCount: items.reduce((sum, item) => sum + item.quantity, 0) });
       return id;
     });
     return json(response, 201, { quickTab: await loadQuickTab(quickTabId, { kind: "user", id: Number(user.id), key: `u:${user.id}`, role: "owner" }), invitation: await invitationPayload(request, token, expiresAt) });
@@ -945,14 +966,12 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   }
   match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/claims$/);
   if (request.method === "POST" && match) {
-    const quickTabId = Number(match[1]); await quickTabAccess(quickTabId, user.id);
+    const quickTabId = Number(match[1]); const role = await quickTabAccess(quickTabId, user.id);
     const tab = await db.prepare("SELECT closed_at FROM quick_tabs WHERE id = ?").get<any>(quickTabId);
     if (tab?.closed_at) throw new HttpError(409, "Snabbnotan är avslutad");
     const body = await readJson(request); const itemId = Number(body.itemId);
-    if (!await db.prepare("SELECT id FROM quick_tab_items WHERE id = ? AND quick_tab_id = ?").get(itemId, quickTabId)) throw new HttpError(404, "Kvittoraden finns inte");
-    if (body.claimed === false) await db.prepare("DELETE FROM quick_tab_claims WHERE item_id = ? AND user_id = ?").run(itemId, user.id);
-    else await db.prepare("INSERT INTO quick_tab_claims (item_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(itemId, user.id);
-    await db.prepare("UPDATE quick_tabs SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(quickTabId);
+    const quantity = body.quantity === undefined ? body.claimed === false ? 0 : 1 : Number(body.quantity);
+    await setQuickTabClaimQuantity(quickTabId, itemId, { kind: "user", id: Number(user.id), key: `u:${user.id}`, role }, quantity);
     broadcastQuickTab(quickTabId);
     return json(response, 200, { quickTab: await loadQuickTab(quickTabId, await quickTabViewer(request, quickTabId, user)) });
   }

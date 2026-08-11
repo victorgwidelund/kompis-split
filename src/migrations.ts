@@ -290,6 +290,16 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [5, "accountless-quick-tab-guests"],
     );
+    await client.query(`
+      ALTER TABLE quick_tab_items
+        ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity BETWEEN 1 AND 20);
+      ALTER TABLE quick_tab_claims
+        ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity BETWEEN 1 AND 20);
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [6, "quick-tab-item-and-claim-quantities"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
