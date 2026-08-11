@@ -2,67 +2,56 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const htmlPath = new URL("../public/index.html", import.meta.url);
-const appPath = new URL("../public/app.js", import.meta.url);
+const root = new URL("../", import.meta.url);
+const read = (path) => readFile(new URL(path, root), "utf8");
 
-test("the Swedish account UI has unique IDs and every direct selector exists", async () => {
-  const [html, app] = await Promise.all([readFile(htmlPath, "utf8"), readFile(appPath, "utf8")]);
+test("React-ingången är svensk, mobilanpassad och Vite-baserad", async () => {
+  const [html, main, app] = await Promise.all([
+    read("frontend/index.html"), read("frontend/src/main.tsx"), read("frontend/src/App.tsx"),
+  ]);
   assert.match(html, /<html lang="sv">/);
-  assert.match(html, /id="setup-form"/);
-  assert.match(html, /id="register-form"/);
-  assert.match(html, /id="dashboard-view"/);
-  assert.match(html, /id="invite-dialog"/);
-  assert.match(html, /id="admin-view"/);
-  assert.match(html, /id="statistics-view"/);
-  assert.match(html, /id="statistics-trend"/);
-  assert.match(html, /id="statistics-categories"/);
-  assert.match(html, /id="statistics-merchants"/);
-  assert.match(html, /id="statistics-payers"/);
-  assert.match(html, /id="quick-tab-view"/);
-  assert.match(html, /id="quick-tab-dialog"/);
-  assert.match(html, /id="quick-guest-form"/);
-  assert.match(html, /id="quick-guest-form"[\s\S]*name="name"[\s\S]*name="swishPhone"/);
-  assert.match(html, /id="quick-tab-receipt-input"/);
-  assert.match(html, /id="quick-tab-receipt-input"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
-  assert.match(html, /id="expense-receipt-input"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
-  assert.match(html, /id="quick-tab-camera-input"[^>]*capture="environment"/);
-  assert.match(html, /id="expense-camera-input"[^>]*capture="environment"/);
-  assert.match(html, /id="quick-tab-items"/);
-  assert.match(html, /id="quick-tab-person-totals"/);
-  assert.match(html, /id="quick-tab-invite-qr"/);
-  assert.match(html, /id="quick-tab-pay-button"/);
-  assert.match(html, /id="dashboard-friends"/);
-  assert.match(html, /id="expense-dialog-title"/);
-  assert.match(html, /id="expense-submit-label"/);
-  assert.match(html, /class="app-version auth-version"/);
-  assert.match(html, /class="app-version sidebar-version"/);
-  assert.match(html, /id="delete-trip-button"/);
-  assert.match(html, /id="active-trips-card"/);
-  assert.match(html, /id="dashboard-trips-panel"/);
-  assert.match(html, /id="category-dialog"/);
-  assert.match(html, /id="receipt-file-input"/);
-  assert.match(html, /id="expense-receipt-input"/);
-  assert.match(html, /id="expense-receipt-status"/);
-  assert.match(html, /id="friend-invite-dialog"/);
-  assert.match(html, /id="invite-qr"/);
-  assert.match(html, /id="friend-invite-qr"/);
-  assert.match(app, /data-add-receipt/);
-  assert.match(app, /data-delete-receipt/);
-  assert.match(app, /navigator\.clipboard/);
-  assert.match(app, /document\.execCommand\("copy"\)/);
-  assert.match(app, /new EventSource/);
-  assert.match(app, /data-quick-quantity/);
-  assert.match(app, /swish:\/\/payment/);
-  assert.doesNotMatch(html, /name="expenseDate"[^>]*required/);
-  assert.equal(
-    [...html.matchAll(/name="splitMode"/g)].length,
-    4,
-    "utgiftsdialogen ska ha exakt fyra delningssätt",
-  );
+  assert.match(html, /name="viewport" content="width=device-width, initial-scale=1.0"/);
+  assert.match(html, /id="root"/);
+  assert.match(html, /src="\/src\/main\.tsx"/);
+  assert.match(main, /createRoot/);
+  assert.match(app, /DashboardPage/);
+  assert.match(app, /TripPage/);
+  assert.match(app, /QuickTabPage/);
+  assert.match(app, /StatisticsPage/);
+  assert.match(app, /AdminPage/);
+});
 
-  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
-  assert.equal(new Set(ids).size, ids.length, "HTML innehåller dubbla id-attribut");
-  const referencedIds = new Set([...app.matchAll(/\$\("#([A-Za-z0-9_-]+)"/g)].map((match) => match[1]));
-  const missing = [...referencedIds].filter((id) => !ids.includes(id));
-  assert.deepEqual(missing, []);
+test("alla bevarade arbetsflöden har React-komponenter och centrala API-anrop", async () => {
+  const [auth, dashboard, trip, tripDialogs, expense, quick, quickDialog, statistics, admin, client] = await Promise.all([
+    read("frontend/src/features/auth/AuthScreen.tsx"),
+    read("frontend/src/features/dashboard/DashboardPage.tsx"),
+    read("frontend/src/features/trips/TripPage.tsx"),
+    read("frontend/src/features/trips/TripDialogs.tsx"),
+    read("frontend/src/features/trips/ExpenseDialog.tsx"),
+    read("frontend/src/features/quick-tabs/QuickTabPage.tsx"),
+    read("frontend/src/features/quick-tabs/QuickTabDialog.tsx"),
+    read("frontend/src/features/statistics/StatisticsPage.tsx"),
+    read("frontend/src/features/admin/AdminPage.tsx"),
+    read("frontend/src/api/client.ts"),
+  ]);
+  assert.match(auth, /quick-guest/);
+  assert.match(dashboard, /Vänner/);
+  assert.match(trip, /Arkivera/);
+  assert.match(trip, /data|Kvitto|receipt/);
+  assert.match(tripDialogs, /users\/search/);
+  assert.match(tripDialogs, /Hantera kategorier/);
+  assert.match(expense, /receipts\/analyze/);
+  assert.match(expense, /\["equal", "percentage", "exact", "shares"\]/);
+  assert.match(quick, /new EventSource/);
+  assert.match(quick, /swishPaymentUrl/);
+  assert.match(quickDialog, /quick-tabs\/analyze/);
+  assert.match(statistics, /Månadsutveckling/);
+  assert.match(admin, /admin.user|onUserUpdate/);
+  assert.match(client, /credentials: "same-origin"/);
+});
+
+test("produktionsbygget innehåller hashad JavaScript och ingen vanilla-appreferens", async () => {
+  const html = await read("frontend/dist/index.html");
+  assert.match(html, /assets\/index-[A-Za-z0-9_-]+\.js/);
+  assert.doesNotMatch(html, /app\.js/);
 });
