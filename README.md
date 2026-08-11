@@ -20,6 +20,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Mobilanpassade formulärfält som inte automatiskt zoomar in på iPhone
 - Egen statistikvy för kategorier, restauranger/platser, betalare och månadsutveckling
 - Fristående Snabbnota: skanna kvittorader, dela en säker länk och låt alla bocka av mat och dryck i realtid
+- Snabbnotans mängder ligger kvar på samma rad, så varje deltagare kan välja exempelvis 0–6 öl och sedan öppna en förifylld Swish-betalning till skaparen
 - PostgreSQL-healthcheck och dagliga komprimerade `pg_dump`-backuper
 
 ## Installation på Unraid
@@ -64,7 +65,7 @@ Appen visar ett enkelt releasenummer, exempelvis `Version 1.1`. Funktionsrelease
 
 ## Snabbnota
 
-Snabbnota är separat från resor och passar en restaurangnota där alla vill välja exakt vad de åt eller drack. Skaparen fotograferar kvittot, granskar de OCR-avlästa raderna och delar en tidsbegränsad länk eller QR-kod. Inloggade deltagare markerar sina egna rader och ser varandras markeringar via en realtidsanslutning till samma server. Om flera delar en rad fördelas den deterministiskt på heltalsöre. Skaparen kan avsluta och återöppna notan; data och kvittobild ligger i PostgreSQL och följer med i ordinarie backup.
+Snabbnota är separat från resor och passar en restaurangnota där alla vill välja exakt vad de åt eller drack. Skaparen fotograferar kvittot, granskar de OCR-avlästa raderna och delar en tidsbegränsad länk eller QR-kod. Inloggade deltagare väljer sitt antal på varje rad och ser varandras val via en realtidsanslutning till samma server. En rad med sex öl ligger alltså kvar som en rad där gruppen tillsammans kan välja högst sex. Belopp och eventuella restören fördelas deterministiskt. Skaparen kan avsluta och återöppna notan; data och kvittobild ligger i PostgreSQL och följer med i ordinarie backup.
 
 OCR kan misstolka en kvittorad. Skaparen måste därför alltid kontrollera namn, antal, radsummor och totalsumma innan snabbnotan skapas. Skillnaden mellan kvittots total och de avlästa raderna visas tydligt som ej fördelad.
 
@@ -98,7 +99,7 @@ Kontrollera sedan tabeller, antal resor/utgifter och saldon innan en produktions
 
 ## Swish
 
-Nuvarande funktion öppnar Swish app-to-app och räknar aldrig en öppnad länk som betalningsbevis. Användaren registrerar betalningen manuellt efteråt. Detta är inte Swish Commerce API; framtida certifikat och nycklar ska endast ligga på servern och bara använda dokumenterad Swish-funktionalitet.
+Nuvarande funktion öppnar Swish app-to-app och räknar aldrig en öppnad länk som betalningsbevis. Resebetalningar registreras manuellt efteråt; snabbnotans knapp förifyller bara deltagarens aktuella belopp till skaparen. Detta är inte Swish Commerce API; framtida certifikat och nycklar ska endast ligga på servern och bara använda dokumenterad Swish-funktionalitet.
 
 ## Inbjudningar och QR-koder
 

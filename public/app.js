@@ -240,23 +240,35 @@ function showDashboard(updateHash = true) {
 function renderQuickTab() {
   const tab = state.quickTab;
   if (!tab) return;
-  const claimedItems = tab.items.filter((item) => item.claims.length).length;
+  const claimedQuantity = Number(tab.claimedQuantity || 0);
+  const totalQuantity = Number(tab.totalQuantity || tab.items.length);
   $("#quick-tab-name").textContent = tab.name;
   $("#quick-tab-meta").textContent = `${tab.merchant || "Ingen plats angiven"} · ${formatDate(tab.receiptDate, "Inget datum")}`;
   $("#quick-tab-total").textContent = formatMoney(tab.totalCents);
   $("#quick-tab-claimed").textContent = formatMoney(tab.claimedCents);
   $("#quick-tab-unclaimed").textContent = formatMoney(tab.unclaimedCents);
-  $("#quick-tab-claimed-caption").textContent = `${claimedItems} av ${tab.items.length} poster har valts`;
+  $("#quick-tab-claimed-caption").textContent = `${claimedQuantity} av ${totalQuantity} produkter har valts`;
   $("#quick-tab-member-count").textContent = `${tab.members.length} ${tab.members.length === 1 ? "person deltar" : "personer deltar"}`;
   $("#quick-tab-live").textContent = tab.closedAt ? "Avslutad" : "Live";
   $("#quick-tab-close-button").classList.toggle("hidden", tab.role !== "owner");
   $("#quick-tab-close-button").textContent = tab.closedAt ? "Öppna igen" : "Avsluta";
   $("#quick-tab-invite-button").classList.toggle("hidden", tab.role !== "owner" || Boolean(tab.closedAt));
   $("#quick-tab-receipt-link").classList.toggle("hidden", !tab.hasReceipt);
+  const owner = tab.members.find((member) => member.role === "owner");
+  const mineTotal = tab.personTotals.find((personTotal) => personTotal.viewerKey === tab.currentViewerKey);
+  const payButton = $("#quick-tab-pay-button");
+  const canPay = tab.role !== "owner" && Number(mineTotal?.amountCents || 0) > 0;
+  payButton.classList.toggle("hidden", !canPay);
+  payButton.textContent = owner?.swishPhone ? `Betala ${formatMoney(mineTotal?.amountCents || 0)} med Swish` : `Kopiera betalningsinfo · ${formatMoney(mineTotal?.amountCents || 0)}`;
   $("#quick-tab-items").innerHTML = tab.items.length ? tab.items.map((item) => {
-    const mine = item.claims.some((claim) => claim.viewerKey === tab.currentViewerKey);
-    const claimants = item.claims.length ? item.claims.map((claim) => `<span>${escapeHtml(claim.name)}</span>`).join("") : `<small>Ingen har valt ännu</small>`;
-    return `<label class="claim-row ${mine ? "mine" : ""} ${tab.closedAt ? "closed" : ""}"><input type="checkbox" data-quick-claim="${item.id}" ${mine ? "checked" : ""} ${tab.closedAt ? "disabled" : ""} /><span class="claim-check">✓</span><span class="claim-copy"><strong>${escapeHtml(item.name)}</strong><span class="claimants">${claimants}</span></span><b>${formatMoney(item.amountCents)}</b></label>`;
+    const mine = item.claims.find((claim) => claim.viewerKey === tab.currentViewerKey);
+    const claimedByOthers = item.claims.filter((claim) => claim.viewerKey !== tab.currentViewerKey).reduce((sum, claim) => sum + Number(claim.quantity), 0);
+    const maximum = Math.max(0, Number(item.quantity) - claimedByOthers);
+    const selected = Number(mine?.quantity || 0);
+    const options = Array.from({ length: maximum + 1 }, (_, quantity) => `<option value="${quantity}" ${quantity === selected ? "selected" : ""}>${quantity} st</option>`).join("");
+    const claimants = item.claims.length ? item.claims.map((claim) => `<span>${escapeHtml(claim.name)} · ${claim.quantity} st</span>`).join("") : `<small>Ingen har valt ännu</small>`;
+    const unitSummary = Number(item.quantity) > 1 ? `${item.quantity} st × ${formatMoney(item.unitAmountCents)}` : "1 st";
+    return `<article class="claim-row ${selected ? "mine" : ""} ${tab.closedAt ? "closed" : ""}"><select class="claim-quantity" data-quick-quantity="${item.id}" aria-label="Välj antal" ${tab.closedAt ? "disabled" : ""}>${options}</select><span class="claim-copy"><strong>${escapeHtml(item.name)}</strong><small class="claim-unit-summary">${unitSummary}</small><span class="claimants">${claimants}</span></span><b>${formatMoney(item.amountCents)}</b></article>`;
   }).join("") : emptyState("Inga kvittorader", "Skaparen behöver lägga till minst en rad.");
   $("#quick-tab-person-totals").innerHTML = tab.personTotals.map((personTotal, index) => `<article class="quick-person-row">${avatar(personTotal, index)}<span><strong>${escapeHtml(personTotal.name)}</strong><small>${personTotal.viewerKey === tab.currentViewerKey ? "Du" : "Deltagare"}${personTotal.swishPhone ? ` · ${escapeHtml(personTotal.swishPhone)}` : ""}</small></span><b>${formatMoney(personTotal.amountCents)}</b></article>`).join("");
 }
@@ -799,13 +811,13 @@ async function analyzeQuickTabReceipt(event) {
 [$("#quick-tab-camera-input"), $("#quick-tab-receipt-input")].forEach((input) => input.addEventListener("change", analyzeQuickTabReceipt));
 
 document.addEventListener("change", async (event) => {
-  const claim = event.target.closest?.("[data-quick-claim]");
+  const claim = event.target.closest?.("[data-quick-quantity]");
   if (!claim || !state.quickTab) return;
   claim.disabled = true;
   try {
-    const payload = await api(`/api/quick-tabs/${state.quickTab.id}/claims`, { method: "POST", body: JSON.stringify({ itemId: Number(claim.dataset.quickClaim), claimed: claim.checked }) });
+    const payload = await api(`/api/quick-tabs/${state.quickTab.id}/claims`, { method: "POST", body: JSON.stringify({ itemId: Number(claim.dataset.quickQuantity), quantity: Number(claim.value) }) });
     state.quickTab = payload.quickTab; renderQuickTab();
-  } catch (error) { claim.checked = !claim.checked; toast(error.message); }
+  } catch (error) { await refreshQuickTab().catch(() => {}); toast(error.message); }
 });
 
 function showQuickTabInvitation(invitation) {
@@ -820,6 +832,18 @@ $("#quick-tab-invite-button").addEventListener("click", async () => {
 });
 $("#copy-quick-tab-invite").addEventListener("click", async () => { try { await copyText(new URL($("#quick-tab-invite-link").value, location.origin).href); toast("Inbjudningslänken kopierades"); } catch (error) { toast(error.message); } });
 $("#quick-tab-receipt-link").addEventListener("click", () => { if (state.quickTab) window.open(`/api/quick-tabs/${state.quickTab.id}/receipt`, "_blank", "noopener"); });
+$("#quick-tab-pay-button").addEventListener("click", async () => {
+  const tab = state.quickTab; if (!tab) return;
+  const owner = tab.members.find((member) => member.role === "owner");
+  const mine = tab.personTotals.find((personTotal) => personTotal.viewerKey === tab.currentViewerKey);
+  const amountCents = Number(mine?.amountCents || 0); if (!owner || amountCents <= 0) return;
+  const details = `${mine.name} betalar ${owner.name} ${formatMoney(amountCents)} — ${tab.name}`;
+  const phone = owner.swishPhone?.replace(/\D/g, "") || "";
+  if (!phone) { await copyText(details); toast("Betalningsinformationen kopierades"); return; }
+  const data = { version: 1, payee: { value: phone, editable: false }, amount: { value: amountCents / 100, editable: false }, message: { value: tab.name.slice(0, 50), editable: true } };
+  location.href = `swish://payment?data=${encodeURIComponent(JSON.stringify(data))}`;
+  setTimeout(() => copyText(details).catch(() => {}), 700);
+});
 $("#quick-tab-close-button").addEventListener("click", async () => {
   if (!state.quickTab) return;
   const closing = !state.quickTab.closedAt;

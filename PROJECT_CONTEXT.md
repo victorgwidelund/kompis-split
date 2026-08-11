@@ -1,8 +1,8 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-11  
-Appversion: 1.5.0
-Databasschema: migration 5
+Appversion: 1.6.0
+Databasschema: migration 6
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
 
@@ -67,13 +67,14 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 
 ## Databasmigreringar
 
-Aktuell högsta version är 5:
+Aktuell högsta version är 6:
 
 1. Grundschema för användare, resor, utgifter, betalningar, åtkomst och audit-logg.
 2. Global adminroll, möjlighet att inaktivera konton och frivilligt utgiftsdatum.
 3. Resepapperskorg, kategorier, kvittofiler och väninbjudningar.
 4. Fristående snabbnota med kvittorader, inbjudningar och registrerade deltagare.
 5. Kontolösa snabbnotegäster och claims som kan tillhöra antingen användare eller gäster.
+6. Antal per snabbnoterad och per deltagares val, utan att samma produkt behöver delas upp i flera rader.
 
 Nya schemaändringar ska få nästa migrationsnummer. Ändra inte en redan distribuerad migration och gör inga destruktiva volymoperationer.
 
@@ -87,6 +88,7 @@ Nya schemaändringar ska få nästa migrationsnummer. Ändra inte en redan distr
 - Vän-, rese- och snabbnoteinbjudningar med länk och QR-kod.
 - Svensk OCR för belopp, datum, handlare och kvittorader.
 - Snabbnota med registrerade användare eller kontolösa gäster, individuella claims och realtidsuppdatering.
+- Snabbnoter behåller produktmängder på en gemensam rad, låter varje deltagare välja antal och erbjuder förifylld Swish-betalning till skaparen.
 - Synligt förenklat versionsnummer från `package.json`/`APP_VERSION`.
 
 ## Test- och releaseflöde
@@ -103,6 +105,8 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.6.0 lägger till antalval på snabbnoter, deterministisk öresfördelning per vald mängd och en Swish-knapp till snabbnotans skapare. Befintliga rader migreras säkert som antal 1.
+- Compose använder `runtime: nvidia` för kompatibilitet med Unraid Compose Manager i stället för det nyare `gpus`-fältet.
 - Version 1.5.0 lägger till helt lokal GLM-OCR via Ollama, adaptiv flerpass-OCR, bildnormalisering och bättre hantering av radbrytningar och teckenfel i belopp.
 - Kamera och bildbibliotek har separata knappar så att användaren alltid kan välja en befintlig bild om Chrome-kameran inte fungerar på enheten.
 - Ollama körs endast på det interna Compose-nätverket med den kvantiserade `glm-ocr:q8_0` för GTX 1080 Ti; appen faller automatiskt tillbaka till Tesseract om modellen inte är tillgänglig.

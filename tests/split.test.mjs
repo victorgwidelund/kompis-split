@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { allocateByWeights, calculateShares, simplifyDebts } from "../dist/split.js";
+import { allocateByWeights, allocateItemQuantities, calculateShares, simplifyDebts } from "../dist/split.js";
 
 test("equal splits preserve every öre", () => {
   assert.deepEqual(allocateByWeights(10000, [1, 1, 1]), [3334, 3333, 3333]);
@@ -15,6 +15,25 @@ test("weighted allocations always conserve the original amount", () => {
       assert.ok(shares.every((amount) => amount >= 0));
     }
   }
+});
+
+test("quick-tab quantities conserve öre and use stable viewer keys", () => {
+  assert.deepEqual(allocateItemQuantities(10001, 2, [
+    { key: "u:2", quantity: 1 }, { key: "u:1", quantity: 1 },
+  ]), {
+    claimedQuantity: 2,
+    claimedCents: 10001,
+    shares: [
+      { key: "u:1", quantity: 1, amountCents: 5001 },
+      { key: "u:2", quantity: 1, amountCents: 5000 },
+    ],
+  });
+  assert.deepEqual(allocateItemQuantities(10001, 3, [{ key: "g:4", quantity: 1 }]), {
+    claimedQuantity: 1,
+    claimedCents: 3334,
+    shares: [{ key: "g:4", quantity: 1, amountCents: 3334 }],
+  });
+  assert.throws(() => allocateItemQuantities(54000, 6, [{ key: "u:1", quantity: 7 }]), /invalid/);
 });
 
 test("equal balances use stable participant IDs", () => {
