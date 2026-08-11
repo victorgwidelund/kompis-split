@@ -72,6 +72,12 @@ Snabbnota är separat från resor och passar en restaurangnota där alla vill v�
 
 OCR kan misstolka en kvittorad. Skaparen måste därför alltid kontrollera namn, antal, radsummor och totalsumma innan snabbnotan skapas. Skillnaden mellan kvittots total och de avlästa raderna visas tydligt som ej fördelad.
 
+Varje analys visar om lokal AI faktiskt användes eller om Ollama exempelvis tog timeout, saknade modellen eller inte kunde nås. Motsvarande säkra diagnostik skrivs till containerloggen utan kvittobild, OCR-text, namn eller andra personuppgifter. Visa den med:
+
+```sh
+docker compose logs --tail=200 kompis-split ollama ollama-model
+```
+
 ## Reverse proxy och HTTPS
 
 Exponera inte port 8787 direkt mot internet. Använd VPN eller en HTTPS-reverse-proxy. Bakom en betrodd proxy:

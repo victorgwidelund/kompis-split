@@ -789,6 +789,20 @@ $("#quick-add-item").addEventListener("click", () => { $("#quick-item-editor").i
 $("#quick-item-editor").addEventListener("input", updateQuickItemSummary);
 $("#quick-tab-form").elements.total.addEventListener("input", updateQuickItemSummary);
 
+function receiptAiStatus(ai) {
+  if (!ai) return "";
+  const seconds = Number.isFinite(ai.durationMs) ? ` (${Math.max(0.1, ai.durationMs / 1000).toFixed(1)} s)` : "";
+  if (ai.status === "ok") return ` AI användes${seconds}${ai.retried ? " och gjorde en extra kontroll" : ""}.`;
+  if (ai.status === "unstructured") return ` AI svarade${seconds}, men svaret behövde reservtolkas.`;
+  if (ai.status === "cancelled_local_complete") return ` Snabb OCR summerade exakt${seconds}, så AI-körningen avbröts.`;
+  if (ai.status === "timeout") return ` AI nådde tidsgränsen${seconds}; reserv-OCR användes.`;
+  if (ai.status === "http_404") return " AI-modellen hittades inte i Ollama; reserv-OCR användes.";
+  if (ai.status === "http_503") return " AI-kön var full; reserv-OCR användes.";
+  if (ai.status === "disabled") return " AI är inte konfigurerad; reserv-OCR användes.";
+  if (ai.status === "connection_error") return ` Appen fick ingen kontakt med Ollama${seconds}; reserv-OCR användes.`;
+  return ` AI kunde inte användas (${ai.status}${seconds}); reserv-OCR användes.`;
+}
+
 async function analyzeQuickTabReceipt(event) {
   const file = event.currentTarget.files?.[0]; if (!file) return;
   const status = $("#quick-tab-receipt-status");
@@ -804,7 +818,7 @@ async function analyzeQuickTabReceipt(event) {
     const engine = payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR";
     status.className = `receipt-status ${payload.needsReview ? "warning" : "success"}`;
     status.textContent = suggestion.items?.length
-      ? `${suggestion.items.length} kvittorader hittades med ${engine}.${payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}`
+      ? `${suggestion.items.length} kvittorader hittades med ${engine}.${receiptAiStatus(payload.ai)}${payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}`
       : "Inga säkra rader hittades. Lägg till rätterna manuellt.";
   } catch (error) { status.className = "receipt-status warning"; status.textContent = `${error.message} Du kan fortfarande fylla i raderna manuellt.`; }
 }
@@ -879,7 +893,7 @@ async function analyzeExpenseReceipt(event) {
     const found = [suggestion.title, suggestion.amount, suggestion.expenseDate].filter(Boolean).length;
     status.className = `receipt-status ${found ? "success" : "warning"}`;
     const engine = payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR";
-    status.textContent = found ? `Förslag ifyllda med ${engine} (${payload.confidence || 0}% läskvalitet).${payload.needsReview ? " Tolkningarna skiljer sig, så kontrollera extra noga." : " Kontrollera namn, belopp och datum innan du sparar."}` : "Kvittot bifogas, men texten kunde inte läsas tydligt. Fyll i uppgifterna manuellt.";
+    status.textContent = found ? `Förslag ifyllda med ${engine} (${payload.confidence || 0}% läskvalitet).${receiptAiStatus(payload.ai)}${payload.needsReview ? " Tolkningarna skiljer sig, så kontrollera extra noga." : " Kontrollera namn, belopp och datum innan du sparar."}` : "Kvittot bifogas, men texten kunde inte läsas tydligt. Fyll i uppgifterna manuellt.";
   } catch (error) {
     if (pendingExpenseReceipt !== file) return;
     status.className = "receipt-status warning";
