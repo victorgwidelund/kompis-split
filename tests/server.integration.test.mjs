@@ -61,6 +61,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const initial = await request("/api/session");
     assert.equal(initial.payload.needsSetup, true);
     assert.equal(initial.payload.version, "1.1");
+    assert.match(initial.response.headers.get("permissions-policy"), /camera=\(self\)/);
 
     const indexResponse = await fetch(`${baseUrl}/`);
     const indexHtml = await indexResponse.text();
