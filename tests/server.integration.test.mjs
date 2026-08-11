@@ -62,6 +62,15 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(initial.payload.needsSetup, true);
     assert.equal(initial.payload.version, "1.1");
 
+    const indexResponse = await fetch(`${baseUrl}/`);
+    const indexHtml = await indexResponse.text();
+    assert.match(indexHtml, /href="\/styles\.css\?v=1\.1"/);
+    assert.match(indexHtml, /src="\/app\.js\?v=1\.1"/);
+    assert.equal(indexResponse.headers.get("cache-control"), "no-store");
+
+    const appResponse = await fetch(`${baseUrl}/app.js?v=1.1`);
+    assert.equal(appResponse.headers.get("cache-control"), "public, max-age=31536000, immutable");
+
     const rejectedOrigin = await request("/api/setup", { method: "POST", origin: "https://evil.example", body: {} });
     assert.equal(rejectedOrigin.response.status, 403);
 

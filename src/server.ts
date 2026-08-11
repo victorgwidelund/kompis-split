@@ -1149,12 +1149,20 @@ function serveStatic(response: ServerResponse, pathname: string) {
   let filePath = join(publicDirectory, safePath);
   try { if (!statSync(filePath).isFile()) filePath = join(publicDirectory, "index.html"); }
   catch { filePath = join(publicDirectory, "index.html"); }
+  const extension = extname(filePath);
+  const isHtml = extension === ".html";
+  const isVersionedAsset = [".css", ".js"].includes(extension);
+  const content = isHtml
+    ? readFileSync(filePath, "utf8")
+      .replace('href="/styles.css"', `href="/styles.css?v=${appVersion}"`)
+      .replace('src="/app.js"', `src="/app.js?v=${appVersion}"`)
+    : readFileSync(filePath);
   response.writeHead(200, {
     ...securityHeaders(),
-    "Content-Type": mimeTypes[extname(filePath)] || "application/octet-stream",
-    "Cache-Control": [".html", ".css", ".js"].includes(extname(filePath)) ? "no-cache" : "public, max-age=3600",
+    "Content-Type": mimeTypes[extension] || "application/octet-stream",
+    "Cache-Control": isHtml ? "no-store" : isVersionedAsset ? "public, max-age=31536000, immutable" : "public, max-age=3600",
   });
-  response.end(readFileSync(filePath));
+  response.end(content);
 }
 
 await db.prepare("DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP").run();
