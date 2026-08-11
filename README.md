@@ -31,7 +31,6 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    TRUST_PROXY=false
    SESSION_DAYS=30
    BACKUP_RETENTION_DAYS=14
-   KOMPIS_SPLIT_IMAGE=ghcr.io/victorgwidelund/kompis-split:sha-abcdef0
    ```
 
 3. Välj **Compose Up** och öppna `http://DIN-UNRAID-IP:8787`.
@@ -50,7 +49,7 @@ Den gamla demo- SQLite-filen under `/mnt/user/kompis_split/data/` används inte 
 
 En push till `main` kör TypeScript-kontroll, finansiella tester, API-test mot PostgreSQL och Compose-validering. Därefter byggs multi-arch-images i GHCR.
 
-Produktionsstacken kräver en uttrycklig `sha-<commit>`-tagg och använder inte `latest`. När workflowen är grön ändrar du `KOMPIS_SPLIT_IMAGE` till den nya taggen och väljer **Pull & Up**. Behåll föregående tagg för rollback av appen; databasvolymen påverkas inte av imagebytet.
+Produktionsstacken följer den publicerade `latest`-imagen. När workflowen är grön väljer du bara **Pull & Up** i Compose Manager; Compose-filen behöver inte redigeras. Varje publicering får även en oföränderlig `sha-<commit>`-tagg. Spara föregående fungerande tagg så att du vid behov kan använda den tillfälligt för rollback; databasvolymen påverkas inte av imagebytet.
 
 ## Reverse proxy och HTTPS
 
@@ -94,7 +93,6 @@ Nuvarande funktion öppnar Swish app-to-app och räknar aldrig en öppnad länk 
 | `TRUST_PROXY` | `false` | Ska bara vara `true` bakom betrodd proxy |
 | `SESSION_DAYS` | `30` | Sessionernas livslängd |
 | `BACKUP_RETENTION_DAYS` | `14` | Retention för dagliga dumpfiler |
-| `KOMPIS_SPLIT_IMAGE` | obligatorisk | Testad `sha-`-tagg från GHCR |
 
 ## Lokal utveckling
 
