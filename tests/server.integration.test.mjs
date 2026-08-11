@@ -33,6 +33,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       COOKIE_SECRET: "integration-cookie-secret-at-least-32-bytes",
       COOKIE_SECURE: "false",
       TRUST_PROXY: "false",
+      APP_VERSION: "sha-testversion123",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -59,6 +60,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
 
     const initial = await request("/api/session");
     assert.equal(initial.payload.needsSetup, true);
+    assert.equal(initial.payload.version, "sha-testversion123");
 
     const rejectedOrigin = await request("/api/setup", { method: "POST", origin: "https://evil.example", body: {} });
     assert.equal(rejectedOrigin.response.status, 403);

@@ -44,7 +44,6 @@ jobs:
           APP_PASSWORD: compose-validation-password
           COOKIE_SECRET: compose-validation-cookie-secret-32-bytes
           POSTGRES_PASSWORD: compose-validation-database-password
-          KOMPIS_SPLIT_IMAGE: ghcr.io/victorgwidelund/kompis-split:sha-validation
         run: docker compose config --quiet
 
   publish:
@@ -75,6 +74,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            APP_VERSION=sha-${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
