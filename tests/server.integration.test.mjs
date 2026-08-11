@@ -80,6 +80,8 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(setup.payload.user.isAdmin, true);
     const ownerCookie = cookieFrom(setup.response);
     assert.match(ownerCookie, /^kompis_session=/);
+    const ownerSession = await request("/api/session", { cookie: ownerCookie });
+    assert.equal(ownerSession.payload.authenticated, true, JSON.stringify(ownerSession.payload));
 
     const friendInvite = await request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} });
     assert.equal(friendInvite.response.status, 201, JSON.stringify(friendInvite.payload));

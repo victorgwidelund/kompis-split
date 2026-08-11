@@ -705,7 +705,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const body = await readJson(request);
     if (!appPassword || !safeEqualStrings(body.setupPassword || "", appPassword)) return json(response, 401, { error: "Fel installationslösenord" });
     const record = await passwordRecord(body.password);
-    return db.transaction(async () => {
+    const setupResult = await db.transaction(async () => {
       await db.exec("SELECT pg_advisory_xact_lock(837451903)");
       if (Number((await db.prepare("SELECT COUNT(*) count FROM users").get<any>())?.count) !== 0) throw new HttpError(409, "Appen är redan konfigurerad");
       const result = await db.prepare("INSERT INTO users (email, display_name, password_hash, password_salt, swish_phone, is_admin) VALUES (?, ?, ?, ?, ?, TRUE) RETURNING id")
@@ -719,8 +719,9 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       }
       await audit(userId, null, "account.bootstrap", "user", userId);
       const createdUser = await db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
-      return json(response, 201, { user: publicUser(createdUser) }, { "Set-Cookie": sessionCookie(await createSession(userId)) });
+      return { createdUser, sessionToken: await createSession(userId) };
     });
+    return json(response, 201, { user: publicUser(setupResult.createdUser) }, { "Set-Cookie": sessionCookie(setupResult.sessionToken) });
   }
   if (request.method === "POST" && url.pathname === "/api/register") {
     const body = await readJson(request);
