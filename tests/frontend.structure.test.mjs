@@ -19,6 +19,8 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /class="app-version auth-version"/);
   assert.match(html, /class="app-version sidebar-version"/);
   assert.match(html, /id="delete-trip-button"/);
+  assert.match(html, /id="active-trips-card"/);
+  assert.match(html, /id="dashboard-trips-panel"/);
   assert.doesNotMatch(html, /name="expenseDate"[^>]*required/);
 
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);

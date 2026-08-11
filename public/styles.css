@@ -94,6 +94,7 @@ h2 { margin-bottom: 4px; font-size: 25px; }
 .summary-grid { display: grid; grid-template-columns: 1fr 1fr .78fr; gap: 15px; }
 .hero-stat, .member-stat { min-height: 184px; padding: 24px; border-radius: 21px; }
 .hero-stat { position: relative; overflow: hidden; }.hero-stat::after { position: absolute; right: -45px; bottom: -80px; width: 180px; height: 180px; border: 28px solid rgba(255,255,255,.14); border-radius: 50%; content: ""; }
+.stat-link { width: 100%; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease; }.stat-link:hover { transform: translateY(-2px); box-shadow: var(--shadow); }.stat-link:focus-visible { outline: 3px solid rgba(66,84,215,.35); outline-offset: 3px; }.panel:focus { outline: none; }.panel-highlight { animation: panel-highlight 1s ease; }@keyframes panel-highlight { 0%, 100% { box-shadow: 0 12px 35px rgba(60,50,38,.035); } 35% { box-shadow: 0 0 0 4px rgba(255,109,77,.24), 0 18px 45px rgba(60,50,38,.09); } }
 .hero-stat.coral { background: var(--coral); }.hero-stat.cobalt { background: var(--cobalt); color: white; }
 .hero-stat p { margin: 20px 0 3px; font-weight: 600; opacity: .8; }.hero-stat strong { display: block; font: 800 clamp(30px, 4vw, 43px) "Manrope"; letter-spacing: -.05em; }.hero-stat small { opacity: .7; }
 .stat-icon { float: right; display: grid; width: 36px; height: 36px; place-items: center; border-radius: 50%; background: rgba(255,255,255,.22); font-size: 20px; }

@@ -81,12 +81,12 @@
         <section id="dashboard-view" class="home-dashboard">
           <header class="dashboard-heading"><div><p class="eyebrow">Din överblick</p><h1 id="dashboard-greeting">Hej!</h1><p>Alla resor, utgifter och saldon på ett ställe.</p></div><button id="dashboard-new-trip" class="button primary">＋ Ny resa</button></header>
           <div class="summary-grid home-stats">
-            <article class="hero-stat coral"><span class="stat-icon">✦</span><p>Aktiva resor</p><strong id="active-trip-total">0</strong><small>pågående och kommande</small></article>
+            <button id="active-trips-card" class="hero-stat coral stat-link" type="button" aria-controls="dashboard-trips-panel"><span class="stat-icon">✦</span><p>Aktiva resor</p><strong id="active-trip-total">0</strong><small>Visa pågående och kommande →</small></button>
             <article class="hero-stat cobalt"><span class="stat-icon">↗</span><p>Ditt nettosaldo</p><strong id="dashboard-balance">0 kr</strong><small id="dashboard-balance-caption">Du ligger jämnt</small></article>
             <article class="member-stat"><p>Totalt registrerat</p><strong id="dashboard-spent">0 kr</strong><small>i aktiva resor</small></article>
           </div>
           <div class="dashboard-grid home-grid">
-            <section class="panel"><div class="panel-title"><div><p class="eyebrow">På gång</p><h2>Dina resor</h2></div></div><div id="dashboard-trips" class="trip-card-grid"></div></section>
+            <section id="dashboard-trips-panel" class="panel" tabindex="-1"><div class="panel-title"><div><p class="eyebrow">På gång</p><h2>Dina resor</h2></div></div><div id="dashboard-trips" class="trip-card-grid"></div></section>
             <section class="panel"><div class="panel-title"><div><p class="eyebrow">Senaste</p><h2>Utgifter</h2></div></div><div id="dashboard-expenses" class="expense-list"></div></section>
           </div>
           <section class="panel friends-panel"><div class="panel-title"><div><p class="eyebrow">Ditt gäng</p><h2>Vänner</h2></div></div><div id="dashboard-friends" class="friends-grid"></div></section>

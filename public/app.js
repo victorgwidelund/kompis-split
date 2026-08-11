@@ -489,6 +489,13 @@ document.addEventListener("click", async (event) => {
 [$("#admin-button"), $("#mobile-admin-button")].forEach((button) => button.addEventListener("click", () => showAdmin().catch((error) => toast(error.message))));
 $("#admin-back-button").addEventListener("click", () => showDashboard());
 $("#admin-refresh-button").addEventListener("click", () => showAdmin().catch((error) => toast(error.message)));
+$("#active-trips-card").addEventListener("click", () => {
+  const panel = $("#dashboard-trips-panel");
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  panel.focus({ preventScroll: true });
+  panel.classList.remove("panel-highlight");
+  requestAnimationFrame(() => panel.classList.add("panel-highlight"));
+});
 [$("#new-trip-button"), $("#mobile-new-trip"), $("#dashboard-new-trip")].forEach((button) => button.addEventListener("click", () => { $("#trip-form").reset(); openDialog("trip-dialog"); }));
 [$("#add-person-button"), $("#summary-add-person"), $("#people-add-button")].forEach((button) => button.addEventListener("click", openPersonDialog));
 [$("#add-expense-button"), $("#expenses-add-button")].forEach((button) => button.addEventListener("click", () => openExpenseDialog()));
