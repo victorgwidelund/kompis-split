@@ -65,6 +65,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
 
     const setup = await request("/api/setup", { method: "POST", body: { setupPassword: "bootstrap-secret-123", name: "Victor", email: "victor@example.test", password: "my-secure-password", swishPhone: "0701234567" } });
     assert.equal(setup.response.status, 201, JSON.stringify(setup.payload));
+    assert.equal(setup.payload.user.isAdmin, true);
     const ownerCookie = cookieFrom(setup.response);
     assert.match(ownerCookie, /^kompis_session=/);
 
@@ -84,6 +85,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
 
     const memberDashboard = await request("/api/dashboard", { cookie: memberCookie });
     assert.equal(memberDashboard.payload.trips.length, 1);
+    assert.equal(memberDashboard.payload.contacts[0].email, "victor@example.test");
+    const forbiddenAdmin = await request("/api/admin", { cookie: memberCookie });
+    assert.equal(forbiddenAdmin.response.status, 403);
     const contacts = await request("/api/contacts", { cookie: memberCookie });
     assert.equal(contacts.payload.contacts[0].email, "victor@example.test");
     const search = await request("/api/users/search?q=Vic", { cookie: memberCookie });
@@ -99,10 +103,11 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const expense = await request(`/api/trips/${tripId}/expenses`, {
       method: "POST",
       cookie: ownerCookie,
-      body: { title: "Middag", amount: "100.01", payerId: ownerParticipant.id, expenseDate: "2026-12-10", category: "food", splitMode: "equal", entries: [{ participantId: ownerParticipant.id, value: 1 }, { participantId: memberParticipant.id, value: 1 }] },
+      body: { title: "Middag", amount: "100.01", payerId: ownerParticipant.id, category: "food", splitMode: "equal", entries: [{ participantId: ownerParticipant.id, value: 1 }, { participantId: memberParticipant.id, value: 1 }] },
     });
     assert.equal(expense.response.status, 201, JSON.stringify(expense.payload));
     assert.equal(expense.payload.trip.totalCents, 10001);
+    assert.equal(expense.payload.trip.expenses[0].expenseDate, null);
     assert.deepEqual(expense.payload.trip.expenses[0].shares.map((share) => share.amountCents), [5001, 5000]);
 
     const memberCannotVoid = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, { method: "DELETE", cookie: memberCookie, body: {} });
@@ -119,6 +124,28 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(blockedWrite.response.status, 409);
     const restored = await request(`/api/trips/${tripId}/archive`, { method: "POST", cookie: ownerCookie, body: { archived: false } });
     assert.equal(restored.payload.trip.archivedAt, null);
+
+    const privateTrip = await request("/api/trips", { method: "POST", cookie: memberCookie, body: { name: "Annas plan" } });
+    assert.equal(privateTrip.response.status, 201, JSON.stringify(privateTrip.payload));
+    assert.equal(privateTrip.payload.trip.startDate, null);
+    const adminOverview = await request("/api/admin", { cookie: ownerCookie });
+    assert.equal(adminOverview.response.status, 200, JSON.stringify(adminOverview.payload));
+    assert.equal(adminOverview.payload.users.length, 2);
+    assert.equal(adminOverview.payload.trips.length, 2);
+    const adminCanOpenEveryTrip = await request(`/api/trips/${privateTrip.payload.trip.id}`, { cookie: ownerCookie });
+    assert.equal(adminCanOpenEveryTrip.response.status, 200);
+    assert.equal(adminCanOpenEveryTrip.payload.trip.role, "admin");
+
+    const memberId = registration.payload.user.id;
+    const promoted = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isAdmin: true } });
+    assert.equal(promoted.response.status, 200);
+    assert.equal(promoted.payload.user.isAdmin, true);
+    const demoted = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isAdmin: false } });
+    assert.equal(demoted.payload.user.isAdmin, false);
+    const disabled = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isDisabled: true } });
+    assert.equal(disabled.response.status, 200);
+    const disabledSession = await request("/api/dashboard", { cookie: memberCookie });
+    assert.equal(disabledSession.response.status, 401);
   } finally {
     const exited = new Promise((resolve) => child.once("exit", resolve));
     child.kill("SIGTERM");
@@ -130,7 +157,8 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   await verification.connect();
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag'")).rows[0].voided, true);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 1);
+  assert.equal((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag'")).rows[0].expense_date, null);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 2);
   await verification.end();
   await admin.query(`DROP DATABASE ${databaseName} WITH (FORCE)`);
   await admin.end();

@@ -12,6 +12,9 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /id="register-form"/);
   assert.match(html, /id="dashboard-view"/);
   assert.match(html, /id="invite-dialog"/);
+  assert.match(html, /id="admin-view"/);
+  assert.match(html, /id="dashboard-friends"/);
+  assert.doesNotMatch(html, /name="expenseDate"[^>]*required/);
 
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, "HTML innehåller dubbla id-attribut");

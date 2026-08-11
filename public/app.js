@@ -1,4 +1,4 @@
-const state = { user: null, dashboard: null, trips: [], trip: null, tab: "overview", inviteToken: "", invitation: null };
+const state = { user: null, dashboard: null, trips: [], trip: null, admin: null, tab: "overview", inviteToken: "", invitation: null };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const money = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 2 });
@@ -7,8 +7,8 @@ const colors = ["#c7e6d2", "#f6ca67", "#bfc6fb", "#ffc6b7", "#d5c2e8", "#b9dcdf"
 const categories = { food: "🍝", travel: "🚆", stay: "🏡", fun: "🎟️", other: "🧾" };
 
 function formatMoney(ore) { return money.format((Number(ore) || 0) / 100).replace("SEK", "kr"); }
-function formatDate(value) {
-  if (!value) return "Inga datum angivna";
+function formatDate(value, fallback = "Inga datum angivna") {
+  if (!value) return fallback;
   const date = String(value).includes("T") || String(value).includes(" ") ? new Date(String(value).replace(" ", "T") + (String(value).includes("Z") ? "" : "Z")) : new Date(`${value}T12:00:00`);
   return dateFormat.format(date);
 }
@@ -119,10 +119,12 @@ async function enterApp() {
   $("#app").classList.remove("hidden");
   $("#sidebar-user-name").textContent = state.user.name;
   $("#sidebar-user-email").textContent = state.user.email;
+  $$(".admin-nav").forEach((button) => button.classList.toggle("hidden", !state.user.isAdmin));
   $("#dashboard-greeting").textContent = `Hej, ${state.user.name.split(/\s+/)[0]}!`;
   await loadDashboard();
   const hashId = Number(location.hash.match(/^#trip-(\d+)$/)?.[1]);
   if (hashId && state.trips.some((trip) => trip.id === hashId)) await selectTrip(hashId);
+  else if (location.hash === "#admin" && state.user.isAdmin) await showAdmin();
   else showDashboard(false);
 }
 
@@ -164,7 +166,9 @@ function renderDashboard() {
   $("#dashboard-balance").classList.toggle("negative", net < 0);
   $("#dashboard-spent").textContent = formatMoney(spent);
   $("#dashboard-trips").innerHTML = active.length ? active.map((trip, index) => tripButton(trip, index)).join("") : emptyState("Dags för nästa resa?", "Skapa en resa och bjud in gänget med en länk.");
-  $("#dashboard-expenses").innerHTML = state.dashboard.recentExpenses.length ? state.dashboard.recentExpenses.map((expense) => `<button class="expense-row dashboard-expense" data-trip-id="${expense.tripId}"><span class="category-icon">${categories[expense.category] || categories.other}</span><span class="expense-main"><strong>${escapeHtml(expense.title)}</strong><small>${escapeHtml(expense.tripName)} · ${escapeHtml(expense.payerName)} · ${formatDate(expense.expenseDate)}</small></span><span class="expense-amount">${formatMoney(expense.amountCents)}</span></button>`).join("") : emptyState("Inga utgifter ännu", "De senaste utgifterna från dina aktiva resor visas här.");
+  $("#dashboard-expenses").innerHTML = state.dashboard.recentExpenses.length ? state.dashboard.recentExpenses.map((expense) => `<button class="expense-row dashboard-expense" data-trip-id="${expense.tripId}"><span class="category-icon">${categories[expense.category] || categories.other}</span><span class="expense-main"><strong>${escapeHtml(expense.title)}</strong><small>${escapeHtml(expense.tripName)} · ${escapeHtml(expense.payerName)} · ${formatDate(expense.expenseDate, "Inget datum")}</small></span><span class="expense-amount">${formatMoney(expense.amountCents)}</span></button>`).join("") : emptyState("Inga utgifter ännu", "De senaste utgifterna från dina aktiva resor visas här.");
+  const friends = state.dashboard.contacts || [];
+  $("#dashboard-friends").innerHTML = friends.length ? friends.map((friend, index) => `<article class="friend-card">${avatar(friend, index)}<span><strong>${escapeHtml(friend.name)}</strong><small>${escapeHtml(friend.email)}</small><small>${friend.swishPhone ? `Swish ${escapeHtml(friend.swishPhone)}` : "Inget Swish-nummer"}</small></span></article>`).join("") : emptyState("Inga sparade vänner ännu", "Vänner sparas automatiskt när ni delar en resa eller när du lägger till en registrerad användare.");
   $("#dashboard-archive-panel").classList.toggle("hidden", archived.length === 0);
   $("#dashboard-archive").innerHTML = archived.map((trip, index) => tripButton(trip, index)).join("");
 }
@@ -172,9 +176,54 @@ function renderDashboard() {
 function showDashboard(updateHash = true) {
   state.trip = null;
   $("#trip-view").classList.add("hidden");
+  $("#admin-view").classList.add("hidden");
   $("#dashboard-view").classList.remove("hidden");
   if (updateHash) history.replaceState(null, "", location.pathname);
   renderTripLists();
+}
+
+const activityLabels = {
+  "account.bootstrap": "Administratörskonto skapades",
+  "trip.created": "Resa skapades",
+  "trip.archived": "Resa arkiverades",
+  "trip.restored": "Resa återställdes",
+  "participant.added": "Person lades till",
+  "expense.created": "Utgift skapades",
+  "expense.voided": "Utgift togs bort från beräkningen",
+  "payment.created": "Betalning registrerades",
+  "payment.voided": "Betalning togs bort från beräkningen",
+  "invitation.created": "Inbjudan skapades",
+  "invitation.joined": "Inbjudan användes",
+  "admin.user.updated": "Användarkonto uppdaterades",
+};
+
+async function showAdmin() {
+  if (!state.user?.isAdmin) return toast("Du saknar administratörsbehörighet");
+  const payload = await api("/api/admin");
+  state.admin = payload;
+  state.trip = null;
+  $("#dashboard-view").classList.add("hidden");
+  $("#trip-view").classList.add("hidden");
+  $("#admin-view").classList.remove("hidden");
+  history.replaceState(null, "", `${location.pathname}#admin`);
+  renderAdmin();
+  renderTripLists();
+}
+
+function renderAdmin() {
+  const data = state.admin;
+  if (!data) return;
+  $("#admin-user-count").textContent = data.stats.userCount;
+  $("#admin-active-users").textContent = `${data.stats.activeUserCount} aktiva`;
+  $("#admin-trip-count").textContent = data.stats.tripCount;
+  $("#admin-active-trips").textContent = `${data.stats.activeTripCount} aktiva`;
+  $("#admin-total-spent").textContent = formatMoney(data.stats.totalCents);
+  $("#admin-users").innerHTML = data.users.length ? data.users.map((user, index) => {
+    const self = Number(user.id) === Number(state.user.id);
+    return `<article class="admin-row ${user.isDisabled ? "disabled-row" : ""}">${avatar(user, index)}<div class="admin-row-main"><strong>${escapeHtml(user.name)} ${user.isAdmin ? '<span class="role-badge">Admin</span>' : ""}</strong><small>${escapeHtml(user.email)} · ${user.tripCount} resor · konto ${formatDate(user.createdAt)}</small></div><div class="admin-actions"><button class="button ghost small-button" data-admin-toggle="${user.id}" data-next-admin="${!user.isAdmin}" ${self ? "disabled" : ""}>${user.isAdmin ? "Ta bort admin" : "Gör till admin"}</button><button class="button ghost small-button ${user.isDisabled ? "positive" : "danger"}" data-user-disable="${user.id}" data-next-disabled="${!user.isDisabled}" ${self ? "disabled" : ""}>${user.isDisabled ? "Aktivera" : "Inaktivera"}</button></div></article>`;
+  }).join("") : emptyState("Inga användare", "Användarkonton visas här.");
+  $("#admin-trips").innerHTML = data.trips.length ? data.trips.map((trip, index) => `<article class="admin-row"><span class="trip-emoji">${["✦", "⌁", "◇", "◉"][index % 4]}</span><div class="admin-row-main"><strong>${escapeHtml(trip.name)} ${trip.archivedAt ? '<span class="role-badge muted-badge">Arkiverad</span>' : ""}</strong><small>${escapeHtml(trip.ownerName || "Okänd ägare")} · ${trip.memberCount} medlemmar · ${trip.expenseCount} utgifter · ${formatMoney(trip.totalCents)}</small></div><div class="admin-actions"><button class="button ghost small-button" data-admin-open-trip="${trip.id}">Öppna</button><button class="button ghost small-button" data-admin-archive-trip="${trip.id}" data-next-archived="${!trip.archivedAt}">${trip.archivedAt ? "Återställ" : "Arkivera"}</button></div></article>`).join("") : emptyState("Inga resor", "Alla resor visas här när de skapas.");
+  $("#admin-activity").innerHTML = data.activity.length ? data.activity.map((item) => `<article class="activity-row"><span class="activity-dot"></span><div><strong>${escapeHtml(activityLabels[item.action] || item.action)}</strong><small>${escapeHtml(item.actorName || "Systemet")}${item.tripName ? ` · ${escapeHtml(item.tripName)}` : ""} · ${formatDate(item.createdAt)}</small></div></article>`).join("") : emptyState("Ingen aktivitet", "Administrativa och ekonomiska händelser visas här.");
 }
 
 async function selectTrip(id) {
@@ -182,6 +231,7 @@ async function selectTrip(id) {
   state.trip = payload.trip;
   location.hash = `trip-${id}`;
   $("#dashboard-view").classList.add("hidden");
+  $("#admin-view").classList.add("hidden");
   $("#trip-view").classList.remove("hidden");
   renderTripLists();
   renderTrip();
@@ -225,7 +275,7 @@ function renderTrip() {
 function expenseRow(expense, allowAction = true) {
   const payer = person(expense.payerId);
   const remove = allowAction && canVoid(expense.createdBy) && !state.trip.archivedAt;
-  return `<article class="expense-row"><span class="category-icon">${categories[expense.category] || categories.other}</span><div class="expense-main"><strong>${escapeHtml(expense.title)}</strong><small>${escapeHtml(payer?.name || "Okänd")} betalade · ${formatDate(expense.expenseDate)} · delat mellan ${expense.shares.length}</small></div><div class="expense-amount">${formatMoney(expense.amountCents)}</div>${remove ? `<button class="delete-button" data-delete-expense="${expense.id}" aria-label="Ta bort ${escapeHtml(expense.title)} från beräkningen" title="Ta bort från beräkningen">×</button>` : ""}</article>`;
+  return `<article class="expense-row"><span class="category-icon">${categories[expense.category] || categories.other}</span><div class="expense-main"><strong>${escapeHtml(expense.title)}</strong><small>${escapeHtml(payer?.name || "Okänd")} betalade · ${formatDate(expense.expenseDate, "Inget datum")} · delat mellan ${expense.shares.length}</small></div><div class="expense-amount">${formatMoney(expense.amountCents)}</div>${remove ? `<button class="delete-button" data-delete-expense="${expense.id}" aria-label="Ta bort ${escapeHtml(expense.title)} från beräkningen" title="Ta bort från beräkningen">×</button>` : ""}</article>`;
 }
 
 function renderExpenses() {
@@ -294,7 +344,7 @@ async function openPersonDialog() {
 
 function openExpenseDialog() {
   if (!state.trip?.participants.length) { toast("Lägg till minst en person först"); return openPersonDialog(); }
-  const form = $("#expense-form"); form.reset(); form.elements.expenseDate.value = new Date().toISOString().slice(0, 10);
+  const form = $("#expense-form"); form.reset();
   form.elements.payerId.innerHTML = state.trip.participants.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
   renderSplitPeople(); openDialog("expense-dialog");
 }
@@ -360,6 +410,13 @@ $("#person-search").addEventListener("input", (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const adminToggle = event.target.closest("[data-admin-toggle]");
+  if (adminToggle) { try { await api(`/api/admin/users/${adminToggle.dataset.adminToggle}`, { method: "PATCH", body: JSON.stringify({ isAdmin: adminToggle.dataset.nextAdmin === "true" }) }); await showAdmin(); toast("Adminbehörigheten uppdaterades"); } catch (error) { toast(error.message); } return; }
+  const userDisable = event.target.closest("[data-user-disable]");
+  if (userDisable && confirm(userDisable.dataset.nextDisabled === "true" ? "Inaktivera kontot och logga ut användaren från alla enheter?" : "Aktivera kontot igen?")) { try { await api(`/api/admin/users/${userDisable.dataset.userDisable}`, { method: "PATCH", body: JSON.stringify({ isDisabled: userDisable.dataset.nextDisabled === "true" }) }); await showAdmin(); toast("Kontostatusen uppdaterades"); } catch (error) { toast(error.message); } return; }
+  const adminOpenTrip = event.target.closest("[data-admin-open-trip]"); if (adminOpenTrip) return selectTrip(Number(adminOpenTrip.dataset.adminOpenTrip));
+  const adminArchiveTrip = event.target.closest("[data-admin-archive-trip]");
+  if (adminArchiveTrip && confirm(adminArchiveTrip.dataset.nextArchived === "true" ? "Arkivera resan? Alla ekonomiska poster bevaras." : "Återställ resan?")) { try { await api(`/api/trips/${adminArchiveTrip.dataset.adminArchiveTrip}/archive`, { method: "POST", body: JSON.stringify({ archived: adminArchiveTrip.dataset.nextArchived === "true" }) }); await loadDashboard(); await showAdmin(); toast("Resan uppdaterades"); } catch (error) { toast(error.message); } return; }
   const tripLink = event.target.closest("[data-trip-id]"); if (tripLink) return selectTrip(Number(tripLink.dataset.tripId));
   const tab = event.target.closest("[data-tab]"); if (tab) return setTab(tab.dataset.tab);
   const goTab = event.target.closest("[data-go-tab]"); if (goTab) return setTab(goTab.dataset.goTab);
@@ -386,6 +443,9 @@ document.addEventListener("click", async (event) => {
 });
 
 [$("#home-button"), $("#mobile-home-button"), $("#back-to-trips")].forEach((button) => button.addEventListener("click", () => showDashboard()));
+[$("#admin-button"), $("#mobile-admin-button")].forEach((button) => button.addEventListener("click", () => showAdmin().catch((error) => toast(error.message))));
+$("#admin-back-button").addEventListener("click", () => showDashboard());
+$("#admin-refresh-button").addEventListener("click", () => showAdmin().catch((error) => toast(error.message)));
 [$("#new-trip-button"), $("#mobile-new-trip"), $("#dashboard-new-trip")].forEach((button) => button.addEventListener("click", () => { $("#trip-form").reset(); openDialog("trip-dialog"); }));
 [$("#add-person-button"), $("#summary-add-person"), $("#people-add-button")].forEach((button) => button.addEventListener("click", openPersonDialog));
 [$("#add-expense-button"), $("#expenses-add-button")].forEach((button) => button.addEventListener("click", openExpenseDialog));

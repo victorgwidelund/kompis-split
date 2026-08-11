@@ -147,17 +147,23 @@ async function sessionUser(request: IncomingMessage) {
   const token = cookieValue(request, "kompis_session");
   if (!token) return null;
   return await db.prepare(`
-    SELECT u.id, u.email, u.display_name, u.swish_phone
+    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled
     FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP
+    WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.is_disabled = FALSE
   `).get(sessionId(token)) || null;
 }
 
 function publicUser(user: any) {
-  return { id: user.id, email: user.email, name: user.display_name, swishPhone: user.swish_phone };
+  return { id: user.id, email: user.email, name: user.display_name, swishPhone: user.swish_phone, isAdmin: Boolean(user.is_admin) };
+}
+
+function requireAdmin(user: any) {
+  if (!user?.is_admin) throw new HttpError(403, "Endast appadministratörer har tillgång till detta");
 }
 
 async function requireAccess(tripId: number, userId: number, roles: string[] | null = null) {
+  const globalAdmin = await db.prepare("SELECT is_admin FROM users WHERE id = ? AND is_disabled = FALSE").get<any>(userId);
+  if (globalAdmin?.is_admin) return "admin";
   const access = await db.prepare("SELECT role FROM trip_access WHERE trip_id = ? AND user_id = ?").get<any>(tripId, userId);
   if (!access) throw new HttpError(403, "Du har inte tillgång till den här resan");
   if (roles && !roles.includes(access.role)) throw new HttpError(403, "Du saknar behörighet för detta");
@@ -190,7 +196,7 @@ async function loadTrip(id: number, userId: number) {
   const participants = participantRows.map((person) => ({
     id: person.id, name: person.name, swishPhone: person.swish_phone, userId: person.user_id,
   }));
-  const expenseRows = await db.prepare("SELECT * FROM expenses WHERE trip_id = ? AND voided_at IS NULL ORDER BY expense_date DESC, id DESC").all<any>(id);
+  const expenseRows = await db.prepare("SELECT * FROM expenses WHERE trip_id = ? AND voided_at IS NULL ORDER BY expense_date DESC NULLS LAST, id DESC").all<any>(id);
   const expenses = await Promise.all(expenseRows.map(async (expense) => ({
     id: expense.id, payerId: expense.payer_id, title: expense.title, amountCents: expense.amount_cents,
     expenseDate: expense.expense_date, category: expense.category, splitMode: expense.split_mode,
@@ -217,7 +223,7 @@ async function dashboard(userId: number) {
       (SELECT COUNT(*) FROM participants p WHERE p.trip_id = t.id) participant_count,
       (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e WHERE e.trip_id = t.id AND e.voided_at IS NULL) total_cents
     FROM trip_access ta JOIN trips t ON t.id = ta.trip_id
-    WHERE ta.user_id = ? ORDER BY (t.archived_at IS NOT NULL), COALESCE(t.start_date, t.created_at) DESC, t.id DESC
+    WHERE ta.user_id = ? ORDER BY (t.archived_at IS NOT NULL), COALESCE(t.start_date, t.created_at::date) DESC, t.id DESC
   `).all<any>(userId);
   const trips = await Promise.all(rows.map(async (row) => {
     const full = await loadTrip(row.id, userId);
@@ -237,12 +243,67 @@ async function dashboard(userId: number) {
     JOIN trip_access ta ON ta.trip_id = t.id AND ta.user_id = ?
     JOIN participants p ON p.id = e.payer_id
     WHERE e.voided_at IS NULL AND t.archived_at IS NULL
-    ORDER BY e.expense_date DESC, e.id DESC LIMIT 12
+    ORDER BY e.expense_date DESC NULLS LAST, e.id DESC LIMIT 12
   `).all<any>(userId)).map((item) => ({
     id: item.id, tripId: item.trip_id, tripName: item.trip_name, title: item.title,
     amountCents: item.amount_cents, expenseDate: item.expense_date, category: item.category, payerName: item.payer_name,
   }));
-  return { trips, recentExpenses };
+  const contacts = (await db.prepare(`
+    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin
+    FROM contacts c JOIN users u ON u.id = c.contact_user_id
+    WHERE c.owner_user_id = ? AND u.is_disabled = FALSE
+    ORDER BY lower(u.display_name)
+  `).all<any>(userId)).map(publicUser);
+  return { trips, recentExpenses, contacts };
+}
+
+async function adminOverview() {
+  const stats = await db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM users) user_count,
+      (SELECT COUNT(*) FROM users WHERE is_disabled = FALSE) active_user_count,
+      (SELECT COUNT(*) FROM trips WHERE archived_at IS NULL) active_trip_count,
+      (SELECT COUNT(*) FROM trips) trip_count,
+      (SELECT COALESCE(SUM(amount_cents), 0) FROM expenses WHERE voided_at IS NULL) total_cents
+  `).get<any>();
+  const users = (await db.prepare(`
+    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, u.created_at,
+      (SELECT COUNT(*) FROM trip_access ta WHERE ta.user_id = u.id) trip_count,
+      (SELECT COUNT(*) FROM trips t WHERE t.created_by = u.id) created_trip_count
+    FROM users u ORDER BY u.is_admin DESC, u.is_disabled, lower(u.display_name), u.id
+  `).all<any>()).map((item) => ({
+    ...publicUser(item), isDisabled: Boolean(item.is_disabled), createdAt: item.created_at,
+    tripCount: Number(item.trip_count), createdTripCount: Number(item.created_trip_count),
+  }));
+  const trips = (await db.prepare(`
+    SELECT t.*, u.display_name owner_name,
+      (SELECT COUNT(*) FROM trip_access ta WHERE ta.trip_id = t.id) member_count,
+      (SELECT COUNT(*) FROM expenses e WHERE e.trip_id = t.id AND e.voided_at IS NULL) expense_count,
+      (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e WHERE e.trip_id = t.id AND e.voided_at IS NULL) total_cents
+    FROM trips t LEFT JOIN users u ON u.id = t.created_by
+    ORDER BY (t.archived_at IS NOT NULL), t.created_at DESC, t.id DESC
+  `).all<any>()).map((item) => ({
+    id: item.id, name: item.name, startDate: item.start_date, endDate: item.end_date,
+    archivedAt: item.archived_at, createdAt: item.created_at, ownerName: item.owner_name,
+    memberCount: Number(item.member_count), expenseCount: Number(item.expense_count), totalCents: Number(item.total_cents),
+  }));
+  const activity = (await db.prepare(`
+    SELECT a.id, a.action, a.entity_type, a.entity_id, a.created_at,
+      u.display_name actor_name, t.name trip_name
+    FROM audit_log a
+    LEFT JOIN users u ON u.id = a.actor_user_id
+    LEFT JOIN trips t ON t.id = a.trip_id
+    ORDER BY a.created_at DESC, a.id DESC LIMIT 30
+  `).all<any>()).map((item) => ({
+    id: item.id, action: item.action, entityType: item.entity_type, entityId: item.entity_id,
+    createdAt: item.created_at, actorName: item.actor_name, tripName: item.trip_name,
+  }));
+  return {
+    stats: {
+      userCount: Number(stats.user_count), activeUserCount: Number(stats.active_user_count),
+      activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), totalCents: Number(stats.total_cents),
+    }, users, trips, activity,
+  };
 }
 
 async function invitationByToken(token: string) {
@@ -323,7 +384,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     return db.transaction(async () => {
       await db.exec("SELECT pg_advisory_xact_lock(837451903)");
       if (Number((await db.prepare("SELECT COUNT(*) count FROM users").get<any>())?.count) !== 0) throw new HttpError(409, "Appen är redan konfigurerad");
-      const result = await db.prepare("INSERT INTO users (email, display_name, password_hash, password_salt, swish_phone) VALUES (?, ?, ?, ?, ?) RETURNING id")
+      const result = await db.prepare("INSERT INTO users (email, display_name, password_hash, password_salt, swish_phone, is_admin) VALUES (?, ?, ?, ?, ?, TRUE) RETURNING id")
         .run(cleanEmail(body.email), cleanText(body.name, "Namn", 60), record.hash, record.salt, normalizePhone(body.swishPhone));
       const userId = Number(result.lastInsertRowid);
       await db.prepare("UPDATE trips SET created_by = ? WHERE created_by IS NULL").run(userId);
@@ -362,7 +423,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     if (!loginAllowed(ip)) return json(response, 429, { error: "För många försök. Vänta en stund." });
     const body = await readJson(request);
     const account = await db.prepare("SELECT * FROM users WHERE email = ?").get<any>(cleanEmail(body.email));
-    if (!account || !(await passwordMatches(body.password, account))) {
+    if (!account || account.is_disabled || !(await passwordMatches(body.password, account))) {
       failedLogin(ip); return json(response, 401, { error: "Fel e-postadress eller lösenord" });
     }
     attempts.delete(ip);
@@ -376,6 +437,29 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (!user) return json(response, 401, { error: "Logga in för att fortsätta" });
 
   let match;
+  if (request.method === "GET" && url.pathname === "/api/admin") {
+    requireAdmin(user);
+    return json(response, 200, await adminOverview());
+  }
+  match = url.pathname.match(/^\/api\/admin\/users\/(\d+)$/);
+  if (request.method === "PATCH" && match) {
+    requireAdmin(user);
+    const targetId = Number(match[1]);
+    const target = await db.prepare("SELECT * FROM users WHERE id = ?").get<any>(targetId);
+    if (!target) return json(response, 404, { error: "Användaren finns inte" });
+    const body = await readJson(request);
+    if (targetId === Number(user.id) && (body.isAdmin === false || body.isDisabled === true)) {
+      throw new HttpError(409, "Du kan inte ta bort din egen adminåtkomst eller inaktivera ditt eget konto");
+    }
+    const isAdmin = typeof body.isAdmin === "boolean" ? body.isAdmin : Boolean(target.is_admin);
+    const isDisabled = typeof body.isDisabled === "boolean" ? body.isDisabled : Boolean(target.is_disabled);
+    await db.transaction(async () => {
+      await db.prepare("UPDATE users SET is_admin = ?, is_disabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(isAdmin, isDisabled, targetId);
+      if (isDisabled) await db.prepare("DELETE FROM sessions WHERE user_id = ?").run(targetId);
+      await audit(user.id, null, "admin.user.updated", "user", targetId, { isAdmin, isDisabled });
+    });
+    return json(response, 200, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(targetId)) });
+  }
   if (request.method === "POST" && url.pathname === "/api/invitations/join") {
     const body = await readJson(request);
     const invitation = await invitationByToken(String(body.token || ""));
@@ -467,7 +551,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const amounts = calculateShares(amountCents, String(body.splitMode || "equal"), entries);
     await db.transaction(async () => {
       const result = await db.prepare("INSERT INTO expenses (trip_id, payer_id, title, amount_cents, expense_date, category, split_mode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-        .run(tripId, payerId, cleanText(body.title, "Beskrivning", 100), amountCents, validDate(body.expenseDate, new Date().toISOString().slice(0, 10)), cleanText(body.category || "other", "Kategori", 30), String(body.splitMode || "equal"), user.id);
+        .run(tripId, payerId, cleanText(body.title, "Beskrivning", 100), amountCents, validDate(body.expenseDate), cleanText(body.category || "other", "Kategori", 30), String(body.splitMode || "equal"), user.id);
       const expenseId = Number(result.lastInsertRowid); const insertShare = db.prepare("INSERT INTO expense_shares (expense_id, participant_id, amount_cents) VALUES (?, ?, ?)");
       for (const [index, entry] of entries.entries()) await insertShare.run(expenseId, entry.participantId, amounts[index]);
       await audit(user.id, tripId, "expense.created", "expense", expenseId, { amountCents });
