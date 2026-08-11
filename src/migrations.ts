@@ -1,6 +1,6 @@
 import { pool } from "./database.js";
 
-export const migrationVersions = [1, 2] as const;
+export const migrationVersions = [1, 2, 3] as const;
 
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -27,6 +27,8 @@ const schema = `
     end_date DATE,
     created_by BIGINT REFERENCES users(id),
     archived_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
+    deleted_by BIGINT REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK(end_date IS NULL OR start_date IS NULL OR end_date >= start_date)
   );
@@ -50,6 +52,28 @@ const schema = `
     created_by BIGINT REFERENCES users(id),
     voided_at TIMESTAMPTZ,
     voided_by BIGINT REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS expense_categories (
+    id BIGSERIAL PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE CHECK(char_length(slug) BETWEEN 1 AND 40),
+    name TEXT NOT NULL CHECK(char_length(name) BETWEEN 1 AND 40),
+    emoji TEXT NOT NULL CHECK(char_length(emoji) BETWEEN 1 AND 16),
+    is_builtin BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by BIGINT REFERENCES users(id),
+    archived_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS expense_receipts (
+    id BIGSERIAL PRIMARY KEY,
+    expense_id BIGINT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+    trip_id BIGINT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL CHECK(char_length(file_name) BETWEEN 1 AND 180),
+    mime_type TEXT NOT NULL,
+    byte_size INTEGER NOT NULL CHECK(byte_size > 0),
+    content BYTEA NOT NULL,
+    created_by BIGINT REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS expense_shares (
@@ -102,6 +126,15 @@ const schema = `
     revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS friend_invitations (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    invited_by BIGINT NOT NULL REFERENCES users(id),
+    expires_at TIMESTAMPTZ NOT NULL,
+    use_count INTEGER NOT NULL DEFAULT 0 CHECK(use_count BETWEEN 0 AND 1),
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS audit_log (
     id BIGSERIAL PRIMARY KEY,
     actor_user_id BIGINT REFERENCES users(id),
@@ -115,11 +148,14 @@ const schema = `
   CREATE INDEX IF NOT EXISTS idx_participants_trip ON participants(trip_id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_trip_user ON participants(trip_id, user_id) WHERE user_id IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_expenses_trip_date ON expenses(trip_id, expense_date) WHERE voided_at IS NULL;
+  CREATE INDEX IF NOT EXISTS idx_receipts_expense ON expense_receipts(expense_id, id);
+  CREATE INDEX IF NOT EXISTS idx_receipts_trip ON expense_receipts(trip_id);
   CREATE INDEX IF NOT EXISTS idx_payments_trip ON payments(trip_id) WHERE voided_at IS NULL;
   CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_trip_access_user ON trip_access(user_id, trip_id);
   CREATE INDEX IF NOT EXISTS idx_users_name ON users(lower(display_name));
   CREATE INDEX IF NOT EXISTS idx_invites_hash ON invitations(token_hash);
+  CREATE INDEX IF NOT EXISTS idx_friend_invites_hash ON friend_invitations(token_hash);
   CREATE INDEX IF NOT EXISTS idx_audit_trip ON audit_log(trip_id, created_at);
 `;
 
@@ -144,6 +180,29 @@ export async function applyMigrations(): Promise<void> {
     await client.query(
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [2, "global-admin-and-optional-expense-date"],
+    );
+    await client.query("ALTER TABLE trips ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
+    await client.query("ALTER TABLE trips ADD COLUMN IF NOT EXISTS deleted_by BIGINT REFERENCES users(id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_trips_visible ON trips(id) WHERE deleted_at IS NULL");
+    await client.query(`
+      INSERT INTO expense_categories (slug, name, emoji, is_builtin)
+      VALUES
+        ('food', 'Mat och dryck', '🍝', TRUE),
+        ('travel', 'Resa', '🚆', TRUE),
+        ('stay', 'Boende', '🏡', TRUE),
+        ('fun', 'Aktiviteter', '🎟️', TRUE),
+        ('other', 'Övrigt', '🧾', TRUE)
+      ON CONFLICT (slug) DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO expense_categories (slug, name, emoji, is_builtin)
+      SELECT DISTINCT category, category, '🧾', FALSE FROM expenses
+      WHERE category IS NOT NULL AND category <> ''
+      ON CONFLICT (slug) DO NOTHING
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [3, "trip-trash-categories-receipts-and-friend-invites"],
     );
     await client.query("COMMIT");
   } catch (error) {

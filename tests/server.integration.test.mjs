@@ -33,7 +33,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       COOKIE_SECRET: "integration-cookie-secret-at-least-32-bytes",
       COOKIE_SECURE: "false",
       TRUST_PROXY: "false",
-      APP_VERSION: "sha-testversion123",
+      APP_VERSION: "1.1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -60,7 +60,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
 
     const initial = await request("/api/session");
     assert.equal(initial.payload.needsSetup, true);
-    assert.equal(initial.payload.version, "sha-testversion123");
+    assert.equal(initial.payload.version, "1.1");
 
     const rejectedOrigin = await request("/api/setup", { method: "POST", origin: "https://evil.example", body: {} });
     assert.equal(rejectedOrigin.response.status, 403);
@@ -71,19 +71,30 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const ownerCookie = cookieFrom(setup.response);
     assert.match(ownerCookie, /^kompis_session=/);
 
+    const friendInvite = await request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} });
+    assert.equal(friendInvite.response.status, 201, JSON.stringify(friendInvite.payload));
+    assert.match(friendInvite.payload.invitation.qrDataUrl, /^data:image\/png;base64,/);
+    const friendPreview = await request("/api/invitations/preview", { method: "POST", body: { token: friendInvite.payload.invitation.token } });
+    assert.equal(friendPreview.payload.invitation.kind, "friend");
+    assert.equal(friendPreview.payload.invitation.tripName, null);
+
+    const registration = await request("/api/register", { method: "POST", body: { inviteToken: friendInvite.payload.invitation.token, name: "Anna", email: "anna@example.test", password: "another-secure-password", swishPhone: "0709876543" } });
+    assert.equal(registration.response.status, 201, JSON.stringify(registration.payload));
+    assert.equal(registration.payload.tripId, null);
+    const memberCookie = cookieFrom(registration.response);
+
     const created = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Sälen", startDate: "2026-12-10", endDate: "2026-12-13" } });
     assert.equal(created.response.status, 201, JSON.stringify(created.payload));
     const tripId = created.payload.trip.id;
-
     const invite = await request(`/api/trips/${tripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
     assert.equal(invite.response.status, 201, JSON.stringify(invite.payload));
+    assert.match(invite.payload.invitation.qrDataUrl, /^data:image\/png;base64,/);
     const token = invite.payload.invitation.token;
     const preview = await request("/api/invitations/preview", { method: "POST", body: { token } });
+    assert.equal(preview.payload.invitation.kind, "trip");
     assert.equal(preview.payload.invitation.tripName, "Sälen");
-
-    const registration = await request("/api/register", { method: "POST", body: { inviteToken: token, name: "Anna", email: "anna@example.test", password: "another-secure-password", swishPhone: "0709876543" } });
-    assert.equal(registration.response.status, 201, JSON.stringify(registration.payload));
-    const memberCookie = cookieFrom(registration.response);
+    const joinedTrip = await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token } });
+    assert.equal(joinedTrip.payload.tripId, tripId);
 
     const memberDashboard = await request("/api/dashboard", { cookie: memberCookie });
     assert.equal(memberDashboard.payload.trips.length, 1);
@@ -102,6 +113,13 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const trip = await request(`/api/trips/${tripId}`, { cookie: ownerCookie });
     assert.equal(trip.payload.trip.participants.length, 2);
     const [ownerParticipant, memberParticipant] = trip.payload.trip.participants;
+    const defaultCategories = await request("/api/categories", { cookie: ownerCookie });
+    assert.equal(defaultCategories.payload.categories.length, 5);
+    const customCategory = await request("/api/categories", { method: "POST", cookie: ownerCookie, body: { name: "Fika", emoji: "☕" } });
+    assert.equal(customCategory.response.status, 201, JSON.stringify(customCategory.payload));
+    assert.match(customCategory.payload.createdSlug, /^custom-/);
+    const customCategoryRecord = customCategory.payload.categories.find((item) => item.slug === customCategory.payload.createdSlug);
+    assert.equal(customCategoryRecord.name, "Fika");
     const expense = await request(`/api/trips/${tripId}/expenses`, {
       method: "POST",
       cookie: ownerCookie,
@@ -121,13 +139,38 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const edited = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
       method: "PATCH",
       cookie: ownerCookie,
-      body: { title: "Middag uppdaterad", amount: "120.01", payerId: memberParticipant.id, expenseDate: "2026-12-11", category: "food", splitMode: "exact", entries: [{ participantId: ownerParticipant.id, value: "60.01" }, { participantId: memberParticipant.id, value: "60.00" }] },
+      body: { title: "Middag uppdaterad", amount: "120.01", payerId: memberParticipant.id, expenseDate: "2026-12-11", category: customCategory.payload.createdSlug, splitMode: "exact", entries: [{ participantId: ownerParticipant.id, value: "60.01" }, { participantId: memberParticipant.id, value: "60.00" }] },
     });
     assert.equal(edited.response.status, 200, JSON.stringify(edited.payload));
     assert.equal(edited.payload.trip.totalCents, 12001);
     assert.equal(edited.payload.trip.expenses[0].title, "Middag uppdaterad");
     assert.equal(edited.payload.trip.expenses[0].payerId, memberParticipant.id);
     assert.deepEqual(edited.payload.trip.expenses[0].shares.map((share) => share.amountCents), [6001, 6000]);
+
+    const archivedCategory = await request(`/api/categories/${customCategoryRecord.id}`, { method: "PATCH", cookie: ownerCookie, body: { archived: true } });
+    assert.ok(archivedCategory.payload.categories.find((item) => item.id === customCategoryRecord.id).archivedAt);
+    const rejectedArchivedCategory = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
+      method: "PATCH",
+      cookie: ownerCookie,
+      body: { title: "Ska nekas", amount: "120.01", payerId: memberParticipant.id, category: customCategory.payload.createdSlug, splitMode: "equal", entries: [{ participantId: ownerParticipant.id, value: 1 }, { participantId: memberParticipant.id, value: 1 }] },
+    });
+    assert.equal(rejectedArchivedCategory.response.status, 400);
+
+    const receiptBytes = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("kompis-split-test")]);
+    const receiptUploadResponse = await fetch(`${baseUrl}/api/expenses/${expense.payload.trip.expenses[0].id}/receipts`, {
+      method: "POST",
+      headers: { Cookie: ownerCookie, Origin: baseUrl, "Content-Type": "image/png", "X-File-Name": encodeURIComponent("middagskvitto.png") },
+      body: receiptBytes,
+    });
+    const receiptUpload = await receiptUploadResponse.json();
+    assert.equal(receiptUploadResponse.status, 201, JSON.stringify(receiptUpload));
+    assert.equal(receiptUpload.trip.expenses[0].receipts.length, 1);
+    const receiptId = receiptUpload.trip.expenses[0].receipts[0].id;
+    const downloadedReceipt = await fetch(`${baseUrl}/api/receipts/${receiptId}`, { headers: { Cookie: ownerCookie } });
+    assert.equal(downloadedReceipt.headers.get("content-type"), "image/png");
+    assert.deepEqual(Buffer.from(await downloadedReceipt.arrayBuffer()), receiptBytes);
+    const memberCannotDeleteReceipt = await request(`/api/receipts/${receiptId}`, { method: "DELETE", cookie: memberCookie, body: {} });
+    assert.equal(memberCannotDeleteReceipt.response.status, 403);
 
     const memberCannotVoid = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, { method: "DELETE", cookie: memberCookie, body: {} });
     assert.equal(memberCannotVoid.response.status, 403);
@@ -141,6 +184,19 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.ok(archived.payload.trip.archivedAt);
     const blockedWrite = await request(`/api/trips/${tripId}/payments`, { method: "POST", cookie: ownerCookie, body: { fromId: memberParticipant.id, toId: ownerParticipant.id, amount: "1" } });
     assert.equal(blockedWrite.response.status, 409);
+    const memberCannotTrash = await request(`/api/trips/${tripId}/trash`, { method: "POST", cookie: memberCookie, body: { deleted: true } });
+    assert.equal(memberCannotTrash.response.status, 403);
+    const trashed = await request(`/api/trips/${tripId}/trash`, { method: "POST", cookie: ownerCookie, body: { deleted: true } });
+    assert.equal(trashed.response.status, 200);
+    const dashboardWithoutTrash = await request("/api/dashboard", { cookie: ownerCookie });
+    assert.equal(dashboardWithoutTrash.payload.trips.length, 0);
+    const hiddenTrip = await request(`/api/trips/${tripId}`, { cookie: ownerCookie });
+    assert.equal(hiddenTrip.response.status, 404);
+    const overviewWithTrash = await request("/api/admin", { cookie: ownerCookie });
+    assert.ok(overviewWithTrash.payload.trips.find((item) => item.id === tripId).deletedAt);
+    assert.equal(overviewWithTrash.payload.stats.deletedTripCount, 1);
+    const untrashed = await request(`/api/trips/${tripId}/trash`, { method: "POST", cookie: ownerCookie, body: { deleted: false } });
+    assert.equal(untrashed.response.status, 200);
     const restored = await request(`/api/trips/${tripId}/archive`, { method: "POST", cookie: ownerCookie, body: { archived: false } });
     assert.equal(restored.payload.trip.archivedAt, null);
 
@@ -179,9 +235,13 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number(revision.previous.amountCents), 10001);
   assert.deepEqual(revision.previous.shares.map((share) => Number(share.amountCents)), [5001, 5000]);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('trip.deleted', 'trip.undeleted')")).rows[0].count), 2);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'receipt.created'")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('friend_invitation.created', 'friend_invitation.joined')")).rows[0].count), 2);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 2);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 3);
   await verification.end();
   await admin.query(`DROP DATABASE ${databaseName} WITH (FORCE)`);
   await admin.end();

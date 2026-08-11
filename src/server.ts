@@ -4,6 +4,7 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
 import { calculateShares, simplifyDebts } from "./split.js";
@@ -22,6 +23,9 @@ const cookieSecret = process.env.COOKIE_SECRET || createHash("sha256").update(ap
 const trustProxy = process.env.TRUST_PROXY === "true";
 const sessionDays = integerEnvironment("SESSION_DAYS", 30, 1, 365);
 const appVersion = String(process.env.APP_VERSION || "dev").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 80) || "dev";
+const receiptMaximumBytes = 8 * 1024 * 1024;
+const receiptMaximumCount = 5;
+const receiptMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 if (process.env.NODE_ENV === "production" && cookieSecret.length < 32) throw new Error("COOKIE_SECRET måste vara minst 32 tecken i produktion");
 await applyMigrations();
 
@@ -76,6 +80,22 @@ function safeEqualStrings(first: unknown, second: unknown) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+function requestOrigin(request: IncomingMessage) {
+  const forwardedHost = trustProxy ? String(request.headers["x-forwarded-host"] || "").split(",")[0]?.trim() : "";
+  const forwardedProtocol = trustProxy ? String(request.headers["x-forwarded-proto"] || "").split(",")[0]?.trim().toLowerCase() : "";
+  const protocol = forwardedProtocol === "https" ? "https" : forwardedProtocol === "http" ? "http" : cookieSecure ? "https" : "http";
+  const host = forwardedHost || String(request.headers.host || "localhost");
+  try { return new URL(`${protocol}://${host}`).origin; }
+  catch { throw new HttpError(400, "Ogiltig värdadress"); }
+}
+
+async function invitationPayload(request: IncomingMessage, token: string, expiresAt: string) {
+  const path = `/#invite=${encodeURIComponent(token)}`;
+  const link = new URL(path, requestOrigin(request)).href;
+  const qrDataUrl = await QRCode.toDataURL(link, { errorCorrectionLevel: "M", margin: 1, width: 320, color: { dark: "#17201cff", light: "#fffdf8ff" } });
+  return { token, path, expiresAt, qrDataUrl };
+}
+
 function securityHeaders() {
   return {
     "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
@@ -122,6 +142,39 @@ async function readJson(request: IncomingMessage): Promise<any> {
   }
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); }
   catch { throw new Error("Ogiltig JSON"); }
+}
+
+async function readBytes(request: IncomingMessage, maximumBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maximumBytes) throw new HttpError(413, `Kvittofilen får vara högst ${Math.floor(maximumBytes / 1024 / 1024)} MB`);
+    chunks.push(Buffer.from(chunk));
+  }
+  if (!size) throw new Error("Kvittofilen är tom");
+  return Buffer.concat(chunks);
+}
+
+function receiptContentMatches(mimeType: string, content: Buffer) {
+  if (mimeType === "image/png") return content.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"));
+  if (mimeType === "image/jpeg") return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
+  if (mimeType === "image/webp") return content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP";
+  if (mimeType === "application/pdf") return content.subarray(0, 5).toString("ascii") === "%PDF-";
+  return false;
+}
+
+function safeReceiptName(value: unknown) {
+  let decoded = String(value || "kvitto");
+  try { decoded = decodeURIComponent(decoded); } catch { /* Behåll rubriken som den är. */ }
+  return cleanText(decoded.replace(/[\\/\0-\x1f\x7f]/g, "_").slice(0, 180), "Filnamn", 180);
+}
+
+async function activeCategorySlug(value: unknown) {
+  const slug = cleanText(value || "other", "Kategori", 40);
+  const category = await db.prepare("SELECT slug FROM expense_categories WHERE slug = ? AND archived_at IS NULL").get<any>(slug);
+  if (!category) throw new Error("Välj en aktiv kategori");
+  return slug;
 }
 
 function cookieValue(request: IncomingMessage, name: string) {
@@ -174,6 +227,7 @@ async function requireAccess(tripId: number, userId: number, roles: string[] | n
 async function requireActiveTrip(tripId: number) {
   const trip = await db.prepare("SELECT * FROM trips WHERE id = ?").get<any>(tripId);
   if (!trip) throw new HttpError(404, "Resan finns inte");
+  if (trip.deleted_at) throw new HttpError(404, "Resan finns inte");
   if (trip.archived_at) throw new HttpError(409, "Återställ resan innan du gör ändringar");
 }
 
@@ -191,7 +245,7 @@ async function assertTripParticipant(tripId: number, participantId: number) {
 
 async function loadTrip(id: number, userId: number) {
   const trip = await db.prepare("SELECT * FROM trips WHERE id = ?").get<any>(id);
-  if (!trip) return null;
+  if (!trip || trip.deleted_at) return null;
   const role = await requireAccess(id, userId);
   const participantRows = await db.prepare("SELECT * FROM participants WHERE trip_id = ? ORDER BY id").all<any>(id);
   const participants = participantRows.map((person) => ({
@@ -203,6 +257,10 @@ async function loadTrip(id: number, userId: number) {
     expenseDate: expense.expense_date, category: expense.category, splitMode: expense.split_mode,
     createdBy: expense.created_by,
     shares: (await db.prepare("SELECT participant_id, amount_cents FROM expense_shares WHERE expense_id = ? ORDER BY participant_id").all<any>(expense.id)).map((share) => ({ participantId: share.participant_id, amountCents: share.amount_cents })),
+    receipts: (await db.prepare("SELECT id, file_name, mime_type, byte_size, created_by, created_at FROM expense_receipts WHERE expense_id = ? ORDER BY id").all<any>(expense.id)).map((receipt) => ({
+      id: receipt.id, fileName: receipt.file_name, mimeType: receipt.mime_type, byteSize: receipt.byte_size,
+      createdBy: receipt.created_by, createdAt: receipt.created_at,
+    })),
   })));
   const paymentRows = await db.prepare("SELECT * FROM payments WHERE trip_id = ? AND voided_at IS NULL ORDER BY paid_at DESC, id DESC").all<any>(id);
   const payments = paymentRows.map((payment) => ({
@@ -212,7 +270,7 @@ async function loadTrip(id: number, userId: number) {
   const totals = simplifyDebts(participants, expenses, payments);
   return {
     id: trip.id, name: trip.name, startDate: trip.start_date, endDate: trip.end_date,
-    createdAt: trip.created_at, archivedAt: trip.archived_at, role, participants, expenses, payments,
+    createdAt: trip.created_at, archivedAt: trip.archived_at, deletedAt: trip.deleted_at, role, participants, expenses, payments,
     balances: totals.balances, settlements: totals.settlements,
     totalCents: expenses.reduce((sum, expense) => sum + expense.amountCents, 0),
   };
@@ -224,7 +282,8 @@ async function dashboard(userId: number) {
       (SELECT COUNT(*) FROM participants p WHERE p.trip_id = t.id) participant_count,
       (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e WHERE e.trip_id = t.id AND e.voided_at IS NULL) total_cents
     FROM trip_access ta JOIN trips t ON t.id = ta.trip_id
-    WHERE ta.user_id = ? ORDER BY (t.archived_at IS NOT NULL), COALESCE(t.start_date, t.created_at::date) DESC, t.id DESC
+    WHERE ta.user_id = ? AND t.deleted_at IS NULL
+    ORDER BY (t.archived_at IS NOT NULL), COALESCE(t.start_date, t.created_at::date) DESC, t.id DESC
   `).all<any>(userId);
   const trips = await Promise.all(rows.map(async (row) => {
     const full = await loadTrip(row.id, userId);
@@ -243,7 +302,7 @@ async function dashboard(userId: number) {
     JOIN trips t ON t.id = e.trip_id
     JOIN trip_access ta ON ta.trip_id = t.id AND ta.user_id = ?
     JOIN participants p ON p.id = e.payer_id
-    WHERE e.voided_at IS NULL AND t.archived_at IS NULL
+    WHERE e.voided_at IS NULL AND t.archived_at IS NULL AND t.deleted_at IS NULL
     ORDER BY e.expense_date DESC NULLS LAST, e.id DESC LIMIT 12
   `).all<any>(userId)).map((item) => ({
     id: item.id, tripId: item.trip_id, tripName: item.trip_name, title: item.title,
@@ -258,19 +317,27 @@ async function dashboard(userId: number) {
   return { trips, recentExpenses, contacts };
 }
 
+async function categoryList() {
+  return (await db.prepare("SELECT id, slug, name, emoji, is_builtin, created_by, archived_at FROM expense_categories ORDER BY is_builtin DESC, lower(name), id").all<any>()).map((category) => ({
+    id: category.id, slug: category.slug, name: category.name, emoji: category.emoji,
+    isBuiltin: Boolean(category.is_builtin), createdBy: category.created_by, archivedAt: category.archived_at,
+  }));
+}
+
 async function adminOverview() {
   const stats = await db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM users) user_count,
       (SELECT COUNT(*) FROM users WHERE is_disabled = FALSE) active_user_count,
-      (SELECT COUNT(*) FROM trips WHERE archived_at IS NULL) active_trip_count,
-      (SELECT COUNT(*) FROM trips) trip_count,
-      (SELECT COALESCE(SUM(amount_cents), 0) FROM expenses WHERE voided_at IS NULL) total_cents
+      (SELECT COUNT(*) FROM trips WHERE archived_at IS NULL AND deleted_at IS NULL) active_trip_count,
+      (SELECT COUNT(*) FROM trips WHERE deleted_at IS NULL) trip_count,
+      (SELECT COUNT(*) FROM trips WHERE deleted_at IS NOT NULL) deleted_trip_count,
+      (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e JOIN trips t ON t.id = e.trip_id WHERE e.voided_at IS NULL AND t.deleted_at IS NULL) total_cents
   `).get<any>();
   const users = (await db.prepare(`
     SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, u.created_at,
-      (SELECT COUNT(*) FROM trip_access ta WHERE ta.user_id = u.id) trip_count,
-      (SELECT COUNT(*) FROM trips t WHERE t.created_by = u.id) created_trip_count
+      (SELECT COUNT(*) FROM trip_access ta JOIN trips t ON t.id = ta.trip_id WHERE ta.user_id = u.id AND t.deleted_at IS NULL) trip_count,
+      (SELECT COUNT(*) FROM trips t WHERE t.created_by = u.id AND t.deleted_at IS NULL) created_trip_count
     FROM users u ORDER BY u.is_admin DESC, u.is_disabled, lower(u.display_name), u.id
   `).all<any>()).map((item) => ({
     ...publicUser(item), isDisabled: Boolean(item.is_disabled), createdAt: item.created_at,
@@ -285,7 +352,7 @@ async function adminOverview() {
     ORDER BY (t.archived_at IS NOT NULL), t.created_at DESC, t.id DESC
   `).all<any>()).map((item) => ({
     id: item.id, name: item.name, startDate: item.start_date, endDate: item.end_date,
-    archivedAt: item.archived_at, createdAt: item.created_at, ownerName: item.owner_name,
+    archivedAt: item.archived_at, deletedAt: item.deleted_at, createdAt: item.created_at, ownerName: item.owner_name,
     memberCount: Number(item.member_count), expenseCount: Number(item.expense_count), totalCents: Number(item.total_cents),
   }));
   const activity = (await db.prepare(`
@@ -302,21 +369,38 @@ async function adminOverview() {
   return {
     stats: {
       userCount: Number(stats.user_count), activeUserCount: Number(stats.active_user_count),
-      activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), totalCents: Number(stats.total_cents),
+      activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), deletedTripCount: Number(stats.deleted_trip_count), totalCents: Number(stats.total_cents),
     }, users, trips, activity,
   };
 }
 
 async function invitationByToken(token: string) {
   if (!token) return null;
-  return await db.prepare(`
+  const tripInvitation = await db.prepare(`
     SELECT i.*, t.name trip_name, u.display_name inviter_name
     FROM invitations i JOIN trips t ON t.id = i.trip_id JOIN users u ON u.id = i.invited_by
-    WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < i.max_uses
-  `).get<any>(sha256(token)) || null;
+    WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < i.max_uses AND t.deleted_at IS NULL
+  `).get<any>(sha256(token));
+  if (tripInvitation) return { ...tripInvitation, kind: "trip" as const };
+  const friendInvitation = await db.prepare(`
+    SELECT i.*, u.display_name inviter_name
+    FROM friend_invitations i JOIN users u ON u.id = i.invited_by
+    WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < 1
+  `).get<any>(sha256(token));
+  return friendInvitation ? { ...friendInvitation, trip_id: null, trip_name: null, kind: "friend" as const } : null;
 }
 
 async function joinInvitationRecords(invitation: any, userId: number) {
+  if (invitation.kind === "friend") {
+    if (Number(invitation.invited_by) === Number(userId)) throw new HttpError(409, "Du kan inte använda din egen väninbjudan");
+    if (await db.prepare("SELECT 1 FROM contacts WHERE owner_user_id = ? AND contact_user_id = ?").get(invitation.invited_by, userId)) return false;
+    const changed = await db.prepare("UPDATE friend_invitations SET use_count = use_count + 1 WHERE id = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND use_count < 1").run(invitation.id);
+    if (!changed.changes) throw new HttpError(409, "Inbjudan har redan använts eller gått ut");
+    await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(invitation.invited_by, userId);
+    await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(userId, invitation.invited_by);
+    await audit(userId, null, "friend_invitation.joined", "friend_invitation", invitation.id);
+    return true;
+  }
   if (await db.prepare("SELECT role FROM trip_access WHERE trip_id = ? AND user_id = ?").get(invitation.trip_id, userId)) return false;
   const changed = await db.prepare("UPDATE invitations SET use_count = use_count + 1 WHERE id = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND use_count < max_uses").run(invitation.id);
   if (!changed.changes) throw new HttpError(409, "Inbjudan har redan använts fullt ut eller gått ut");
@@ -375,7 +459,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "POST" && url.pathname === "/api/invitations/preview") {
     const body = await readJson(request);
     const invitation = await invitationByToken(String(body.token || ""));
-    return invitation ? json(response, 200, { invitation: { tripName: invitation.trip_name, inviterName: invitation.inviter_name, expiresAt: invitation.expires_at } }) : json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
+    return invitation ? json(response, 200, { invitation: { kind: invitation.kind, tripName: invitation.trip_name, inviterName: invitation.inviter_name, expiresAt: invitation.expires_at } }) : json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
   }
   if (request.method === "POST" && url.pathname === "/api/setup") {
     if (userCount !== 0) return json(response, 409, { error: "Appen är redan konfigurerad" });
@@ -417,7 +501,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       if ((error as any)?.code === "23505") return json(response, 409, { error: "E-postadressen finns redan. Logga in i stället." });
       throw error;
     }
-    return json(response, 201, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(userId)), tripId: invitation.trip_id }, { "Set-Cookie": sessionCookie(await createSession(userId)) });
+    return json(response, 201, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(userId)), tripId: invitation.trip_id || null }, { "Set-Cookie": sessionCookie(await createSession(userId)) });
   }
   if (request.method === "POST" && url.pathname === "/api/login") {
     const ip = clientIp(request);
@@ -468,7 +552,46 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     await joinInvitation(invitation, user.id);
     return json(response, 200, { tripId: invitation.trip_id });
   }
+  if (request.method === "POST" && url.pathname === "/api/friend-invitations") {
+    const token = randomBytes(24).toString("base64url");
+    const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
+    await db.transaction(async () => {
+      await db.prepare("UPDATE friend_invitations SET revoked_at = CURRENT_TIMESTAMP WHERE invited_by = ? AND revoked_at IS NULL AND use_count = 0").run(user.id);
+      const result = await db.prepare("INSERT INTO friend_invitations (token_hash, invited_by, expires_at) VALUES (?, ?, ?) RETURNING id")
+        .run(sha256(token), user.id, expiresAt);
+      await audit(user.id, null, "friend_invitation.created", "friend_invitation", Number(result.lastInsertRowid));
+    });
+    return json(response, 201, { invitation: await invitationPayload(request, token, expiresAt) });
+  }
   if (request.method === "GET" && url.pathname === "/api/dashboard") return json(response, 200, await dashboard(user.id));
+  if (request.method === "GET" && url.pathname === "/api/categories") {
+    return json(response, 200, { categories: await categoryList() });
+  }
+  if (request.method === "POST" && url.pathname === "/api/categories") {
+    const body = await readJson(request);
+    const name = cleanText(body.name, "Kategorinamn", 40);
+    const emoji = cleanText(body.emoji || "🧾", "Emoji", 16);
+    const slug = `custom-${randomBytes(9).toString("base64url").toLowerCase()}`;
+    const result = await db.prepare("INSERT INTO expense_categories (slug, name, emoji, created_by) VALUES (?, ?, ?, ?) RETURNING id")
+      .run(slug, name, emoji, user.id);
+    await audit(user.id, null, "category.created", "category", Number(result.lastInsertRowid), { slug, name });
+    return json(response, 201, { categories: await categoryList(), createdSlug: slug });
+  }
+  match = url.pathname.match(/^\/api\/categories\/(\d+)$/);
+  if (request.method === "PATCH" && match) {
+    const category = await db.prepare("SELECT * FROM expense_categories WHERE id = ?").get<any>(Number(match[1]));
+    if (!category) return json(response, 404, { error: "Kategorin finns inte" });
+    if (category.is_builtin) throw new HttpError(409, "Standardkategorier kan inte ändras");
+    if (!user.is_admin && Number(category.created_by) !== Number(user.id)) throw new HttpError(403, "Du kan bara ändra egna kategorier");
+    const body = await readJson(request);
+    const name = body.name === undefined ? category.name : cleanText(body.name, "Kategorinamn", 40);
+    const emoji = body.emoji === undefined ? category.emoji : cleanText(body.emoji, "Emoji", 16);
+    const archivedAt = typeof body.archived === "boolean" ? (body.archived ? new Date().toISOString() : null) : category.archived_at;
+    await db.prepare("UPDATE expense_categories SET name = ?, emoji = ?, archived_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(name, emoji, archivedAt, category.id);
+    await audit(user.id, null, "category.updated", "category", category.id, { name, emoji, archived: Boolean(archivedAt) });
+    return json(response, 200, { categories: await categoryList() });
+  }
   if (request.method === "GET" && url.pathname === "/api/contacts") {
     const contacts = (await db.prepare(`SELECT u.id, u.email, u.display_name, u.swish_phone FROM contacts c JOIN users u ON u.id = c.contact_user_id WHERE c.owner_user_id = ? ORDER BY lower(u.display_name)`).all<any>(user.id)).map(publicUser);
     return json(response, 200, { contacts });
@@ -511,10 +634,30 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/archive$/);
   if (request.method === "POST" && match) {
     const tripId = Number(match[1]); await requireAccess(tripId, user.id, ["owner", "admin"]);
+    const existing = await db.prepare("SELECT deleted_at FROM trips WHERE id = ?").get<any>(tripId);
+    if (!existing || existing.deleted_at) return json(response, 404, { error: "Resan finns inte" });
     const body = await readJson(request);
     await db.prepare("UPDATE trips SET archived_at = ? WHERE id = ?").run(body.archived === false ? null : new Date().toISOString(), tripId);
     await audit(user.id, tripId, body.archived === false ? "trip.restored" : "trip.archived", "trip", tripId);
     return json(response, 200, { trip: await loadTrip(tripId, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/trips\/(\d+)\/trash$/);
+  if (request.method === "POST" && match) {
+    const tripId = Number(match[1]); await requireAccess(tripId, user.id, ["owner", "admin"]);
+    const trip = await db.prepare("SELECT id, archived_at, deleted_at FROM trips WHERE id = ?").get<any>(tripId);
+    if (!trip) return json(response, 404, { error: "Resan finns inte" });
+    const body = await readJson(request);
+    const restoring = body.deleted === false;
+    if (!restoring && !trip.archived_at) throw new HttpError(409, "Arkivera resan innan du tar bort den");
+    await db.transaction(async () => {
+      const receiptCount = restoring ? 0 : Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE trip_id = ?").get<any>(tripId))?.count || 0);
+      if (!restoring) await db.prepare("DELETE FROM expense_receipts WHERE trip_id = ?").run(tripId);
+      await db.prepare("UPDATE trips SET deleted_at = ?, deleted_by = ? WHERE id = ?")
+        .run(restoring ? null : new Date().toISOString(), restoring ? null : user.id, tripId);
+      await db.prepare("UPDATE invitations SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP) WHERE trip_id = ?").run(tripId);
+      await audit(user.id, tripId, restoring ? "trip.undeleted" : "trip.deleted", "trip", tripId, { deletedReceiptCount: receiptCount });
+    });
+    return json(response, 200, { ok: true });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/invitations$/);
   if (request.method === "POST" && match) {
@@ -523,7 +666,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
     const result = await db.prepare("INSERT INTO invitations (trip_id, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?) RETURNING id").run(tripId, sha256(token), user.id, expiresAt);
     await audit(user.id, tripId, "invitation.created", "invitation", Number(result.lastInsertRowid));
-    return json(response, 201, { invitation: { token, path: `/#invite=${token}`, expiresAt } });
+    return json(response, 201, { invitation: await invitationPayload(request, token, expiresAt) });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/participants$/);
   if (request.method === "POST" && match) {
@@ -546,13 +689,14 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const tripId = Number(match[1]); await requireAccess(tripId, user.id); await requireActiveTrip(tripId);
     const body = await readJson(request); const payerId = Number(body.payerId); await assertTripParticipant(tripId, payerId);
     const amountCents = parseAmount(body.amount);
+    const category = await activeCategorySlug(body.category);
     const entries: Array<{ participantId: number; value: unknown }> = Array.isArray(body.entries) ? body.entries.map((entry: any) => ({ participantId: Number(entry.participantId), value: entry.value })) : [];
     await Promise.all(entries.map((entry: any) => assertTripParticipant(tripId, entry.participantId)));
     if (new Set(entries.map((entry: { participantId: number }) => entry.participantId)).size !== entries.length) throw new Error("Varje deltagare får bara finnas en gång");
     const amounts = calculateShares(amountCents, String(body.splitMode || "equal"), entries);
     await db.transaction(async () => {
       const result = await db.prepare("INSERT INTO expenses (trip_id, payer_id, title, amount_cents, expense_date, category, split_mode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-        .run(tripId, payerId, cleanText(body.title, "Beskrivning", 100), amountCents, validDate(body.expenseDate), cleanText(body.category || "other", "Kategori", 30), String(body.splitMode || "equal"), user.id);
+        .run(tripId, payerId, cleanText(body.title, "Beskrivning", 100), amountCents, validDate(body.expenseDate), category, String(body.splitMode || "equal"), user.id);
       const expenseId = Number(result.lastInsertRowid); const insertShare = db.prepare("INSERT INTO expense_shares (expense_id, participant_id, amount_cents) VALUES (?, ?, ?)");
       for (const [index, entry] of entries.entries()) await insertShare.run(expenseId, entry.participantId, amounts[index]);
       await audit(user.id, tripId, "expense.created", "expense", expenseId, { amountCents });
@@ -569,6 +713,54 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       .run(tripId, fromId, toId, amountCents, body.note ? cleanText(body.note, "Anteckning", 120) : null, user.id);
     await audit(user.id, tripId, "payment.created", "payment", Number(result.lastInsertRowid), { amountCents });
     return json(response, 201, { trip: await loadTrip(tripId, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/expenses\/(\d+)\/receipts$/);
+  if (request.method === "POST" && match) {
+    const expense = await db.prepare("SELECT * FROM expenses WHERE id = ? AND voided_at IS NULL").get<any>(Number(match[1]));
+    if (!expense) return json(response, 404, { error: "Utgiften finns inte" });
+    await requireAccess(expense.trip_id, user.id);
+    await requireActiveTrip(expense.trip_id);
+    const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1);
+    const mimeType = contentType.trim().toLowerCase();
+    if (!receiptMimeTypes.has(mimeType)) throw new HttpError(415, "Kvitton måste vara JPG, PNG, WebP eller PDF");
+    const receiptCount = Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE expense_id = ?").get<any>(expense.id))?.count || 0);
+    if (receiptCount >= receiptMaximumCount) throw new HttpError(409, `Högst ${receiptMaximumCount} kvitton per utgift`);
+    const content = await readBytes(request, receiptMaximumBytes);
+    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda filformatet");
+    const fileName = safeReceiptName(request.headers["x-file-name"]);
+    const result = await db.prepare("INSERT INTO expense_receipts (expense_id, trip_id, file_name, mime_type, byte_size, content, created_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .run(expense.id, expense.trip_id, fileName, mimeType, content.length, content, user.id);
+    await audit(user.id, expense.trip_id, "receipt.created", "receipt", Number(result.lastInsertRowid), { expenseId: expense.id, fileName, byteSize: content.length });
+    return json(response, 201, { trip: await loadTrip(expense.trip_id, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/receipts\/(\d+)$/);
+  if (request.method === "GET" && match) {
+    const receipt = await db.prepare("SELECT * FROM expense_receipts WHERE id = ?").get<any>(Number(match[1]));
+    if (!receipt) return json(response, 404, { error: "Kvittot finns inte" });
+    await requireAccess(receipt.trip_id, user.id);
+    const content = Buffer.from(receipt.content);
+    response.writeHead(200, {
+      ...securityHeaders(),
+      "Content-Type": receipt.mime_type,
+      "Content-Length": String(content.length),
+      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(receipt.file_name)}`,
+      "Cache-Control": "private, no-store",
+    });
+    response.end(content);
+    return;
+  }
+  if (request.method === "DELETE" && match) {
+    const receipt = await db.prepare("SELECT * FROM expense_receipts WHERE id = ?").get<any>(Number(match[1]));
+    if (!receipt) return json(response, 404, { error: "Kvittot finns inte" });
+    await requireRecordWriteAccess(receipt.trip_id, user.id, receipt.created_by);
+    await requireActiveTrip(receipt.trip_id);
+    await db.transaction(async () => {
+      await audit(user.id, receipt.trip_id, "receipt.deleted", "receipt", receipt.id, {
+        expenseId: receipt.expense_id, fileName: receipt.file_name, byteSize: receipt.byte_size,
+      });
+      await db.prepare("DELETE FROM expense_receipts WHERE id = ?").run(receipt.id);
+    });
+    return json(response, 200, { ok: true });
   }
   match = url.pathname.match(/^\/api\/expenses\/(\d+)$/);
   if (request.method === "PATCH" && match) {
@@ -589,7 +781,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const amounts = calculateShares(amountCents, splitMode, entries);
     const title = cleanText(body.title, "Beskrivning", 100);
     const expenseDate = validDate(body.expenseDate);
-    const category = cleanText(body.category || "other", "Kategori", 30);
+    const category = await activeCategorySlug(body.category);
     const previousShares = await db.prepare("SELECT participant_id, amount_cents FROM expense_shares WHERE expense_id = ? ORDER BY participant_id").all<any>(expense.id);
     await db.transaction(async () => {
       await db.prepare(`
