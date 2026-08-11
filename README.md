@@ -16,7 +16,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
 - Frivilliga datum för både resor och utgifter
 - Egna, arkiverbara utgiftskategorier samt kvitton direkt under utgiften
-- Lokal svensk kvittoavläsning med Qwen3-VL 4B, bildförbehandling och Tesseract-reserv som föreslår restaurang/plats, totalbelopp, datum, kategori och artikelrader
+- Lokal svensk kvittoavläsning med PaddleOCR-VL 1.6, bildförbehandling och Tesseract-reserv som föreslår restaurang/plats, totalbelopp, datum, kategori och artikelrader
 - Mobilanpassade formulärfält som inte automatiskt zoomar in på iPhone
 - Egen statistikvy för kategorier, restauranger/platser, betalare och månadsutveckling
 - Fristående Snabbnota: skanna kvittorader, dela en säker länk och låt alla bocka av mat och dryck i realtid
@@ -39,14 +39,14 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    TRUST_PROXY=false
    SESSION_DAYS=30
    BACKUP_RETENTION_DAYS=14
-   OLLAMA_MODEL=qwen3-vl:4b-instruct-q4_K_M
-   OLLAMA_OCR_TIMEOUT_MS=60000
-   OLLAMA_OCR_MAX_TOKENS=768
-   OLLAMA_ACCURATE_RETRY=true
+   PADDLEOCR_TIMEOUT_MS=60000
+   PADDLEOCR_MAX_TOKENS=512
+   PADDLEOCR_ACCURATE_RETRY=true
+   PADDLEOCR_PARALLEL=2
    RECEIPT_OCR_WORKERS=2
    ```
 
-4. Välj **Compose Up**. Första starten laddar ner Qwen3-VL-modellen på cirka 3,3 GB och kan därför ta några minuter.
+4. Välj **Compose Up**. Första starten laddar ner PaddleOCR-VL-modellen och dess bildprojektor på sammanlagt cirka 1,7 GB och kan därför ta några minuter.
 5. Öppna `http://DIN-UNRAID-IP:8787` och skapa första administratören med `APP_PASSWORD`.
 
 PostgreSQL publicerar ingen port på Unraid. Endast appen finns på port 8787. Beständig data och backup ligger utanför containrarna:
@@ -54,7 +54,7 @@ PostgreSQL publicerar ingen port på Unraid. Endast appen finns på port 8787. B
 ```text
 /mnt/user/kompis_split/postgres/
 /mnt/user/kompis_split/backups/
-/mnt/user/kompis_split/ollama/
+/mnt/user/kompis_split/paddleocr/
 ```
 
 Den gamla demo-SQLite-filen under `/mnt/user/kompis_split/data/` används inte längre och kan ligga kvar tills du själv väljer att ta bort den.
@@ -73,10 +73,10 @@ Snabbnota är separat från resor och passar en restaurangnota där alla vill v�
 
 OCR kan misstolka en kvittorad. Skaparen måste därför alltid kontrollera namn, antal, radsummor och totalsumma innan snabbnotan skapas. Skillnaden mellan kvittots total och de avlästa raderna visas tydligt som ej fördelad.
 
-Varje analys visar om lokal AI faktiskt användes eller om Ollama exempelvis tog timeout, saknade modellen eller inte kunde nås. Motsvarande säkra diagnostik skrivs till containerloggen utan kvittobild, OCR-text, namn eller andra personuppgifter. Visa den med:
+Varje analys visar om lokal AI faktiskt användes eller om PaddleOCR exempelvis tog timeout eller inte kunde nås. Motsvarande säkra diagnostik skrivs till containerloggen utan kvittobild, OCR-text, namn eller andra personuppgifter. Visa den med:
 
 ```sh
-docker compose logs --tail=200 kompis-split ollama ollama-model
+docker compose logs --tail=200 kompis-split paddleocr paddleocr-model
 ```
 
 ## Reverse proxy och HTTPS
@@ -96,7 +96,7 @@ Proxyn ska vidarebefordra `Host` eller `X-Forwarded-Host`. `TRUST_PROXY=true` f�
 
 Kvitton lagras i PostgreSQL och följer därför med i samma backup. JPG, PNG, WebP och PDF stöds, högst 8 MB per fil och fem filer per utgift. När en arkiverad resa flyttas till papperskorgen raderas dess kvittofiler permanent; utgifter, betalningar och audit-logg behålls så att den ekonomiska historiken fortfarande kan granskas och resan återställas.
 
-När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen skickar bilden över det interna Compose-nätverket till den lokala Qwen3-VL-modellen och jämför resultatet med Tesseract och exakt öresmatematik. Ett inkonsekvent AI-resultat kontrolleras automatiskt en andra gång. Bilden lämnar aldrig Unraid-servern. Om Ollama eller GPU:n inte är tillgänglig används Tesseract automatiskt. Kontrollera alltid belopp, datum, namn och artikelrader innan du sparar. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
+När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen skickar bilden över det interna Compose-nätverket till den lokala PaddleOCR-VL 1.6-modellen och jämför resultatet med Tesseract och exakt öresmatematik. Ett inkonsekvent AI-resultat kontrolleras automatiskt en andra gång. Bilden lämnar aldrig Unraid-servern. Om PaddleOCR-tjänsten eller GPU:n inte är tillgänglig används Tesseract automatiskt. Kontrollera alltid belopp, datum, namn och artikelrader innan du sparar. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
 
 Testa återställning på en separat databas:
 
@@ -129,11 +129,12 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `TRUST_PROXY` | `false` | Ska bara vara `true` bakom betrodd proxy |
 | `SESSION_DAYS` | `30` | Sessionernas livslängd |
 | `BACKUP_RETENTION_DAYS` | `14` | Retention för dagliga dumpfiler |
-| `OLLAMA_URL` | `http://ollama:11434` i Compose | Intern adress till lokal dokument-AI; exponeras inte publikt |
-| `OLLAMA_MODEL` | `qwen3-vl:4b-instruct-q4_K_M` | Lokal 4,44B instruct-visionmodell, cirka 3,3 GB och vald för GTX 1080 Ti; thinking-taggen ska inte användas för kvittoextraktion |
-| `OLLAMA_OCR_TIMEOUT_MS` | `60000` | Maximal väntetid i millisekunder per lokal AI-kontroll innan Tesseract-resultatet används |
-| `OLLAMA_OCR_MAX_TOKENS` | `768` | Hård gräns för AI-svarets längd; hindrar visionmodellen från att fortsätta tills timeout |
-| `OLLAMA_ACCURATE_RETRY` | `true` | Kör en extra AI-kontroll endast när den första tolkningen inte summerar exakt |
+| `PADDLEOCR_URL` | `http://paddleocr:8080` i Compose | Intern adress till den lokala llama.cpp-servern; exponeras inte publikt |
+| `PADDLEOCR_MODEL` | `PaddleOCR-VL-1.6` i Compose | Modellnamn som skickas till den interna servern |
+| `PADDLEOCR_TIMEOUT_MS` | `60000` | Maximal väntetid i millisekunder per lokal AI-kontroll innan Tesseract-resultatet används |
+| `PADDLEOCR_MAX_TOKENS` | `512` | Hård gräns för OCR-svarets längd; hindrar modellen från att fortsätta tills timeout |
+| `PADDLEOCR_ACCURATE_RETRY` | `true` | Kör en extra AI-kontroll endast när den första tolkningen inte summerar exakt |
+| `PADDLEOCR_PARALLEL` | `2` | Antal samtidiga llama.cpp-förfrågningar; två är en försiktig start för GTX 1080 Ti |
 | `RECEIPT_OCR_WORKERS` | `2` | Antal parallella Tesseract-arbetare; två matchar AI-parallelliteten och serverns 40 CPU-trådar |
 
 ## Lokal utveckling

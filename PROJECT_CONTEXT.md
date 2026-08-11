@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-11  
-Appversion: 1.11.0
+Appversion: 1.12.0
 Databasschema: migration 6
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -25,7 +25,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 - Databas: PostgreSQL 17, endast tillgänglig inne i Compose-nätverket.
 - Databasåtkomst: `pg` med frågeadapter i `src/database.ts`.
 - Migreringar: ordnade, framåtriktade migreringar i `src/migrations.ts`, registrerade i `schema_migrations`.
-- OCR: lokal Qwen3-VL 4B via en intern Ollama-container med strukturerat kvittoschema, kompletterad med automatisk beskärning, perspektivuträtning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. AI startas parallellt men avbryts när den snabba lokala tolkningen redan summerar exakt. Matematiskt inkonsekventa AI-resultat får en adaptiv andra kontroll.
+- OCR: lokal PaddleOCR-VL 1.6 GGUF via en intern pinnad llama.cpp CUDA-server, kompletterad med automatisk beskärning, perspektivuträtning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. AI startas parallellt men avbryts när den snabba lokala tolkningen redan summerar exakt. Matematiskt inkonsekventa AI-resultat får en adaptiv andra kontroll.
 - Realtid: Server-Sent Events för snabbnota.
 - Pakethanterare: pnpm 11.16.0.
 - Produktion: Docker Compose på Unraid och publicerad image i GitHub Container Registry.
@@ -39,7 +39,7 @@ Bevara denna arkitektur om inte en större förändring uttryckligen har godkän
 - PostgreSQL: `postgres:17.10-alpine3.22`, utan publicerad host-port.
 - Beständig databas: `/mnt/user/kompis_split/postgres`.
 - Automatiska dump-backuper: `/mnt/user/kompis_split/backups`, normalt 14 dagars retention.
-- Lokala Ollama-modeller: `/mnt/user/kompis_split/ollama`; tjänsten har ingen publicerad host-port och använder GTX 1080 Ti via Nvidia-runtime.
+- Lokala PaddleOCR-modeller: `/mnt/user/kompis_split/paddleocr`; llama.cpp-tjänsten har ingen publicerad host-port och använder GTX 1080 Ti via Nvidia-runtime.
 - Appcontainern är read-only, saknar Linux capabilities och använder `/tmp` som begränsad tmpfs.
 - Produktionsåtkomst ska gå via HTTPS-reverse proxy. `COOKIE_SECURE=true` och `TRUST_PROXY=true` används när proxyn är korrekt konfigurerad.
 - Hemligheter sätts i Unraid Compose Manager eller ignorerad `.env`, aldrig i Git.
@@ -63,7 +63,7 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 - Utgifter och betalningar är huvudboken. Saldon beräknas från den och lagras inte som separat sanning.
 - Finansiella poster mjukraderas eller reverseras så att historiken bevaras.
 - Resor kan arkiveras och mjukraderas. Kvittofiler kopplade till en borttagen resa tas bort enligt appens nuvarande dataskyddsbeteende.
-- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot. Qwen3-VL och Tesseract jämförs, radsummor valideras mot totalen och avvikelser markeras för extra kontroll.
+- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot. PaddleOCR-VL och Tesseract jämförs, radsummor valideras mot totalen och avvikelser markeras för extra kontroll.
 
 ## Databasmigreringar
 
@@ -105,6 +105,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.12.0 byter den lokala dokumentmodellen till PaddleOCR-VL 1.6 via dess officiella GGUF-distribution och en intern, versionspinnad llama.cpp CUDA-server. Modellen använder det dokumenterade `OCR:`-kommandot utan framtvingat JSON-schema. Parsern hanterar både traditionella artikelrader och PaddleOCR-resultat där flera produktnamn följs av ett separat prisblock, samt totalrubrik och totalbelopp på skilda rader. Modellfilerna hämtas atomiskt till en beständig Unraid-katalog. Tesseract och alla säkra reservvägar behålls.
 - Version 1.11.0 byter till den officiella `qwen3-vl:4b-instruct-q4_K_M`, eftersom thinking-varianten kan returnera hundratals tokens i `message.thinking` men lämna `message.content` tomt för bilder. Reserv-OCR använder en naturligare gråskalebild och behandlar inte längre största artikelpriset som totalsumma när en oläslig totalrad faktiskt finns. `thinking_only` loggas separat utan att modellens resonemang eller kvittodata sparas.
 - Version 1.10.0 begränsar Qwen3-VL:s kvittosvar till 768 tokens, stänger uttryckligen av thinking-läge och skickar en mindre AI-bild utan att minska Tesseracts upplösning. Detta förhindrar minutlånga svar som annars fortsatte till timeout. Säkra loggar visar nu avslutsorsak, prompt- och svarstokens samt modellens laddnings- och inferenstid utan att logga kvittodata.
 - Version 1.9.0 rätar ut fotograferade papperskvitton mot mörk bakgrund och kombinerar alternativa läsningar genom att välja radbelopp som får kvittot att summera exakt. Heltalsbelopp före `SEK`, prioriterade beställningsdatum, OCR-varianter av antalmarkören `x` och styckpris gånger antal hanteras deterministiskt. En exakt lokal tolkning avbryter den långsamma AI-körningen. Säkra loggar och klientstatus visar om Ollama användes, tog timeout, saknade modell, inte kunde nås eller returnerade ogiltigt svar; kvittobild och OCR-text loggas aldrig.
@@ -114,7 +115,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 - Compose använder `runtime: nvidia` för kompatibilitet med Unraid Compose Manager i stället för det nyare `gpus`-fältet.
 - Version 1.5.0 lägger till helt lokal GLM-OCR via Ollama, adaptiv flerpass-OCR, bildnormalisering och bättre hantering av radbrytningar och teckenfel i belopp.
 - Kamera och bildbibliotek har separata knappar så att användaren alltid kan välja en befintlig bild om Chrome-kameran inte fungerar på enheten.
-- Ollama körs endast på det interna Compose-nätverket med `qwen3-vl:4b-instruct-q4_K_M` för GTX 1080 Ti; appen faller automatiskt tillbaka till Tesseract om modellen inte är tillgänglig.
+- PaddleOCR körs endast på det interna Compose-nätverket med `ghcr.io/ggml-org/llama.cpp:server-cuda-b9570`; appen faller automatiskt tillbaka till Tesseract om modellen inte är tillgänglig.
 - Version 1.4.0 innehåller förbättrad svensk kvittoradstolkning och kontolösa snabbnotegäster.
 - Setup-sessionens HTTP-svar skickas först efter att PostgreSQL-transaktionen har committats, vilket förhindrar en sporadisk 401 direkt efter första installationen.
 - PostgreSQL-integrationstest, TypeScript, lint och övriga tester är gröna för denna version.

@@ -1,41 +1,66 @@
 services:
-  ollama:
-    image: ollama/ollama:0.32.0
-    container_name: kompis-split-ollama
-    restart: unless-stopped
-    runtime: nvidia
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      OLLAMA_KEEP_ALIVE: "10m"
-      OLLAMA_NUM_PARALLEL: "2"
-      OLLAMA_MAX_LOADED_MODELS: "1"
-      OLLAMA_MAX_QUEUE: "128"
-      OLLAMA_CONTEXT_LENGTH: "8192"
-      OLLAMA_FLASH_ATTENTION: "1"
-      OLLAMA_KV_CACHE_TYPE: q8_0
+  paddleocr-model:
+    image: alpine:3.23.3
+    container_name: kompis-split-paddleocr-model
+    restart: "no"
     volumes:
-      - /mnt/user/kompis_split/ollama:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 30s
+      - /mnt/user/kompis_split/paddleocr:/models
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        apk add --no-cache ca-certificates wget
+        base="https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/resolve/511b09642bb324401f15f97cc23bc67e8f0a291d"
+        download() {
+          file="$$1"
+          checksum="$$2"
+          if [ ! -s "/models/$$file" ] || ! echo "$$checksum  /models/$$file" | sha256sum -c -; then
+            wget -O "/models/$$file.part" "$$base/$$file"
+            echo "$$checksum  /models/$$file.part" | sha256sum -c -
+            mv "/models/$$file.part" "/models/$$file"
+          fi
+        }
+        download PaddleOCR-VL-1.6-GGUF.gguf f3ae46ec885050acf4b3d31944431e1fd90d50664fb09126af4a3c050ba14ee8
+        download PaddleOCR-VL-1.6-GGUF-mmproj.gguf 204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a
     security_opt:
       - no-new-privileges:true
 
-  ollama-model:
-    image: ollama/ollama:0.32.0
-    container_name: kompis-split-ollama-model
-    restart: "no"
+  paddleocr:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b9570
+    container_name: kompis-split-paddleocr
+    restart: unless-stopped
+    runtime: nvidia
     depends_on:
-      ollama:
-        condition: service_healthy
+      paddleocr-model:
+        condition: service_completed_successfully
     environment:
-      OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["/bin/ollama"]
-    command: ["pull", "${OLLAMA_MODEL:-qwen3-vl:4b-instruct-q4_K_M}"]
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - /mnt/user/kompis_split/paddleocr:/models:ro
+    command:
+      - --model
+      - /models/PaddleOCR-VL-1.6-GGUF.gguf
+      - --mmproj
+      - /models/PaddleOCR-VL-1.6-GGUF-mmproj.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --temp
+      - "0"
+      - --ctx-size
+      - "8192"
+      - --n-gpu-layers
+      - "99"
+      - --parallel
+      - "${PADDLEOCR_PARALLEL:-2}"
+      - --cont-batching
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
     security_opt:
       - no-new-privileges:true
 
@@ -82,11 +107,11 @@ services:
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       TRUST_PROXY: "${TRUST_PROXY:-false}"
       SESSION_DAYS: "${SESSION_DAYS:-30}"
-      OLLAMA_URL: http://ollama:11434
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3-vl:4b-instruct-q4_K_M}"
-      OLLAMA_OCR_TIMEOUT_MS: "${OLLAMA_OCR_TIMEOUT_MS:-60000}"
-      OLLAMA_OCR_MAX_TOKENS: "${OLLAMA_OCR_MAX_TOKENS:-768}"
-      OLLAMA_ACCURATE_RETRY: "${OLLAMA_ACCURATE_RETRY:-true}"
+      PADDLEOCR_URL: http://paddleocr:8080
+      PADDLEOCR_MODEL: PaddleOCR-VL-1.6
+      PADDLEOCR_TIMEOUT_MS: "${PADDLEOCR_TIMEOUT_MS:-60000}"
+      PADDLEOCR_MAX_TOKENS: "${PADDLEOCR_MAX_TOKENS:-512}"
+      PADDLEOCR_ACCURATE_RETRY: "${PADDLEOCR_ACCURATE_RETRY:-true}"
       RECEIPT_OCR_WORKERS: "${RECEIPT_OCR_WORKERS:-2}"
     read_only: true
     tmpfs:

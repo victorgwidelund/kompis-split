@@ -14,6 +14,16 @@ const ollamaUrl = (() => {
     return ["http:", "https:"].includes(parsed.protocol) ? parsed.href.replace(/\/$/, "") : null;
   } catch { return null; }
 })();
+const paddleOcrModel = String(process.env.PADDLEOCR_MODEL || "PaddleOCR-VL-1.6").trim();
+const paddleOcrMaxTokens = Math.min(1_024, Math.max(256, Number(process.env.PADDLEOCR_MAX_TOKENS) || 512));
+const paddleOcrUrl = (() => {
+  const value = String(process.env.PADDLEOCR_URL || "").trim();
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href.replace(/\/$/, "") : null;
+  } catch { return null; }
+})();
 
 export type ReceiptSuggestion = {
   title: string | null;
@@ -118,11 +128,21 @@ function merchantNameScore(value: string) {
 function receiptTotal(lines: string[]) {
   const prioritized: number[] = [];
   const fallback: number[] = [];
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
     const amounts = amountCandidates(line);
     if (!amounts.length) continue;
     fallback.push(...amounts);
     if (totalWords.test(line) && !excludedTotalWords.test(line)) prioritized.push(...amounts);
+  }
+  if (!prioritized.length) {
+    for (let index = 0; index < lines.length - 1; index += 1) {
+      const line = lines[index]!;
+      const next = lines[index + 1]!;
+      if (!totalWords.test(line) || excludedTotalWords.test(line)) continue;
+      if (!/^\s*\d{1,6}[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(next)) continue;
+      prioritized.push(...amountCandidates(next));
+    }
   }
   if (!prioritized.length && lines.some((line) => totalWords.test(line) && !excludedTotalWords.test(line))) return null;
   const candidates = prioritized.length ? prioritized : fallback;
@@ -134,6 +154,26 @@ function receiptItems(lines: string[]) {
   const itemLines: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
+    const separatedNames: string[] = [];
+    let cursor = index;
+    while (cursor < lines.length && /^\s*\d{1,2}\s*[xX]\s*\S.*[A-Za-zÅÄÖåäö]/.test(lines[cursor]!) && !amountCandidates(lines[cursor]!).length) {
+      separatedNames.push(lines[cursor]!);
+      cursor += 1;
+    }
+    if (separatedNames.length >= 2) {
+      const separatedAmounts: string[] = [];
+      while (cursor < lines.length && /^\s*\d{1,6}[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(lines[cursor]!)) {
+        separatedAmounts.push(lines[cursor]!);
+        cursor += 1;
+      }
+      if (separatedAmounts.length === separatedNames.length) {
+        for (let pairIndex = 0; pairIndex < separatedNames.length; pairIndex += 1) {
+          itemLines.push(`${separatedNames[pairIndex]} ${separatedAmounts[pairIndex]}`);
+        }
+        index = cursor - 1;
+        continue;
+      }
+    }
     const next = lines[index + 1] || "";
     const hasProductText = (line.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2;
     const endsWithAmount = /\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line);
@@ -380,6 +420,68 @@ export function ollamaReceiptRequest(content: Buffer, verification = false) {
   };
 }
 
+export function paddleOcrReceiptRequest(content: Buffer, verification = false) {
+  return {
+    model: paddleOcrModel,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image_url", image_url: { url: `data:image/jpeg;base64,${content.toString("base64")}` } },
+        { type: "text", text: "OCR:" },
+      ],
+    }],
+    temperature: 0,
+    seed: verification ? 239017 : 837451,
+    max_tokens: paddleOcrMaxTokens,
+    stream: false,
+  };
+}
+
+async function recognizeWithPaddleOcr(content: Buffer, verification = false, cancelled?: AbortSignal): Promise<AiAttempt> {
+  const startedAt = Date.now();
+  if (!paddleOcrUrl) return { pass: null, status: "disabled", durationMs: 0 };
+  try {
+    const timeout = Math.min(180_000, Math.max(15_000, Number(process.env.PADDLEOCR_TIMEOUT_MS) || 60_000));
+    const timeoutSignal = AbortSignal.timeout(timeout);
+    const response = await fetch(`${paddleOcrUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: cancelled ? AbortSignal.any([timeoutSignal, cancelled]) : timeoutSignal,
+      body: JSON.stringify(paddleOcrReceiptRequest(content, verification)),
+    });
+    if (!response.ok) {
+      const attempt = { pass: null, status: `http_${response.status}`, durationMs: Date.now() - startedAt, httpStatus: response.status } satisfies AiAttempt;
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: paddleOcrModel, status: attempt.status, durationMs: attempt.durationMs });
+      return attempt;
+    }
+    const payload = await response.json() as {
+      choices?: Array<{ finish_reason?: unknown; message?: { content?: unknown } }>;
+      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+    };
+    const text = typeof payload.choices?.[0]?.message?.content === "string" ? payload.choices[0].message.content.trim() : "";
+    const finishReason = typeof payload.choices?.[0]?.finish_reason === "string" ? payload.choices[0].finish_reason : undefined;
+    const metrics = {
+      doneReason: finishReason,
+      outputTokens: Number.isFinite(Number(payload.usage?.completion_tokens)) ? Number(payload.usage?.completion_tokens) : undefined,
+      promptTokens: Number.isFinite(Number(payload.usage?.prompt_tokens)) ? Number(payload.usage?.prompt_tokens) : undefined,
+    };
+    if (!text) {
+      const attempt = { pass: null, status: "empty_response", durationMs: Date.now() - startedAt } satisfies AiAttempt;
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: paddleOcrModel, status: attempt.status, durationMs: attempt.durationMs, ...metrics });
+      return attempt;
+    }
+    const tokenLimited = finishReason === "length";
+    const attempt = { pass: tokenLimited ? null : { text, confidence: verification ? 94 : 92, suggestion: parseReceiptText(text) }, status: tokenLimited ? "token_limit" : "ok", durationMs: Date.now() - startedAt } satisfies AiAttempt;
+    logOcr({ stage: verification ? "ai_verify" : "ai", model: paddleOcrModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass?.suggestion.items.length, ...metrics });
+    return attempt;
+  } catch (error) {
+    const status = cancelled?.aborted ? "cancelled_local_complete" : error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError") ? "timeout" : "connection_error";
+    const attempt = { pass: null, status, durationMs: Date.now() - startedAt } satisfies AiAttempt;
+    logOcr({ stage: verification ? "ai_verify" : "ai", model: paddleOcrModel, status, durationMs: attempt.durationMs });
+    return attempt;
+  }
+}
+
 async function recognizeWithOllama(content: Buffer, verification = false, cancelled?: AbortSignal): Promise<AiAttempt> {
   const startedAt = Date.now();
   if (!ollamaUrl) return { pass: null, status: "disabled", durationMs: 0 };
@@ -438,6 +540,10 @@ async function recognizeWithOllama(content: Buffer, verification = false, cancel
     logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status, durationMs: attempt.durationMs });
     return attempt;
   }
+}
+
+function recognizeWithDocumentAi(content: Buffer, verification = false, cancelled?: AbortSignal) {
+  return paddleOcrUrl ? recognizeWithPaddleOcr(content, verification, cancelled) : recognizeWithOllama(content, verification, cancelled);
 }
 
 const localWorkerCount = Math.min(4, Math.max(1, Number(process.env.RECEIPT_OCR_WORKERS) || 2));
@@ -614,13 +720,14 @@ export async function recognizeReceipt(content: Buffer) {
   const startedAt = Date.now();
   const images = await prepareReceiptImages(content);
   const aiCancellation = new AbortController();
-  const aiPromise = recognizeWithOllama(images.ai, false, aiCancellation.signal);
+  const aiModel = paddleOcrUrl ? paddleOcrModel : ollamaModel;
+  const aiPromise = recognizeWithDocumentAi(images.ai, false, aiCancellation.signal);
   const local = await recognizeReceiptLocally(images);
   const localPass = { text: "", confidence: local.confidence, suggestion: local.suggestion } satisfies ReceiptPass;
   if (balancedPass(localPass)) {
     aiCancellation.abort();
     const aiAttempt = await aiPromise;
-    const result = { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, rectified: images.rectified, ai: { model: ollamaModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs, used: false, retried: false }, needsReview: false };
+    const result = { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, rectified: images.rectified, ai: { model: aiModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs, used: false, retried: false }, needsReview: false };
     logOcr({ scanId, stage: "complete", source: result.source, aiStatus: aiAttempt.status, durationMs: Date.now() - startedAt, items: result.suggestion.items.length, balanced: true, rectified: images.rectified });
     return result;
   }
@@ -630,14 +737,15 @@ export async function recognizeReceipt(content: Buffer) {
     const localTotal = amountCents(local.suggestion.amount);
     const localItemTotal = local.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
     const balanced = localTotal !== null && local.suggestion.items.length > 0 && localItemTotal === localTotal;
-    const result = { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, rectified: images.rectified, ai: { model: ollamaModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs, used: false, retried: false }, needsReview: !balanced };
+    const result = { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, rectified: images.rectified, ai: { model: aiModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs, used: false, retried: false }, needsReview: !balanced };
     logOcr({ scanId, stage: "complete", source: result.source, aiStatus: aiAttempt.status, durationMs: Date.now() - startedAt, items: result.suggestion.items.length, balanced, rectified: images.rectified });
     return result;
   }
   const aiPasses = [aiPass];
   let verificationAttempt: AiAttempt | null = null;
-  if (!balancedPass(aiPass) && String(process.env.OLLAMA_ACCURATE_RETRY || "true").toLowerCase() !== "false") {
-    verificationAttempt = await recognizeWithOllama(images.grayscale, true);
+  const accurateRetry = paddleOcrUrl ? process.env.PADDLEOCR_ACCURATE_RETRY : process.env.OLLAMA_ACCURATE_RETRY;
+  if (!balancedPass(aiPass) && String(accurateRetry || "true").toLowerCase() !== "false") {
+    verificationAttempt = await recognizeWithDocumentAi(images.grayscale, true);
     if (verificationAttempt.pass) aiPasses.push(verificationAttempt.pass);
   }
   const combined = combineReceiptPasses([...aiPasses, localPass]);
@@ -648,7 +756,7 @@ export async function recognizeReceipt(content: Buffer) {
   const result = {
     ...combined, passes: local.passes + aiPasses.length, source: "ollama+tesseract" as const, cropped: images.crop.screenshotPreview,
     rectified: images.rectified,
-    ai: { model: ollamaModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs + (verificationAttempt?.durationMs || 0), used: true, retried: Boolean(verificationAttempt), verificationStatus: verificationAttempt?.status },
+    ai: { model: aiModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs + (verificationAttempt?.durationMs || 0), used: true, retried: Boolean(verificationAttempt), verificationStatus: verificationAttempt?.status },
     needsReview: new Set(totals).size > 1 || total === null || !combined.suggestion.items.length || itemTotal !== total,
   };
   logOcr({ scanId, stage: "complete", source: result.source, aiStatus: aiAttempt.status, aiRetried: Boolean(verificationAttempt), aiVerificationStatus: verificationAttempt?.status, durationMs: Date.now() - startedAt, items: result.suggestion.items.length, balanced: !result.needsReview, rectified: images.rectified });
