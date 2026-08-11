@@ -50,6 +50,28 @@ test("receipt rows and quantities are extracted for quick tab claiming", () => {
   ]);
 });
 
+test("phone photos with OCR borders and decimal quantities preserve receipt rows", () => {
+  const suggestion = parseReceiptText(`
+    | Förhandsvisning |
+    VASE230109 #23 : 21719 |
+    Framsida
+    tis 26 maj 26 18:10
+    | 1.00 Chipspåse FS 49,00 |
+    | 1.00 Valenciamandlar burk 80,00 |
+    | 6.00 Heineken Draft (90.00) 540.00 |
+    Total 669.00 |
+    Moms% Moms ExMoms Total |
+  `, new Date("2026-05-27T12:00:00Z"));
+  assert.equal(suggestion.title, "Framsida");
+  assert.equal(suggestion.amount, "669.00");
+  assert.equal(suggestion.expenseDate, "2026-05-26");
+  assert.deepEqual(suggestion.items, [
+    { name: "Chipspåse FS", quantity: 1, amount: "49.00" },
+    { name: "Valenciamandlar burk", quantity: 1, amount: "80.00" },
+    { name: "Heineken Draft", quantity: 6, amount: "540.00" },
+  ]);
+});
+
 test("receipt parser handles European dates and ignores headings as merchants", () => {
   const suggestion = parseReceiptText(`
     KASSAKVITTO
