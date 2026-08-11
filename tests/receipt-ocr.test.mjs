@@ -1,22 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { closeReceiptOcr, combineReceiptPasses, parseOllamaReceipt, parseReceiptText, recognizeReceipt } from "../dist/receipt-ocr.js";
-
-function blankBitmap(width = 320, height = 120) {
-  const rowSize = Math.ceil((width * 3) / 4) * 4;
-  const imageSize = rowSize * height;
-  const bitmap = Buffer.alloc(54 + imageSize, 255);
-  bitmap.write("BM", 0, "ascii");
-  bitmap.writeUInt32LE(bitmap.length, 2);
-  bitmap.writeUInt32LE(54, 10);
-  bitmap.writeUInt32LE(40, 14);
-  bitmap.writeInt32LE(width, 18);
-  bitmap.writeInt32LE(height, 22);
-  bitmap.writeUInt16LE(1, 26);
-  bitmap.writeUInt16LE(24, 28);
-  bitmap.writeUInt32LE(imageSize, 34);
-  return bitmap;
-}
+import sharp from "sharp";
+import { closeReceiptOcr, combineReceiptPasses, parseOllamaReceipt, parseReceiptText, prepareReceiptImages, recognizeReceipt } from "../dist/receipt-ocr.js";
 
 test("Swedish receipt fields are extracted as editable suggestions", () => {
   const suggestion = parseReceiptText(`
@@ -48,6 +33,55 @@ test("receipt rows and quantities are extracted for quick tab claiming", () => {
     { name: "Lager", quantity: 2, amount: "130.00" },
     { name: "Fish and chips", quantity: 1, amount: "189.00" },
   ]);
+});
+
+test("compact quantity prefixes are kept and payment rows are excluded", () => {
+  const suggestion = parseReceiptText(`
+    KVÄLLSKROGEN
+    Produkt Pris
+    3x Mariestad 261.00
+    7x Smirnoff ICE 665.00
+    TOTALT SEK 926.00
+    Betalt SEK 926.00
+  `);
+  assert.equal(suggestion.amount, "926.00");
+  assert.deepEqual(suggestion.items, [
+    { name: "Mariestad", quantity: 3, amount: "261.00" },
+    { name: "Smirnoff ICE", quantity: 7, amount: "665.00" },
+  ]);
+});
+
+test("missing OCR decimal separators are repaired without treating card IDs as products", () => {
+  const suggestion = parseReceiptText(`
+    Mixed Grill 595 00
+    Heineken 13000
+    Extra SEK 168 .00
+    Total SEK 893.00
+    CTUIDSISTCSKSA000000011
+    AID A000000004 1010
+    TVR 0000008001
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Mixed Grill", quantity: 1, amount: "595.00" },
+    { name: "Heineken", quantity: 1, amount: "130.00" },
+    { name: "Extra", quantity: 1, amount: "168.00" },
+  ]);
+});
+
+test("iPhone preview chrome and margins are cropped before OCR", async () => {
+  const screenshot = await sharp(Buffer.from(`<svg width="590" height="1280" xmlns="http://www.w3.org/2000/svg">
+    <rect width="590" height="1280" fill="#fffdfd"/>
+    <rect width="590" height="148" fill="#4b4b4b"/>
+    <rect x="188" y="162" width="214" height="948" fill="#fff" stroke="#111" stroke-width="3"/>
+    <text x="220" y="300" font-size="22" fill="#222">KVITTO</text>
+    <text x="215" y="440" font-size="18" fill="#222">3x Dryck 261.00</text>
+    <text x="215" y="500" font-size="18" fill="#222">TOTAL 261.00</text>
+  </svg>`)).png().toBuffer();
+  const prepared = await prepareReceiptImages(screenshot);
+  assert.equal(prepared.crop.screenshotPreview, true);
+  assert.ok(prepared.crop.left > 140);
+  assert.ok(prepared.crop.width < 330);
+  assert.ok(prepared.crop.top >= 140);
 });
 
 test("phone photos with OCR borders and decimal quantities preserve receipt rows", () => {
@@ -131,7 +165,8 @@ test("invalid and future dates are not suggested", () => {
 
 test("the bundled Swedish OCR model works without an external service", { timeout: 30_000 }, async () => {
   try {
-    const result = await recognizeReceipt(blankBitmap());
+    const blankImage = await sharp({ create: { width: 320, height: 120, channels: 3, background: "white" } }).png().toBuffer();
+    const result = await recognizeReceipt(blankImage);
     assert.equal(result.suggestion.amount, null);
     assert.equal(result.suggestion.category, "other");
   } finally {

@@ -40,6 +40,7 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    SESSION_DAYS=30
    BACKUP_RETENTION_DAYS=14
    OLLAMA_MODEL=glm-ocr:q8_0
+   OLLAMA_OCR_TIMEOUT_MS=45000
    ```
 
 4. Välj **Compose Up**. Första starten laddar ner GLM-OCR-modellen och kan därför ta några minuter.
@@ -121,6 +122,7 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `BACKUP_RETENTION_DAYS` | `14` | Retention för dagliga dumpfiler |
 | `OLLAMA_URL` | `http://ollama:11434` i Compose | Intern adress till lokal dokument-AI; exponeras inte publikt |
 | `OLLAMA_MODEL` | `glm-ocr:q8_0` | Kvantiserad lokal OCR-modell, vald för GTX 1080 Ti-kompatibilitet |
+| `OLLAMA_OCR_TIMEOUT_MS` | `45000` | Maximal väntetid i millisekunder på lokal GLM-OCR innan Tesseract-resultatet används |
 
 ## Lokal utveckling
 

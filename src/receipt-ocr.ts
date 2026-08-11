@@ -23,19 +23,23 @@ export type ReceiptSuggestion = {
 };
 
 const ignoredMerchantWords = /^(kassa)?kvitto$|^välkommen|^tack för|^org\.?\s*nr|^datum|^tid|^tel|^telefon|^www\.|^moms|^total|^summa|^att betala|^butik\s*nr|^[^\s]*örhandsvisning|tillbaka/i;
-const totalWords = /att\s+betala|kortbelopp|belopp\s+sek|totalt?|summa/i;
+const totalWords = /att\s+betala|betalt|kortbelopp|belopp\s+sek|totalt?|f[öo]tatt|summa/i;
 const excludedTotalWords = /moms|vat|växel|change|rabatt|subtotal|delsumma/i;
 
 type ReceiptPass = { text: string; confidence: number; suggestion: ReceiptSuggestion };
 
 function normalizeNumericGlyphs(line: string) {
-  return line.replace(/(?<![A-Za-zÅÄÖåäö])[\dOo]{1,8}[.,][\dOo]{2}(?![A-Za-zÅÄÖåäö])/g, (value) => value.replace(/[Oo]/g, "0"));
+  return line
+    .replace(/(\d)\s+([.,])\s*(\d{2})(?!\d)/g, "$1$2$3")
+    .replace(/(\d)([.,])\s+(\d{2})(?!\d)/g, "$1$2$3")
+    .replace(/(\d{1,5})\s+(\d{2})(?=\s*(?:kr|sek)?$)/i, "$1.$2")
+    .replace(/(?<!\d)(\d{3,5})(?=\s*(?:kr|sek)?$)/i, (value) => `${value.slice(0, -2)}.${value.slice(-2)}`)
+    .replace(/(?<![A-Za-zÅÄÖåäö])[\dOo]{1,8}[.,][\dOo]{2}(?![A-Za-zÅÄÖåäö])/g, (value) => value.replace(/[Oo]/g, "0"));
 }
 
 function normalizedLines(text: string) {
   return text.split(/\r?\n/).map((line) => line
-    .replace(/^\s*[|¦]\s*/, "")
-    .replace(/\s*[|¦]\s*$/, "")
+    .replace(/\s*[|¦]\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim()).map(normalizeNumericGlyphs).filter(Boolean);
 }
@@ -124,7 +128,7 @@ function receiptItems(lines: string[]) {
   }
   const seen = new Set<string>();
   for (const line of itemLines) {
-    if (totalWords.test(line) || excludedTotalWords.test(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
+    if (totalWords.test(line) || excludedTotalWords.test(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
     const amounts = amountCandidates(line);
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
     const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[xX*]\s+)/;
@@ -274,44 +278,27 @@ export function parseOllamaReceipt(value: unknown, now = new Date()): ReceiptPas
   return { text, confidence: 85, suggestion: { title: merchant, amount, expenseDate, category: suggestedCategory(text), items } };
 }
 
-const ollamaReceiptSchema = {
-  type: "object",
-  properties: {
-    merchant: { type: ["string", "null"] },
-    date: { type: ["string", "null"], description: "Datum som YYYY-MM-DD" },
-    total: { type: ["number", "null"], description: "Kvittots totalbelopp" },
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" }, quantity: { type: "integer", minimum: 1, maximum: 20 },
-          amount: { type: "number", description: "Hela radens summa, inte styckpriset" },
-        },
-        required: ["name", "quantity", "amount"], additionalProperties: false,
-      },
-    },
-  },
-  required: ["merchant", "date", "total", "items"], additionalProperties: false,
-};
-
 async function recognizeWithOllama(content: Buffer) {
   if (!ollamaUrl) return null;
   try {
-    const response = await fetch(`${ollamaUrl}/api/generate`, {
+    const timeout = Math.min(120_000, Math.max(10_000, Number(process.env.OLLAMA_OCR_TIMEOUT_MS) || 45_000));
+    const response = await fetch(`${ollamaUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeout),
       body: JSON.stringify({
-        model: ollamaModel, stream: false, format: ollamaReceiptSchema,
-        prompt: "Läs det svenska restaurang- eller butikskvittot exakt. Returnera restaurang/butik, datum, totalbelopp och varje köpt rad. amount ska vara radens fulla summa efter quantity, aldrig styckpris. Gissa inte dold text. Ta inte med moms-, betalnings-, rabatt- eller totalrader som artiklar.",
-        images: [content.toString("base64")], options: { temperature: 0, seed: 837451 }, keep_alive: "10m",
+        model: ollamaModel,
+        stream: false,
+        messages: [{ role: "user", content: "Text Recognition:", images: [content.toString("base64")] }],
+        options: { temperature: 0, seed: 837451 },
+        keep_alive: "10m",
       }),
     });
     if (!response.ok) return null;
-    const payload = await response.json() as { response?: unknown };
-    const parsed = typeof payload.response === "string" ? JSON.parse(payload.response) : payload.response;
-    return parseOllamaReceipt(parsed);
+    const payload = await response.json() as { message?: { content?: unknown } };
+    const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
+    if (!text) return null;
+    return { text, confidence: 88, suggestion: parseReceiptText(text) } satisfies ReceiptPass;
   } catch { return null; }
 }
 
@@ -327,16 +314,77 @@ async function receiptWorker() {
   return workerPromise;
 }
 
-async function enhancedReceiptImages(content: Buffer) {
-  try {
-    const base = sharp(content, { limitInputPixels: 20_000_000, failOn: "error" })
-      .rotate()
-      .flatten({ background: "#ffffff" })
-      .resize({ width: 2200, height: 3600, fit: "inside", withoutEnlargement: false });
-    const grayscale = await base.clone().grayscale().normalize({ lower: 1, upper: 99 }).sharpen().png().toBuffer();
-    const binary = await base.clone().grayscale().normalize({ lower: 2, upper: 98 }).threshold(185).png().toBuffer();
-    return { grayscale, binary };
-  } catch { return null; }
+export type ReceiptCrop = { left: number; top: number; width: number; height: number; screenshotPreview: boolean };
+
+function regionMean(data: Buffer, width: number, top: number, bottom: number) {
+  let sum = 0;
+  let count = 0;
+  for (let y = Math.max(0, top); y < Math.min(bottom, Math.floor(data.length / width)); y += 1) {
+    const offset = y * width;
+    for (let x = 0; x < width; x += 3) { sum += data[offset + x]!; count += 1; }
+  }
+  return count ? sum / count : 255;
+}
+
+function locateReceipt(data: Buffer, width: number, height: number): ReceiptCrop {
+  const topMean = regionMean(data, width, Math.floor(height * 0.02), Math.floor(height * 0.11));
+  const bodyMean = regionMean(data, width, Math.floor(height * 0.13), Math.floor(height * 0.24));
+  const screenshotPreview = width / height < 0.8 && topMean < 195 && bodyMean > topMean + 35;
+  if (!screenshotPreview) return { left: 0, top: 0, width, height, screenshotPreview: false };
+
+  const rowMean = (y: number) => {
+    let sum = 0;
+    const offset = y * width;
+    for (let x = 0; x < width; x += 2) sum += data[offset + x]!;
+    return sum / Math.ceil(width / 2);
+  };
+  let searchTop = Math.floor(height * 0.08);
+  for (let y = searchTop; y < Math.floor(height * 0.32); y += 1) {
+    if (rowMean(y) > 215 && rowMean(Math.min(height - 1, y + 4)) > 215) { searchTop = y; break; }
+  }
+  const searchBottom = Math.floor(height * 0.94);
+  const darkLimit = 185;
+  const columnThreshold = Math.max(4, Math.floor((searchBottom - searchTop) * 0.009));
+  let left = width; let right = -1;
+  for (let x = 0; x < width; x += 1) {
+    let dark = 0;
+    for (let y = searchTop; y < searchBottom; y += 2) if (data[y * width + x]! < darkLimit) dark += 1;
+    if (dark >= Math.ceil(columnThreshold / 2)) { left = Math.min(left, x); right = Math.max(right, x); }
+  }
+  if (right < left || right - left < width * 0.16) return { left: 0, top: searchTop, width, height: searchBottom - searchTop, screenshotPreview };
+
+  const horizontalPadding = Math.max(8, Math.floor(width * 0.018));
+  left = Math.max(0, left - horizontalPadding);
+  right = Math.min(width - 1, right + horizontalPadding);
+  const rowThreshold = Math.max(2, Math.floor((right - left + 1) * 0.006));
+  let top = searchBottom; let bottom = -1;
+  for (let y = searchTop; y < searchBottom; y += 1) {
+    let dark = 0;
+    for (let x = left; x <= right; x += 2) if (data[y * width + x]! < darkLimit) dark += 1;
+    if (dark >= Math.ceil(rowThreshold / 2)) { top = Math.min(top, y); bottom = Math.max(bottom, y); }
+  }
+  if (bottom < top || bottom - top < height * 0.3) { top = searchTop; bottom = searchBottom - 1; }
+  const verticalPadding = Math.max(8, Math.floor(height * 0.012));
+  top = Math.max(searchTop, top - verticalPadding);
+  bottom = Math.min(searchBottom - 1, bottom + verticalPadding);
+  return { left, top, width: right - left + 1, height: bottom - top + 1, screenshotPreview };
+}
+
+export async function prepareReceiptImages(content: Buffer) {
+  const analyzed = await sharp(content, { limitInputPixels: 20_000_000, failOn: "error" })
+    .rotate().flatten({ background: "#ffffff" })
+    .resize({ width: 1200, height: 2000, fit: "inside", withoutEnlargement: true })
+    .png().toBuffer();
+  const raw = await sharp(analyzed).grayscale().raw().toBuffer({ resolveWithObject: true });
+  const crop = locateReceipt(raw.data, raw.info.width, raw.info.height);
+  const base = sharp(analyzed).extract({ left: crop.left, top: crop.top, width: crop.width, height: crop.height })
+    .resize({ width: 1600, height: 3400, fit: "inside", withoutEnlargement: false });
+  const [ai, grayscale, binary] = await Promise.all([
+    base.clone().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.8 }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer(),
+    base.clone().grayscale().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.9 }).png().toBuffer(),
+    base.clone().grayscale().normalize({ lower: 2, upper: 98 }).threshold(180).png().toBuffer(),
+  ]);
+  return { ai, grayscale, binary, crop };
 }
 
 async function recognizePass(worker: Worker, content: Buffer, pageMode: PSM, rotateAuto: boolean): Promise<ReceiptPass> {
@@ -348,23 +396,15 @@ async function recognizePass(worker: Worker, content: Buffer, pageMode: PSM, rot
   return { text: result.data.text, confidence, suggestion: parseReceiptText(result.data.text) };
 }
 
-async function recognizeReceiptLocally(content: Buffer) {
+async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepareReceiptImages>>) {
   const job = queue.then(async () => {
     const worker = await receiptWorker();
-    const passes: ReceiptPass[] = [await recognizePass(worker, content, PSM.SINGLE_BLOCK, true)];
+    const passes: ReceiptPass[] = [await recognizePass(worker, images.grayscale, PSM.SINGLE_BLOCK, false)];
     const first = passes[0]!;
     const firstTotal = amountCents(first.suggestion.amount);
     const firstItemTotal = first.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
     if (first.confidence < 75 || first.suggestion.items.length < 2 || firstTotal === null || firstItemTotal !== firstTotal) {
-      const enhanced = await enhancedReceiptImages(content);
-      if (!enhanced) return { ...combineReceiptPasses(passes), passes: passes.length };
-      passes.push(await recognizePass(worker, enhanced.grayscale, PSM.SINGLE_BLOCK, false));
-      const combined = combineReceiptPasses(passes);
-      const combinedTotal = amountCents(combined.suggestion.amount);
-      const combinedItemTotal = combined.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
-      if (combinedTotal === null || combinedItemTotal !== combinedTotal) {
-        passes.push(await recognizePass(worker, enhanced.binary, PSM.SPARSE_TEXT, false));
-      }
+      passes.push(await recognizePass(worker, images.binary, PSM.SPARSE_TEXT, false));
     }
     return { ...combineReceiptPasses(passes), passes: passes.length };
   });
@@ -373,19 +413,22 @@ async function recognizeReceiptLocally(content: Buffer) {
 }
 
 export async function recognizeReceipt(content: Buffer) {
-  const aiPass = await recognizeWithOllama(content);
-  const local = await recognizeReceiptLocally(content);
+  const images = await prepareReceiptImages(content);
+  const [aiPass, local] = await Promise.all([
+    recognizeWithOllama(images.ai),
+    recognizeReceiptLocally(images),
+  ]);
   if (!aiPass) {
     const localTotal = amountCents(local.suggestion.amount);
     const localItemTotal = local.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
-    return { ...local, source: "tesseract" as const, needsReview: Boolean(local.suggestion.items.length) && (localTotal === null || localItemTotal !== localTotal) };
+    return { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, needsReview: localTotal !== null && (!local.suggestion.items.length || localItemTotal !== localTotal) };
   }
   const combined = combineReceiptPasses([aiPass, { text: "", confidence: local.confidence, suggestion: local.suggestion }]);
   const totals = [aiPass.suggestion.amount, local.suggestion.amount].filter(Boolean);
   const itemTotal = combined.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
   const total = amountCents(combined.suggestion.amount);
   return {
-    ...combined, passes: local.passes + 1, source: "ollama+tesseract" as const,
+    ...combined, passes: local.passes + 1, source: "ollama+tesseract" as const, cropped: images.crop.screenshotPreview,
     needsReview: new Set(totals).size > 1 || total === null || itemTotal !== total,
   };
 }
