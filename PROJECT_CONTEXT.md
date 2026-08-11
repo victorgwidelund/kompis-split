@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-11  
-Appversion: 1.7.0
+Appversion: 1.8.0
 Databasschema: migration 6
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -25,7 +25,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 - Databas: PostgreSQL 17, endast tillgänglig inne i Compose-nätverket.
 - Databasåtkomst: `pg` med frågeadapter i `src/database.ts`.
 - Migreringar: ordnade, framåtriktade migreringar i `src/migrations.ts`, registrerade i `schema_migrations`.
-- OCR: lokal GLM-OCR via en intern Ollama-container, kompletterad med automatisk beskärning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. GLM-OCR och Tesseract körs parallellt efter en gemensam bildförbehandling.
+- OCR: lokal Qwen3-VL 4B via en intern Ollama-container med strukturerat kvittoschema, kompletterad med automatisk beskärning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. Qwen3-VL och Tesseract körs parallellt efter en gemensam bildförbehandling. Matematiskt inkonsekventa AI-resultat får en adaptiv andra kontroll.
 - Realtid: Server-Sent Events för snabbnota.
 - Pakethanterare: pnpm 11.16.0.
 - Produktion: Docker Compose på Unraid och publicerad image i GitHub Container Registry.
@@ -63,7 +63,7 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 - Utgifter och betalningar är huvudboken. Saldon beräknas från den och lagras inte som separat sanning.
 - Finansiella poster mjukraderas eller reverseras så att historiken bevaras.
 - Resor kan arkiveras och mjukraderas. Kvittofiler kopplade till en borttagen resa tas bort enligt appens nuvarande dataskyddsbeteende.
-- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot. GLM-OCR och Tesseract jämförs, och avvikande totalsummor markeras för extra kontroll.
+- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot. Qwen3-VL och Tesseract jämförs, radsummor valideras mot totalen och avvikelser markeras för extra kontroll.
 
 ## Databasmigreringar
 
@@ -105,12 +105,13 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.8.0 byter huvudmodell från GLM-OCR 0,9B till Qwen3-VL 4B Q4_K_M. Modellen returnerar ett validerat kvittoschema och använder 8K kontext. Tesseract kör fortfarande parallellt, medan ofullständiga eller matematiskt inkonsekventa AI-resultat automatiskt får en andra kontroll. GTX 1080 Ti har 11 GB VRAM; Compose tillåter därför två samtidiga modellförfrågningar med Flash Attention och q8-KV-cache, medan två Tesseract-arbetare nyttjar CPU:n utan en global kö. Modellen är cirka 3,3 GB; första modellhämtningen tar därför längre tid än tidigare.
 - Version 1.7.0 beskär automatiskt bort iPhone-förhandsvisning, verktygsfält och tomma bildmarginaler innan kvittot skalas upp. GLM-OCR använder modellens dokumenterade textigenkänningsläge och kör parallellt med Tesseract, med 45 sekunders konfigurerbar timeout (`OLLAMA_OCR_TIMEOUT_MS`). Parsern bevarar kompakta antal som `3x` och `7x` och filtrerar betalningsrader.
 - Version 1.6.0 lägger till antalval på snabbnoter, deterministisk öresfördelning per vald mängd och en Swish-knapp till snabbnotans skapare. Befintliga rader migreras säkert som antal 1.
 - Compose använder `runtime: nvidia` för kompatibilitet med Unraid Compose Manager i stället för det nyare `gpus`-fältet.
 - Version 1.5.0 lägger till helt lokal GLM-OCR via Ollama, adaptiv flerpass-OCR, bildnormalisering och bättre hantering av radbrytningar och teckenfel i belopp.
 - Kamera och bildbibliotek har separata knappar så att användaren alltid kan välja en befintlig bild om Chrome-kameran inte fungerar på enheten.
-- Ollama körs endast på det interna Compose-nätverket med den kvantiserade `glm-ocr:q8_0` för GTX 1080 Ti; appen faller automatiskt tillbaka till Tesseract om modellen inte är tillgänglig.
+- Ollama körs endast på det interna Compose-nätverket med `qwen3-vl:4b` för GTX 1080 Ti; appen faller automatiskt tillbaka till Tesseract om modellen inte är tillgänglig.
 - Version 1.4.0 innehåller förbättrad svensk kvittoradstolkning och kontolösa snabbnotegäster.
 - Setup-sessionens HTTP-svar skickas först efter att PostgreSQL-transaktionen har committats, vilket förhindrar en sporadisk 401 direkt efter första installationen.
 - PostgreSQL-integrationstest, TypeScript, lint och övriga tester är gröna för denna version.

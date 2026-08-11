@@ -4,7 +4,7 @@ import { createWorker, OEM, PSM, type Worker } from "tesseract.js";
 
 const require = createRequire(import.meta.url);
 const swedishLanguage = require("@tesseract.js-data/swe") as { langPath: string; gzip: boolean };
-const ollamaModel = String(process.env.OLLAMA_MODEL || "glm-ocr:q8_0").trim();
+const ollamaModel = String(process.env.OLLAMA_MODEL || "qwen3-vl:4b").trim();
 const ollamaUrl = (() => {
   const value = String(process.env.OLLAMA_URL || "").trim();
   if (!value) return null;
@@ -278,10 +278,54 @@ export function parseOllamaReceipt(value: unknown, now = new Date()): ReceiptPas
   return { text, confidence: 85, suggestion: { title: merchant, amount, expenseDate, category: suggestedCategory(text), items } };
 }
 
-async function recognizeWithOllama(content: Buffer) {
+const ollamaReceiptSchema = {
+  type: "object",
+  properties: {
+    merchant: { type: "string", description: "Exakt restaurang- eller butiksnamn, annars tom sträng" },
+    date: { type: "string", description: "Datum som YYYY-MM-DD, annars tom sträng" },
+    total: { type: "number", description: "Slutsumman att betala i SEK, annars 0" },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          quantity: { type: "integer", minimum: 1, maximum: 20 },
+          amount: { type: "number", description: "Hela radens summa i SEK, inte styckpriset" },
+        },
+        required: ["name", "quantity", "amount"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["merchant", "date", "total", "items"],
+  additionalProperties: false,
+} as const;
+
+function receiptPrompt(verification: boolean) {
+  return `${verification ? "Kontrollera kvittot en andra gång mycket noggrant." : "Läs det svenska restaurang- eller butikskvittot noggrant."}
+Returnera endast JSON enligt detta schema: ${JSON.stringify(ollamaReceiptSchema)}
+Regler:
+- Läs bara synlig text och gissa aldrig dolda rader.
+- En rad som \"7x Smirnoff ICE 665.00\" betyder quantity 7 och amount 665.00.
+- En rad som \"2st * 55 kr 110.00\" betyder quantity 2 och amount 110.00.
+- amount är alltid hela radens summa, aldrig styckpriset inom parentes.
+- Ta med varje köpt mat- och dryckesrad samt eventuell tydlig dricks/extraavgift.
+- Ta inte med moms, delsumma, total, betalning, kortnummer, terminaldata eller kvittonummer som artiklar.
+- total är den tydliga slutsumman/att betala, inte moms eller delsumma.
+- Kontrollera att antal och decimaler återges exakt. Använd tom sträng eller 0 när ett fält inte går att läsa.`;
+}
+
+function balancedPass(pass: ReceiptPass) {
+  const total = amountCents(pass.suggestion.amount);
+  const itemTotal = pass.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
+  return total !== null && pass.suggestion.items.length > 0 && itemTotal === total;
+}
+
+async function recognizeWithOllama(content: Buffer, verification = false) {
   if (!ollamaUrl) return null;
   try {
-    const timeout = Math.min(120_000, Math.max(10_000, Number(process.env.OLLAMA_OCR_TIMEOUT_MS) || 45_000));
+    const timeout = Math.min(180_000, Math.max(15_000, Number(process.env.OLLAMA_OCR_TIMEOUT_MS) || 60_000));
     const response = await fetch(`${ollamaUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -289,8 +333,9 @@ async function recognizeWithOllama(content: Buffer) {
       body: JSON.stringify({
         model: ollamaModel,
         stream: false,
-        messages: [{ role: "user", content: "Text Recognition:", images: [content.toString("base64")] }],
-        options: { temperature: 0, seed: 837451 },
+        format: ollamaReceiptSchema,
+        messages: [{ role: "user", content: receiptPrompt(verification), images: [content.toString("base64")] }],
+        options: { temperature: 0, seed: verification ? 239017 : 837451, num_ctx: 8192, num_predict: 4096 },
         keep_alive: "10m",
       }),
     });
@@ -298,20 +343,27 @@ async function recognizeWithOllama(content: Buffer) {
     const payload = await response.json() as { message?: { content?: unknown } };
     const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
     if (!text) return null;
-    return { text, confidence: 88, suggestion: parseReceiptText(text) } satisfies ReceiptPass;
+    try {
+      const pass = parseOllamaReceipt(JSON.parse(text));
+      return pass ? { ...pass, confidence: verification ? 94 : 92 } : null;
+    } catch {
+      return { text, confidence: 70, suggestion: parseReceiptText(text) } satisfies ReceiptPass;
+    }
   } catch { return null; }
 }
 
-let workerPromise: Promise<Worker> | null = null;
-let queue: Promise<void> = Promise.resolve();
+const localWorkerCount = Math.min(4, Math.max(1, Number(process.env.RECEIPT_OCR_WORKERS) || 2));
+const workerPromises: Array<Promise<Worker> | undefined> = Array(localWorkerCount);
+const queues: Promise<void>[] = Array.from({ length: localWorkerCount }, () => Promise.resolve());
+let nextWorker = 0;
 
-async function receiptWorker() {
-  workerPromise ||= createWorker("swe", OEM.LSTM_ONLY, {
+async function receiptWorker(index: number) {
+  workerPromises[index] ||= createWorker("swe", OEM.LSTM_ONLY, {
     langPath: swedishLanguage.langPath,
     gzip: swedishLanguage.gzip,
     cacheMethod: "none",
   });
-  return workerPromise;
+  return workerPromises[index]!;
 }
 
 export type ReceiptCrop = { left: number; top: number; width: number; height: number; screenshotPreview: boolean };
@@ -397,8 +449,9 @@ async function recognizePass(worker: Worker, content: Buffer, pageMode: PSM, rot
 }
 
 async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepareReceiptImages>>) {
-  const job = queue.then(async () => {
-    const worker = await receiptWorker();
+  const workerIndex = nextWorker++ % localWorkerCount;
+  const job = queues[workerIndex]!.then(async () => {
+    const worker = await receiptWorker(workerIndex);
     const passes: ReceiptPass[] = [await recognizePass(worker, images.grayscale, PSM.SINGLE_BLOCK, false)];
     const first = passes[0]!;
     const firstTotal = amountCents(first.suggestion.amount);
@@ -408,7 +461,7 @@ async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepare
     }
     return { ...combineReceiptPasses(passes), passes: passes.length };
   });
-  queue = job.then(() => undefined, () => undefined);
+  queues[workerIndex] = job.then(() => undefined, () => undefined);
   return job;
 }
 
@@ -423,18 +476,24 @@ export async function recognizeReceipt(content: Buffer) {
     const localItemTotal = local.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
     return { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, needsReview: localTotal !== null && (!local.suggestion.items.length || localItemTotal !== localTotal) };
   }
-  const combined = combineReceiptPasses([aiPass, { text: "", confidence: local.confidence, suggestion: local.suggestion }]);
-  const totals = [aiPass.suggestion.amount, local.suggestion.amount].filter(Boolean);
+  const aiPasses = [aiPass];
+  if (!balancedPass(aiPass) && String(process.env.OLLAMA_ACCURATE_RETRY || "true").toLowerCase() !== "false") {
+    const verification = await recognizeWithOllama(images.grayscale, true);
+    if (verification) aiPasses.push(verification);
+  }
+  const combined = combineReceiptPasses([...aiPasses, { text: "", confidence: local.confidence, suggestion: local.suggestion }]);
+  const totals = aiPasses.map((pass) => pass.suggestion.amount).filter(Boolean);
+  if (local.confidence >= 75 && local.suggestion.amount) totals.push(local.suggestion.amount);
   const itemTotal = combined.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
   const total = amountCents(combined.suggestion.amount);
   return {
-    ...combined, passes: local.passes + 1, source: "ollama+tesseract" as const, cropped: images.crop.screenshotPreview,
-    needsReview: new Set(totals).size > 1 || total === null || itemTotal !== total,
+    ...combined, passes: local.passes + aiPasses.length, source: "ollama+tesseract" as const, cropped: images.crop.screenshotPreview,
+    needsReview: new Set(totals).size > 1 || total === null || !combined.suggestion.items.length || itemTotal !== total,
   };
 }
 
 export async function closeReceiptOcr() {
-  const worker = workerPromise ? await workerPromise.catch(() => null) : null;
-  workerPromise = null;
-  if (worker) await worker.terminate();
+  const workers = await Promise.all(workerPromises.map((worker) => worker?.catch(() => null) || null));
+  workerPromises.fill(undefined);
+  await Promise.all(workers.map((worker) => worker?.terminate()));
 }

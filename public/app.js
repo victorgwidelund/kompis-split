@@ -793,7 +793,7 @@ async function analyzeQuickTabReceipt(event) {
   const file = event.currentTarget.files?.[0]; if (!file) return;
   const status = $("#quick-tab-receipt-status");
   if (file.size > 8 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) { status.className = "receipt-status warning"; status.textContent = "Välj en JPG-, PNG- eller WebP-bild på högst 8 MB."; return; }
-  pendingQuickTabReceipt = file; status.className = "receipt-status reading"; status.textContent = "Läser restaurang, totalsumma och kvittorader …";
+  pendingQuickTabReceipt = file; status.className = "receipt-status reading"; status.textContent = "AI:n läser och kontrollerar kvittoraderna … Svåra kvitton kan ta upp till en minut.";
   try {
     const payload = await api("/api/quick-tabs/analyze", { method: "POST", headers: { "Content-Type": file.type }, body: file });
     const suggestion = payload.suggestion || {}; const form = $("#quick-tab-form");
@@ -865,7 +865,7 @@ async function analyzeExpenseReceipt(event) {
   $("#expense-receipt-image").src = pendingExpenseReceiptUrl;
   $("#expense-receipt-preview").classList.remove("hidden");
   status.className = "receipt-status reading";
-  status.textContent = "Läser kvittot på din server… Det kan ta några sekunder.";
+  status.textContent = "AI:n läser och kontrollerar kvittot på din server… Svåra kvitton kan ta upp till en minut.";
   try {
     const payload = await api(`/api/trips/${state.trip.id}/receipts/analyze`, { method: "POST", headers: { "Content-Type": file.type }, body: file });
     if (pendingExpenseReceipt !== file) return;
