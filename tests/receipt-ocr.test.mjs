@@ -23,7 +23,7 @@ test("Swedish receipt fields are extracted as editable suggestions", () => {
     RESTAURANG HÖRNET
     Storgatan 1 Stockholm
     Datum 2026-08-10 19:42
-    Mat 1 100,00
+    Mat 100,00
     Moms 12% 132,00
     TOTALT 1 234,50
   `, new Date("2026-08-11T12:00:00Z"));
@@ -32,7 +32,22 @@ test("Swedish receipt fields are extracted as editable suggestions", () => {
     amount: "1234.50",
     expenseDate: "2026-08-10",
     category: "food",
+    items: [{ name: "Mat", quantity: 1, amount: "100.00" }],
   });
+});
+
+test("receipt rows and quantities are extracted for quick tab claiming", () => {
+  const suggestion = parseReceiptText(`
+    BISTRO KAJEN
+    2 x Lager 65,00 130,00
+    Fish and chips 189,00
+    MOMS 34,18
+    ATT BETALA 319,00
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Lager", quantity: 2, amount: "130.00" },
+    { name: "Fish and chips", quantity: 1, amount: "189.00" },
+  ]);
 });
 
 test("receipt parser handles European dates and ignores headings as merchants", () => {

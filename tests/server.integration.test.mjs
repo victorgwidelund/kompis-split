@@ -156,6 +156,34 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(statistics.payload.payers[0].name, memberParticipant.name);
     assert.equal(statistics.payload.trend[0].month, "2026-12");
 
+    const quickTab = await request("/api/quick-tabs", {
+      method: "POST", cookie: ownerCookie,
+      body: { name: "Middag på Kajen", merchant: "Bistro Kajen", receiptDate: "2026-12-11", total: "150.01", items: [{ name: "Lager", quantity: 2, amount: "100.01" }, { name: "Pommes", quantity: 1, amount: "50.00" }] },
+    });
+    assert.equal(quickTab.response.status, 201, JSON.stringify(quickTab.payload));
+    assert.equal(quickTab.payload.quickTab.items.length, 3);
+    assert.deepEqual(quickTab.payload.quickTab.items.map((item) => item.amountCents), [5001, 5000, 5000]);
+    const quickTabId = quickTab.payload.quickTab.id;
+    const quickPreview = await request("/api/invitations/preview", { method: "POST", body: { token: quickTab.payload.invitation.token } });
+    assert.equal(quickPreview.payload.invitation.kind, "quick_tab");
+    assert.equal(quickPreview.payload.invitation.quickTabName, "Middag på Kajen");
+    const joinedQuickTab = await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token: quickTab.payload.invitation.token } });
+    assert.equal(joinedQuickTab.payload.quickTabId, quickTabId);
+    const firstQuickItem = quickTab.payload.quickTab.items[0].id;
+    const secondQuickItem = quickTab.payload.quickTab.items[1].id;
+    await request(`/api/quick-tabs/${quickTabId}/claims`, { method: "POST", cookie: ownerCookie, body: { itemId: firstQuickItem, claimed: true } });
+    await request(`/api/quick-tabs/${quickTabId}/claims`, { method: "POST", cookie: memberCookie, body: { itemId: firstQuickItem, claimed: true } });
+    const memberClaims = await request(`/api/quick-tabs/${quickTabId}/claims`, { method: "POST", cookie: memberCookie, body: { itemId: secondQuickItem, claimed: true } });
+    assert.equal(memberClaims.payload.quickTab.claimedCents, 10001);
+    assert.equal(memberClaims.payload.quickTab.unclaimedCents, 5000);
+    assert.deepEqual(memberClaims.payload.quickTab.personTotals.map((item) => item.amountCents), [2501, 7500]);
+    const memberCannotCloseQuickTab = await request(`/api/quick-tabs/${quickTabId}/close`, { method: "POST", cookie: memberCookie, body: { closed: true } });
+    assert.equal(memberCannotCloseQuickTab.response.status, 403);
+    const closedQuickTab = await request(`/api/quick-tabs/${quickTabId}/close`, { method: "POST", cookie: ownerCookie, body: { closed: true } });
+    assert.ok(closedQuickTab.payload.quickTab.closedAt);
+    const quickTabList = await request("/api/quick-tabs", { cookie: memberCookie });
+    assert.equal(quickTabList.payload.quickTabs[0].myClaimCount, 2);
+
     const archivedCategory = await request(`/api/categories/${customCategoryRecord.id}`, { method: "PATCH", cookie: ownerCookie, body: { archived: true } });
     assert.ok(archivedCategory.payload.categories.find((item) => item.id === customCategoryRecord.id).archivedAt);
     const rejectedArchivedCategory = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
@@ -253,7 +281,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 3);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 4);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tab_claims")).rows[0].count), 3);
   await verification.end();
   await admin.query(`DROP DATABASE ${databaseName} WITH (FORCE)`);
   await admin.end();

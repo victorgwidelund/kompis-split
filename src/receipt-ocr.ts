@@ -9,6 +9,7 @@ export type ReceiptSuggestion = {
   amount: string | null;
   expenseDate: string | null;
   category: "food" | "travel" | "stay" | "fun" | "other";
+  items: Array<{ name: string; quantity: number; amount: string }>;
 };
 
 const ignoredMerchantWords = /^(kassa)?kvitto$|^välkommen|^tack för|^org\.?\s*nr|^datum|^tid|^tel|^telefon|^www\.|^moms|^total|^summa|^att betala|^butik\s*nr/i;
@@ -77,6 +78,30 @@ function receiptTotal(lines: string[]) {
   return candidates.length ? Math.max(...candidates) : null;
 }
 
+function receiptItems(lines: string[]) {
+  const items: Array<{ name: string; quantity: number; amount: string }> = [];
+  for (const line of lines) {
+    if (totalWords.test(line) || excludedTotalWords.test(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma/i.test(line)) continue;
+    const amounts = amountCandidates(line);
+    if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
+    const quantityMatch = line.match(/^\s*(\d{1,2})\s*[xX*]\s*/);
+    const quantity = Math.min(20, Math.max(1, Number(quantityMatch?.[1] || 1)));
+    const amount = amounts.at(-1)!;
+    const name = line
+      .replace(/^\s*\d{1,2}\s*[xX*]\s*/, "")
+      .replace(/(?<!\d)(\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}(?!\d)/g, " ")
+      .replace(/\b(?:kr|sek|st)\b/gi, " ")
+      .replace(/[.·_-]{2,}/g, " ")
+      .replace(/\s+/g, " ").trim()
+      .replace(/^[^A-Za-zÅÄÖåäö]+|[^A-Za-zÅÄÖåäö0-9)&'. -]+$/g, "")
+      .slice(0, 100);
+    if ((name.match(/[A-Za-zÅÄÖåäö]/g) || []).length < 2 || amount <= 0) continue;
+    items.push({ name, quantity, amount: amount.toFixed(2) });
+    if (items.length >= 60) break;
+  }
+  return items;
+}
+
 function suggestedCategory(text: string): ReceiptSuggestion["category"] {
   if (/restaurang|restaurant|café|cafe|espresso|pizza|burger|sushi|mat|livs|ica|coop|willys|hemköp/i.test(text)) return "food";
   if (/hotell|hotel|hostel|vandrarhem|boende/i.test(text)) return "stay";
@@ -93,6 +118,7 @@ export function parseReceiptText(text: string, now = new Date()): ReceiptSuggest
     amount: total === null ? null : total.toFixed(2),
     expenseDate: receiptDate(lines, now),
     category: suggestedCategory(text),
+    items: receiptItems(lines),
   };
 }
 

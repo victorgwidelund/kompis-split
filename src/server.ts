@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
 import { closeReceiptOcr, recognizeReceipt } from "./receipt-ocr.js";
-import { calculateShares, simplifyDebts } from "./split.js";
+import { allocateByWeights, calculateShares, simplifyDebts } from "./split.js";
 
 const scrypt = promisify(scryptCallback);
 function integerEnvironment(name: string, fallback: number, minimum: number, maximum: number) {
@@ -494,7 +494,13 @@ async function invitationByToken(token: string) {
     FROM friend_invitations i JOIN users u ON u.id = i.invited_by
     WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < 1
   `).get<any>(sha256(token));
-  return friendInvitation ? { ...friendInvitation, trip_id: null, trip_name: null, kind: "friend" as const } : null;
+  if (friendInvitation) return { ...friendInvitation, trip_id: null, trip_name: null, quick_tab_id: null, kind: "friend" as const };
+  const quickTabInvitation = await db.prepare(`
+    SELECT i.*, q.name quick_tab_name, u.display_name inviter_name
+    FROM quick_tab_invitations i JOIN quick_tabs q ON q.id = i.quick_tab_id JOIN users u ON u.id = i.invited_by
+    WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < i.max_uses
+  `).get<any>(sha256(token));
+  return quickTabInvitation ? { ...quickTabInvitation, trip_id: null, trip_name: null, kind: "quick_tab" as const } : null;
 }
 
 async function joinInvitationRecords(invitation: any, userId: number) {
@@ -506,6 +512,16 @@ async function joinInvitationRecords(invitation: any, userId: number) {
     await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(invitation.invited_by, userId);
     await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(userId, invitation.invited_by);
     await audit(userId, null, "friend_invitation.joined", "friend_invitation", invitation.id);
+    return true;
+  }
+  if (invitation.kind === "quick_tab") {
+    if (await db.prepare("SELECT role FROM quick_tab_access WHERE quick_tab_id = ? AND user_id = ?").get(invitation.quick_tab_id, userId)) return false;
+    const changed = await db.prepare("UPDATE quick_tab_invitations SET use_count = use_count + 1 WHERE id = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND use_count < max_uses").run(invitation.id);
+    if (!changed.changes) throw new HttpError(409, "Inbjudan har redan använts fullt ut eller gått ut");
+    await db.prepare("INSERT INTO quick_tab_access (quick_tab_id, user_id, role) VALUES (?, ?, 'member')").run(invitation.quick_tab_id, userId);
+    await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(invitation.invited_by, userId);
+    await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(userId, invitation.invited_by);
+    await audit(userId, null, "quick_tab.joined", "quick_tab", invitation.quick_tab_id);
     return true;
   }
   if (await db.prepare("SELECT role FROM trip_access WHERE trip_id = ? AND user_id = ?").get(invitation.trip_id, userId)) return false;
@@ -522,6 +538,71 @@ async function joinInvitationRecords(invitation: any, userId: number) {
 
 async function joinInvitation(invitation: any, userId: number) {
   return db.transaction(() => joinInvitationRecords(invitation, userId));
+}
+
+const quickTabStreams = new Map<number, Set<ServerResponse>>();
+function broadcastQuickTab(quickTabId: number) {
+  const payload = `event: update\ndata: ${JSON.stringify({ quickTabId, at: Date.now() })}\n\n`;
+  for (const stream of quickTabStreams.get(quickTabId) || []) stream.write(payload);
+}
+
+async function quickTabAccess(quickTabId: number, userId: number) {
+  const access = await db.prepare("SELECT role FROM quick_tab_access WHERE quick_tab_id = ? AND user_id = ?").get<any>(quickTabId, userId);
+  if (!access) throw new HttpError(403, "Du har inte tillgång till snabbnotan");
+  return String(access.role);
+}
+
+async function loadQuickTab(quickTabId: number, userId: number) {
+  const role = await quickTabAccess(quickTabId, userId);
+  const tab = await db.prepare("SELECT id, name, merchant, receipt_date, total_cents, receipt_content IS NOT NULL has_receipt, created_by, closed_at, created_at FROM quick_tabs WHERE id = ?").get<any>(quickTabId);
+  if (!tab) throw new HttpError(404, "Snabbnotan finns inte");
+  const members = (await db.prepare(`
+    SELECT u.id, u.display_name name, a.role FROM quick_tab_access a JOIN users u ON u.id = a.user_id
+    WHERE a.quick_tab_id = ? ORDER BY a.joined_at, u.id
+  `).all<any>(quickTabId)).map((member) => ({ id: Number(member.id), name: member.name, role: member.role }));
+  const itemRows = await db.prepare("SELECT id, name, amount_cents, position FROM quick_tab_items WHERE quick_tab_id = ? ORDER BY position, id").all<any>(quickTabId);
+  const claimRows = await db.prepare(`
+    SELECT c.item_id, c.user_id, u.display_name name FROM quick_tab_claims c
+    JOIN quick_tab_items i ON i.id = c.item_id JOIN users u ON u.id = c.user_id
+    WHERE i.quick_tab_id = ? ORDER BY c.item_id, c.user_id
+  `).all<any>(quickTabId);
+  const claimsByItem = new Map<number, Array<{ userId: number; name: string }>>();
+  for (const claim of claimRows) {
+    const claims = claimsByItem.get(Number(claim.item_id)) || [];
+    claims.push({ userId: Number(claim.user_id), name: claim.name });
+    claimsByItem.set(Number(claim.item_id), claims);
+  }
+  const totals = new Map<number, number>();
+  const items = itemRows.map((item) => {
+    const claims = claimsByItem.get(Number(item.id)) || [];
+    if (claims.length) {
+      const shares = allocateByWeights(Number(item.amount_cents), claims.map(() => 1));
+      claims.forEach((claim, index) => totals.set(claim.userId, (totals.get(claim.userId) || 0) + shares[index]!));
+    }
+    return { id: Number(item.id), name: item.name, amountCents: Number(item.amount_cents), claims };
+  });
+  const claimedCents = items.filter((item) => item.claims.length).reduce((sum, item) => sum + item.amountCents, 0);
+  return {
+    id: Number(tab.id), name: tab.name, merchant: tab.merchant, receiptDate: tab.receipt_date,
+    totalCents: Number(tab.total_cents), hasReceipt: Boolean(tab.has_receipt), createdBy: Number(tab.created_by),
+    closedAt: tab.closed_at, createdAt: tab.created_at, role, currentUserId: Number(userId), members, items,
+    claimedCents, unclaimedCents: Math.max(0, Number(tab.total_cents) - claimedCents),
+    personTotals: members.map((member) => ({ userId: member.id, name: member.name, amountCents: totals.get(member.id) || 0 })),
+  };
+}
+
+async function quickTabList(userId: number) {
+  return (await db.prepare(`
+    SELECT q.id, q.name, q.merchant, q.total_cents, q.closed_at, q.created_at, a.role,
+      (SELECT COUNT(*) FROM quick_tab_items i WHERE i.quick_tab_id = q.id) item_count,
+      (SELECT COUNT(*) FROM quick_tab_claims c JOIN quick_tab_items i ON i.id = c.item_id WHERE i.quick_tab_id = q.id AND c.user_id = ?) my_claim_count
+    FROM quick_tab_access a JOIN quick_tabs q ON q.id = a.quick_tab_id
+    WHERE a.user_id = ? ORDER BY (q.closed_at IS NOT NULL), q.created_at DESC
+  `).all<any>(userId, userId)).map((tab) => ({
+    id: Number(tab.id), name: tab.name, merchant: tab.merchant, totalCents: Number(tab.total_cents),
+    closedAt: tab.closed_at, createdAt: tab.created_at, role: tab.role,
+    itemCount: Number(tab.item_count), myClaimCount: Number(tab.my_claim_count),
+  }));
 }
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -576,7 +657,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "POST" && url.pathname === "/api/invitations/preview") {
     const body = await readJson(request);
     const invitation = await invitationByToken(String(body.token || ""));
-    return invitation ? json(response, 200, { invitation: { kind: invitation.kind, tripName: invitation.trip_name, inviterName: invitation.inviter_name, expiresAt: invitation.expires_at } }) : json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
+    return invitation ? json(response, 200, { invitation: { kind: invitation.kind, tripName: invitation.trip_name, quickTabName: invitation.quick_tab_name || null, inviterName: invitation.inviter_name, expiresAt: invitation.expires_at } }) : json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
   }
   if (request.method === "POST" && url.pathname === "/api/setup") {
     if (userCount !== 0) return json(response, 409, { error: "Appen är redan konfigurerad" });
@@ -618,7 +699,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       if ((error as any)?.code === "23505") return json(response, 409, { error: "E-postadressen finns redan. Logga in i stället." });
       throw error;
     }
-    return json(response, 201, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(userId)), tripId: invitation.trip_id || null }, { "Set-Cookie": sessionCookie(await createSession(userId)) });
+    return json(response, 201, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(userId)), tripId: invitation.trip_id || null, quickTabId: invitation.quick_tab_id || null }, { "Set-Cookie": sessionCookie(await createSession(userId)) });
   }
   if (request.method === "POST" && url.pathname === "/api/login") {
     const ip = clientIp(request);
@@ -667,7 +748,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const invitation = await invitationByToken(String(body.token || ""));
     if (!invitation) return json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
     await joinInvitation(invitation, user.id);
-    return json(response, 200, { tripId: invitation.trip_id });
+    return json(response, 200, { tripId: invitation.trip_id || null, quickTabId: invitation.quick_tab_id || null });
   }
   if (request.method === "POST" && url.pathname === "/api/friend-invitations") {
     const token = randomBytes(24).toString("base64url");
@@ -682,6 +763,115 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   }
   if (request.method === "GET" && url.pathname === "/api/dashboard") return json(response, 200, await dashboard(user.id));
   if (request.method === "GET" && url.pathname === "/api/statistics") return json(response, 200, await statistics(user.id));
+  if (request.method === "GET" && url.pathname === "/api/quick-tabs") return json(response, 200, { quickTabs: await quickTabList(user.id) });
+  if (request.method === "POST" && url.pathname === "/api/quick-tabs/analyze") {
+    if (!receiptAnalysisAllowed(Number(user.id))) throw new HttpError(429, "För många kvittoanalyser. Vänta en stund och försök igen.");
+    const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1);
+    const mimeType = contentType.trim().toLowerCase();
+    if (!receiptImageMimeTypes.has(mimeType)) throw new HttpError(415, "Automatisk avläsning stöder JPG, PNG och WebP");
+    const content = await readBytes(request, receiptMaximumBytes);
+    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda bildformatet");
+    safeReceiptImageDimensions(mimeType, content);
+    return json(response, 200, await recognizeReceipt(content));
+  }
+  if (request.method === "POST" && url.pathname === "/api/quick-tabs") {
+    const body = await readJson(request);
+    const totalCents = parseAmount(body.total);
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    if (!rawItems.length || rawItems.length > 60) throw new Error("Snabbnotan måste ha mellan 1 och 60 kvittorader");
+    const expanded: Array<{ name: string; amountCents: number }> = [];
+    for (const raw of rawItems) {
+      const name = cleanText(raw.name, "Radnamn", 100);
+      const quantity = Number(raw.quantity || 1);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) throw new Error("Antalet per rad måste vara mellan 1 och 20");
+      const rowCents = parseAmount(raw.amount);
+      const units = allocateByWeights(rowCents, Array.from({ length: quantity }, () => 1));
+      units.forEach((amountCents, index) => expanded.push({ name: quantity > 1 ? `${name} ${index + 1}/${quantity}` : name, amountCents }));
+    }
+    if (expanded.length > 100) throw new Error("Snabbnotan får ha högst 100 valbara poster");
+    if (expanded.reduce((sum, item) => sum + item.amountCents, 0) > totalCents) throw new Error("Kvittoradernas summa kan inte vara högre än hela notan");
+    const token = randomBytes(24).toString("base64url");
+    const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
+    const quickTabId = await db.transaction(async () => {
+      const result = await db.prepare("INSERT INTO quick_tabs (name, merchant, receipt_date, total_cents, created_by) VALUES (?, ?, ?, ?, ?) RETURNING id")
+        .run(cleanText(body.name || body.merchant || "Snabbnota", "Namn", 100), body.merchant ? cleanText(body.merchant, "Plats", 100) : null, validDate(body.receiptDate), totalCents, user.id);
+      const id = Number(result.lastInsertRowid);
+      await db.prepare("INSERT INTO quick_tab_access (quick_tab_id, user_id, role) VALUES (?, ?, 'owner')").run(id, user.id);
+      const insert = db.prepare("INSERT INTO quick_tab_items (quick_tab_id, name, amount_cents, position) VALUES (?, ?, ?, ?)");
+      for (const [position, item] of expanded.entries()) await insert.run(id, item.name, item.amountCents, position);
+      await db.prepare("INSERT INTO quick_tab_invitations (quick_tab_id, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?)").run(id, sha256(token), user.id, expiresAt);
+      await audit(user.id, null, "quick_tab.created", "quick_tab", id, { totalCents, itemCount: expanded.length });
+      return id;
+    });
+    return json(response, 201, { quickTab: await loadQuickTab(quickTabId, user.id), invitation: await invitationPayload(request, token, expiresAt) });
+  }
+  match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)$/);
+  if (request.method === "GET" && match) return json(response, 200, { quickTab: await loadQuickTab(Number(match[1]), user.id) });
+  match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/invitations$/);
+  if (request.method === "POST" && match) {
+    const quickTabId = Number(match[1]); const role = await quickTabAccess(quickTabId, user.id);
+    if (role !== "owner") throw new HttpError(403, "Bara skaparen kan bjuda in till snabbnotan");
+    const token = randomBytes(24).toString("base64url"); const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
+    await db.transaction(async () => {
+      await db.prepare("UPDATE quick_tab_invitations SET revoked_at = CURRENT_TIMESTAMP WHERE quick_tab_id = ? AND revoked_at IS NULL").run(quickTabId);
+      await db.prepare("INSERT INTO quick_tab_invitations (quick_tab_id, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?)").run(quickTabId, sha256(token), user.id, expiresAt);
+    });
+    return json(response, 201, { invitation: await invitationPayload(request, token, expiresAt) });
+  }
+  match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/events$/);
+  if (request.method === "GET" && match) {
+    const quickTabId = Number(match[1]);
+    await quickTabAccess(quickTabId, user.id);
+    if ((quickTabStreams.get(quickTabId)?.size || 0) >= 100) throw new HttpError(429, "För många samtidiga anslutningar till snabbnotan");
+    response.writeHead(200, { ...securityHeaders(), "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+    response.write(`event: ready\ndata: ${JSON.stringify({ quickTabId })}\n\n`);
+    const streams = quickTabStreams.get(quickTabId) || new Set<ServerResponse>();
+    streams.add(response); quickTabStreams.set(quickTabId, streams);
+    const heartbeat = setInterval(() => response.write(": ping\n\n"), 20_000);
+    request.on("close", () => { clearInterval(heartbeat); streams.delete(response); if (!streams.size) quickTabStreams.delete(quickTabId); });
+    return;
+  }
+  match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/claims$/);
+  if (request.method === "POST" && match) {
+    const quickTabId = Number(match[1]); await quickTabAccess(quickTabId, user.id);
+    const tab = await db.prepare("SELECT closed_at FROM quick_tabs WHERE id = ?").get<any>(quickTabId);
+    if (tab?.closed_at) throw new HttpError(409, "Snabbnotan är avslutad");
+    const body = await readJson(request); const itemId = Number(body.itemId);
+    if (!await db.prepare("SELECT id FROM quick_tab_items WHERE id = ? AND quick_tab_id = ?").get(itemId, quickTabId)) throw new HttpError(404, "Kvittoraden finns inte");
+    if (body.claimed === false) await db.prepare("DELETE FROM quick_tab_claims WHERE item_id = ? AND user_id = ?").run(itemId, user.id);
+    else await db.prepare("INSERT INTO quick_tab_claims (item_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(itemId, user.id);
+    await db.prepare("UPDATE quick_tabs SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(quickTabId);
+    broadcastQuickTab(quickTabId);
+    return json(response, 200, { quickTab: await loadQuickTab(quickTabId, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/receipt$/);
+  if (request.method === "POST" && match) {
+    const quickTabId = Number(match[1]); const role = await quickTabAccess(quickTabId, user.id);
+    if (role !== "owner") throw new HttpError(403, "Bara skaparen kan spara kvittot");
+    const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1); const mimeType = contentType.trim().toLowerCase();
+    if (!receiptImageMimeTypes.has(mimeType)) throw new HttpError(415, "Kvittot måste vara JPG, PNG eller WebP");
+    const content = await readBytes(request, receiptMaximumBytes);
+    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte bildformatet");
+    safeReceiptImageDimensions(mimeType, content);
+    await db.prepare("UPDATE quick_tabs SET receipt_mime_type = ?, receipt_content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(mimeType, content, quickTabId);
+    return json(response, 201, { ok: true });
+  }
+  if (request.method === "GET" && match) {
+    const quickTabId = Number(match[1]); await quickTabAccess(quickTabId, user.id);
+    const receipt = await db.prepare("SELECT receipt_mime_type, receipt_content FROM quick_tabs WHERE id = ?").get<any>(quickTabId);
+    if (!receipt?.receipt_content) return json(response, 404, { error: "Kvittot finns inte" });
+    response.writeHead(200, { ...securityHeaders(), "Content-Type": receipt.receipt_mime_type, "Cache-Control": "private, no-store", "Content-Disposition": "inline" });
+    response.end(receipt.receipt_content); return;
+  }
+  match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/close$/);
+  if (request.method === "POST" && match) {
+    const quickTabId = Number(match[1]); const role = await quickTabAccess(quickTabId, user.id);
+    if (role !== "owner") throw new HttpError(403, "Bara skaparen kan avsluta snabbnotan");
+    const body = await readJson(request);
+    await db.prepare("UPDATE quick_tabs SET closed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.closed === false ? null : new Date().toISOString(), quickTabId);
+    broadcastQuickTab(quickTabId);
+    return json(response, 200, { quickTab: await loadQuickTab(quickTabId, user.id) });
+  }
   if (request.method === "GET" && url.pathname === "/api/categories") {
     return json(response, 200, { categories: await categoryList() });
   }

@@ -1,4 +1,4 @@
-const state = { user: null, dashboard: null, trips: [], trip: null, admin: null, statistics: null, categories: [], tab: "overview", inviteToken: "", invitation: null, version: "dev" };
+const state = { user: null, dashboard: null, trips: [], trip: null, quickTabs: [], quickTab: null, admin: null, statistics: null, categories: [], tab: "overview", inviteToken: "", invitation: null, version: "dev" };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const money = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 2 });
@@ -8,6 +8,8 @@ const colors = ["#c7e6d2", "#f6ca67", "#bfc6fb", "#ffc6b7", "#d5c2e8", "#b9dcdf"
 const categories = { food: "🍝", travel: "🚆", stay: "🏡", fun: "🎟️", other: "🧾" };
 let pendingExpenseReceipt = null;
 let pendingExpenseReceiptUrl = "";
+let pendingQuickTabReceipt = null;
+let quickTabEvents = null;
 
 function formatMoney(ore) { return money.format((Number(ore) || 0) / 100).replace("SEK", "kr"); }
 function formatDate(value, fallback = "Inga datum angivna") {
@@ -79,9 +81,9 @@ function setAuthMode(mode) {
   $$(".auth-form").forEach((form) => form.classList.add("hidden"));
   $(`#${mode}-form`).classList.remove("hidden");
   if (mode === "register") {
-    $("#auth-subtitle").textContent = state.invitation?.kind === "friend" ? "Skapa ditt konto för att lägga till vännen." : "Skapa ditt eget konto för att gå med i resan.";
+    $("#auth-subtitle").textContent = state.invitation?.kind === "friend" ? "Skapa ditt konto för att lägga till vännen." : state.invitation?.kind === "quick_tab" ? "Skapa ditt konto för att bocka av din del av notan." : "Skapa ditt eget konto för att gå med i resan.";
   } else if (mode === "login" && state.invitation) {
-    $("#auth-subtitle").textContent = state.invitation.kind === "friend" ? "Logga in så sparas ni som vänner." : "Logga in så läggs resan till på ditt konto.";
+    $("#auth-subtitle").textContent = state.invitation.kind === "friend" ? "Logga in så sparas ni som vänner." : state.invitation.kind === "quick_tab" ? "Logga in så öppnas snabbnotan." : "Logga in så läggs resan till på ditt konto.";
   }
 }
 
@@ -92,7 +94,9 @@ function showAuth(needsSetup) {
   summary.classList.toggle("hidden", !state.invitation);
   if (state.invitation) summary.innerHTML = state.invitation.kind === "friend"
     ? `<strong>${escapeHtml(state.invitation.inviterName)}</strong> vill lägga till dig som vän i Kompis Split.`
-    : `<strong>${escapeHtml(state.invitation.inviterName)}</strong> har bjudit in dig till <strong>${escapeHtml(state.invitation.tripName)}</strong>.`;
+    : state.invitation.kind === "quick_tab"
+      ? `<strong>${escapeHtml(state.invitation.inviterName)}</strong> vill att du bockar av din del av <strong>${escapeHtml(state.invitation.quickTabName)}</strong>.`
+      : `<strong>${escapeHtml(state.invitation.inviterName)}</strong> har bjudit in dig till <strong>${escapeHtml(state.invitation.tripName)}</strong>.`;
   $("#show-register-button").classList.toggle("hidden", !state.invitation);
   if (needsSetup) {
     $("#auth-subtitle").textContent = "Skapa det första administratörskontot. Dina befintliga resor bevaras.";
@@ -104,17 +108,20 @@ function showAuth(needsSetup) {
   }
 }
 
-async function finishAuthentication(user, knownTripId = null) {
+async function finishAuthentication(user, knownTripId = null, knownQuickTabId = null) {
   state.user = user;
   let tripId = knownTripId;
-  if (state.inviteToken && !tripId) {
+  let quickTabId = knownQuickTabId;
+  if (state.inviteToken && !tripId && !quickTabId) {
     const payload = await api("/api/invitations/join", { method: "POST", body: JSON.stringify({ token: state.inviteToken }) });
     tripId = payload.tripId;
+    quickTabId = payload.quickTabId;
   }
   state.inviteToken = "";
   state.invitation = null;
   await enterApp();
   if (tripId) await selectTrip(tripId);
+  else if (quickTabId) await showQuickTab(quickTabId);
 }
 
 async function init() {
@@ -139,7 +146,9 @@ async function enterApp() {
   await loadCategories();
   await loadDashboard();
   const hashId = Number(location.hash.match(/^#trip-(\d+)$/)?.[1]);
+  const quickTabHashId = Number(location.hash.match(/^#quick-tab-(\d+)$/)?.[1]);
   if (hashId && state.trips.some((trip) => trip.id === hashId)) await selectTrip(hashId);
+  else if (quickTabHashId && state.quickTabs.some((tab) => tab.id === quickTabHashId)) await showQuickTab(quickTabHashId);
   else if (location.hash === "#statistics") await showStatistics();
   else if (location.hash === "#admin" && state.user.isAdmin) await showAdmin();
   else showDashboard(false);
@@ -151,9 +160,10 @@ async function loadCategories() {
 }
 
 async function loadDashboard() {
-  const payload = await api("/api/dashboard");
+  const [payload, quickPayload] = await Promise.all([api("/api/dashboard"), api("/api/quick-tabs")]);
   state.dashboard = payload;
   state.trips = payload.trips;
+  state.quickTabs = quickPayload.quickTabs || [];
   renderDashboard();
   renderTripLists();
 }
@@ -189,6 +199,7 @@ function renderDashboard() {
   $("#dashboard-spent").textContent = formatMoney(spent);
   $("#dashboard-trips").innerHTML = active.length ? active.map((trip, index) => tripButton(trip, index)).join("") : emptyState("Dags för nästa resa?", "Skapa en resa och bjud in gänget med en länk.");
   $("#dashboard-expenses").innerHTML = state.dashboard.recentExpenses.length ? state.dashboard.recentExpenses.map((expense) => `<button class="expense-row dashboard-expense" data-trip-id="${expense.tripId}"><span class="category-icon">${categoryIcon(expense.category)}</span><span class="expense-main"><strong>${escapeHtml(expense.title)}</strong><small>${escapeHtml(expense.tripName)} · ${escapeHtml(expense.payerName)} · ${formatDate(expense.expenseDate, "Inget datum")}</small></span><span class="expense-amount">${formatMoney(expense.amountCents)}</span></button>`).join("") : emptyState("Inga utgifter ännu", "De senaste utgifterna från dina aktiva resor visas här.");
+  $("#dashboard-quick-tabs").innerHTML = state.quickTabs.length ? state.quickTabs.map((tab) => `<button class="quick-tab-card ${tab.closedAt ? "closed" : ""}" data-quick-tab-id="${tab.id}"><span class="quick-tab-card-icon">${tab.closedAt ? "✓" : "●"}</span><span><strong>${escapeHtml(tab.name)}</strong><small>${escapeHtml(tab.merchant || "Snabbnota")} · ${tab.myClaimCount}/${tab.itemCount} avbockade av dig</small></span><b>${formatMoney(tab.totalCents)}</b></button>`).join("") : emptyState("Ingen snabbnota ännu", "Skanna ett restaurangkvitto och låt alla välja sina egna rader.");
   const friends = state.dashboard.contacts || [];
   $("#dashboard-friends").innerHTML = friends.length ? friends.map((friend, index) => `<article class="friend-card">${avatar(friend, index)}<span><strong>${escapeHtml(friend.name)}</strong><small>${escapeHtml(friend.email)}</small><small>${friend.swishPhone ? `Swish ${escapeHtml(friend.swishPhone)}` : "Inget Swish-nummer"}</small></span></article>`).join("") : emptyState("Inga sparade vänner ännu", "Vänner sparas automatiskt när ni delar en resa eller när du lägger till en registrerad användare.");
   $("#dashboard-archive-panel").classList.toggle("hidden", archived.length === 0);
@@ -196,13 +207,65 @@ function renderDashboard() {
 }
 
 function showDashboard(updateHash = true) {
+  if (quickTabEvents) { quickTabEvents.close(); quickTabEvents = null; }
   state.trip = null;
+  state.quickTab = null;
   $("#trip-view").classList.add("hidden");
+  $("#quick-tab-view").classList.add("hidden");
   $("#admin-view").classList.add("hidden");
   $("#statistics-view").classList.add("hidden");
   $("#dashboard-view").classList.remove("hidden");
   if (updateHash) history.replaceState(null, "", location.pathname);
   renderTripLists();
+}
+
+function renderQuickTab() {
+  const tab = state.quickTab;
+  if (!tab) return;
+  const claimedItems = tab.items.filter((item) => item.claims.length).length;
+  $("#quick-tab-name").textContent = tab.name;
+  $("#quick-tab-meta").textContent = `${tab.merchant || "Ingen plats angiven"} · ${formatDate(tab.receiptDate, "Inget datum")}`;
+  $("#quick-tab-total").textContent = formatMoney(tab.totalCents);
+  $("#quick-tab-claimed").textContent = formatMoney(tab.claimedCents);
+  $("#quick-tab-unclaimed").textContent = formatMoney(tab.unclaimedCents);
+  $("#quick-tab-claimed-caption").textContent = `${claimedItems} av ${tab.items.length} poster har valts`;
+  $("#quick-tab-member-count").textContent = `${tab.members.length} ${tab.members.length === 1 ? "person deltar" : "personer deltar"}`;
+  $("#quick-tab-live").textContent = tab.closedAt ? "Avslutad" : "Live";
+  $("#quick-tab-close-button").classList.toggle("hidden", tab.role !== "owner");
+  $("#quick-tab-close-button").textContent = tab.closedAt ? "Öppna igen" : "Avsluta";
+  $("#quick-tab-invite-button").classList.toggle("hidden", tab.role !== "owner" || Boolean(tab.closedAt));
+  $("#quick-tab-receipt-link").classList.toggle("hidden", !tab.hasReceipt);
+  $("#quick-tab-items").innerHTML = tab.items.length ? tab.items.map((item) => {
+    const mine = item.claims.some((claim) => Number(claim.userId) === Number(tab.currentUserId));
+    const claimants = item.claims.length ? item.claims.map((claim) => `<span>${escapeHtml(claim.name)}</span>`).join("") : `<small>Ingen har valt ännu</small>`;
+    return `<label class="claim-row ${mine ? "mine" : ""} ${tab.closedAt ? "closed" : ""}"><input type="checkbox" data-quick-claim="${item.id}" ${mine ? "checked" : ""} ${tab.closedAt ? "disabled" : ""} /><span class="claim-check">✓</span><span class="claim-copy"><strong>${escapeHtml(item.name)}</strong><span class="claimants">${claimants}</span></span><b>${formatMoney(item.amountCents)}</b></label>`;
+  }).join("") : emptyState("Inga kvittorader", "Skaparen behöver lägga till minst en rad.");
+  $("#quick-tab-person-totals").innerHTML = tab.personTotals.map((personTotal, index) => `<article class="quick-person-row">${avatar(personTotal, index)}<span><strong>${escapeHtml(personTotal.name)}</strong><small>${Number(personTotal.userId) === Number(tab.currentUserId) ? "Du" : "Deltagare"}</small></span><b>${formatMoney(personTotal.amountCents)}</b></article>`).join("");
+}
+
+async function refreshQuickTab() {
+  if (!state.quickTab) return;
+  const payload = await api(`/api/quick-tabs/${state.quickTab.id}`);
+  state.quickTab = payload.quickTab;
+  renderQuickTab();
+}
+
+function connectQuickTabEvents(id) {
+  if (quickTabEvents) quickTabEvents.close();
+  quickTabEvents = new EventSource(`/api/quick-tabs/${id}/events`);
+  quickTabEvents.addEventListener("update", () => refreshQuickTab().catch(() => {}));
+  quickTabEvents.onopen = () => { $("#quick-tab-live").classList.add("connected"); };
+  quickTabEvents.onerror = () => { $("#quick-tab-live").classList.remove("connected"); };
+}
+
+async function showQuickTab(id) {
+  const payload = await api(`/api/quick-tabs/${id}`);
+  state.quickTab = payload.quickTab; state.trip = null;
+  ["#dashboard-view", "#trip-view", "#statistics-view", "#admin-view"].forEach((selector) => $(selector).classList.add("hidden"));
+  $("#quick-tab-view").classList.remove("hidden");
+  $("#quick-tab-invite-output").classList.add("hidden");
+  history.replaceState(null, "", `${location.pathname}#quick-tab-${id}`);
+  renderQuickTab(); connectQuickTabEvents(id);
 }
 
 function renderRankList(selector, items, icon) {
@@ -232,11 +295,13 @@ function renderStatistics() {
 }
 
 async function showStatistics() {
+  if (quickTabEvents) { quickTabEvents.close(); quickTabEvents = null; }
   const payload = await api("/api/statistics");
   state.statistics = payload;
   state.trip = null;
   $("#dashboard-view").classList.add("hidden");
   $("#trip-view").classList.add("hidden");
+  $("#quick-tab-view").classList.add("hidden");
   $("#admin-view").classList.add("hidden");
   $("#statistics-view").classList.remove("hidden");
   history.replaceState(null, "", `${location.pathname}#statistics`);
@@ -269,12 +334,14 @@ const activityLabels = {
 };
 
 async function showAdmin() {
+  if (quickTabEvents) { quickTabEvents.close(); quickTabEvents = null; }
   if (!state.user?.isAdmin) return toast("Du saknar administratörsbehörighet");
   const payload = await api("/api/admin");
   state.admin = payload;
   state.trip = null;
   $("#dashboard-view").classList.add("hidden");
   $("#trip-view").classList.add("hidden");
+  $("#quick-tab-view").classList.add("hidden");
   $("#statistics-view").classList.add("hidden");
   $("#admin-view").classList.remove("hidden");
   history.replaceState(null, "", `${location.pathname}#admin`);
@@ -306,11 +373,13 @@ function renderAdmin() {
 }
 
 async function selectTrip(id) {
+  if (quickTabEvents) { quickTabEvents.close(); quickTabEvents = null; }
   const payload = await api(`/api/trips/${id}`);
   state.trip = payload.trip;
   location.hash = `trip-${id}`;
   $("#dashboard-view").classList.add("hidden");
   $("#admin-view").classList.add("hidden");
+  $("#quick-tab-view").classList.add("hidden");
   $("#statistics-view").classList.add("hidden");
   $("#trip-view").classList.remove("hidden");
   renderTripLists();
@@ -447,6 +516,30 @@ function openCategoryDialog() {
   openDialog("category-dialog");
 }
 
+function quickItemRow(item = {}) {
+  return `<div class="quick-edit-row"><label class="grow">Rätt eller dryck<input data-quick-item-name maxlength="100" value="${escapeHtml(item.name || "")}" placeholder="t.ex. Lager" required /></label><label>Antal<input data-quick-item-quantity type="number" min="1" max="20" step="1" value="${Number(item.quantity || 1)}" required /></label><label>Radsumma SEK<input data-quick-item-amount type="number" min="0.01" step="0.01" inputmode="decimal" value="${escapeHtml(item.amount || "")}" required /></label><button class="delete-button quick-remove-item" type="button" aria-label="Ta bort rad">×</button></div>`;
+}
+
+function renderQuickItemEditor(items = []) {
+  $("#quick-item-editor").innerHTML = (items.length ? items : [{}]).map(quickItemRow).join("");
+  updateQuickItemSummary();
+}
+
+function updateQuickItemSummary() {
+  const rows = $$(".quick-edit-row", $("#quick-item-editor"));
+  const rowCents = rows.reduce((sum, row) => sum + Math.round(Number($("[data-quick-item-amount]", row).value || 0) * 100), 0);
+  const totalCents = Math.round(Number($("#quick-tab-form").elements.total.value || 0) * 100);
+  const difference = totalCents - rowCents;
+  $("#quick-item-summary").textContent = `${rows.length} ${rows.length === 1 ? "rad" : "rader"} · ${formatMoney(rowCents)}${totalCents ? difference === 0 ? " · stämmer med totalen" : ` · ${formatMoney(Math.abs(difference))} ${difference > 0 ? "saknas i raderna" : "över totalen"}` : ""}`;
+}
+
+function openQuickTabDialog() {
+  const form = $("#quick-tab-form"); form.reset(); pendingQuickTabReceipt = null;
+  $("#quick-tab-receipt-status").className = "receipt-status";
+  $("#quick-tab-receipt-status").textContent = "Inget kvitto valt ännu.";
+  renderQuickItemEditor(); openDialog("quick-tab-dialog");
+}
+
 function resetExpenseReceipt() {
   pendingExpenseReceipt = null;
   if (pendingExpenseReceiptUrl) URL.revokeObjectURL(pendingExpenseReceiptUrl);
@@ -543,7 +636,7 @@ $("#login-form").addEventListener("submit", async (event) => {
 
 $("#register-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.currentTarget; const data = Object.fromEntries(new FormData(form)); data.inviteToken = state.inviteToken;
-  try { const payload = await api("/api/register", { method: "POST", body: JSON.stringify(data) }); form.reset(); state.inviteToken = ""; state.invitation = null; await finishAuthentication(payload.user, payload.tripId); }
+  try { const payload = await api("/api/register", { method: "POST", body: JSON.stringify(data) }); form.reset(); state.inviteToken = ""; state.invitation = null; await finishAuthentication(payload.user, payload.tripId, payload.quickTabId); }
   catch (error) { showFormError(form, error); }
 });
 
@@ -571,6 +664,9 @@ document.addEventListener("click", async (event) => {
   if (adminArchiveTrip && confirm(adminArchiveTrip.dataset.nextArchived === "true" ? "Arkivera resan? Alla ekonomiska poster bevaras." : "Återställ resan?")) { try { await api(`/api/trips/${adminArchiveTrip.dataset.adminArchiveTrip}/archive`, { method: "POST", body: JSON.stringify({ archived: adminArchiveTrip.dataset.nextArchived === "true" }) }); await loadDashboard(); await showAdmin(); toast("Resan uppdaterades"); } catch (error) { toast(error.message); } return; }
   const adminTrashTrip = event.target.closest("[data-admin-trash-trip]");
   if (adminTrashTrip && confirm("Återställ resan från papperskorgen?")) { try { await api(`/api/trips/${adminTrashTrip.dataset.adminTrashTrip}/trash`, { method: "POST", body: JSON.stringify({ deleted: false }) }); await loadDashboard(); await showAdmin(); toast("Resan återställdes"); } catch (error) { toast(error.message); } return; }
+  const quickTabLink = event.target.closest("[data-quick-tab-id]"); if (quickTabLink) return showQuickTab(Number(quickTabLink.dataset.quickTabId)).catch((error) => toast(error.message));
+  const removeQuickItem = event.target.closest(".quick-remove-item");
+  if (removeQuickItem) { removeQuickItem.closest(".quick-edit-row").remove(); if (!$(".quick-edit-row", $("#quick-item-editor"))) renderQuickItemEditor(); else updateQuickItemSummary(); return; }
   const tripLink = event.target.closest("[data-trip-id]"); if (tripLink) return selectTrip(Number(tripLink.dataset.tripId));
   const tab = event.target.closest("[data-tab]"); if (tab) return setTab(tab.dataset.tab);
   const goTab = event.target.closest("[data-go-tab]"); if (goTab) return setTab(goTab.dataset.goTab);
@@ -629,7 +725,8 @@ document.addEventListener("click", async (event) => {
   if (record) { const form = $("#payment-form"); form.reset(); form.elements.fromId.value = record.dataset.recordFrom; form.elements.toId.value = record.dataset.recordTo; form.elements.amount.value = (Number(record.dataset.recordAmount) / 100).toFixed(2); $("#payment-route").textContent = `${person(record.dataset.recordFrom).name} → ${person(record.dataset.recordTo).name}`; openDialog("payment-dialog"); }
 });
 
-[$("#home-button"), $("#mobile-home-button"), $("#back-to-trips")].forEach((button) => button.addEventListener("click", () => showDashboard()));
+[$("#home-button"), $("#mobile-home-button"), $("#back-to-trips"), $("#quick-tab-back")].forEach((button) => button.addEventListener("click", () => showDashboard()));
+[$("#quick-tab-button"), $("#mobile-quick-tab-button"), $("#dashboard-new-quick-tab")].forEach((button) => button.addEventListener("click", openQuickTabDialog));
 [$("#statistics-button"), $("#mobile-statistics-button"), $("#dashboard-statistics")].forEach((button) => button.addEventListener("click", () => showStatistics().catch((error) => toast(error.message))));
 [$("#admin-button"), $("#mobile-admin-button")].forEach((button) => button.addEventListener("click", () => showAdmin().catch((error) => toast(error.message))));
 $("#admin-back-button").addEventListener("click", () => showDashboard());
@@ -647,6 +744,56 @@ $("#active-trips-card").addEventListener("click", () => {
 [$("#add-person-button"), $("#summary-add-person"), $("#people-add-button")].forEach((button) => button.addEventListener("click", openPersonDialog));
 [$("#add-expense-button"), $("#expenses-add-button")].forEach((button) => button.addEventListener("click", () => openExpenseDialog()));
 $("#manage-categories-button").addEventListener("click", openCategoryDialog);
+$("#quick-add-item").addEventListener("click", () => { $("#quick-item-editor").insertAdjacentHTML("beforeend", quickItemRow()); updateQuickItemSummary(); });
+$("#quick-item-editor").addEventListener("input", updateQuickItemSummary);
+$("#quick-tab-form").elements.total.addEventListener("input", updateQuickItemSummary);
+
+$("#quick-tab-receipt-input").addEventListener("change", async (event) => {
+  const file = event.currentTarget.files?.[0]; if (!file) return;
+  const status = $("#quick-tab-receipt-status");
+  if (file.size > 8 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) { status.className = "receipt-status warning"; status.textContent = "Välj en JPG-, PNG- eller WebP-bild på högst 8 MB."; return; }
+  pendingQuickTabReceipt = file; status.className = "receipt-status reading"; status.textContent = "Läser restaurang, totalsumma och kvittorader …";
+  try {
+    const payload = await api("/api/quick-tabs/analyze", { method: "POST", headers: { "Content-Type": file.type }, body: file });
+    const suggestion = payload.suggestion || {}; const form = $("#quick-tab-form");
+    if (suggestion.title) { form.elements.merchant.value = suggestion.title; form.elements.name.value = `Nota på ${suggestion.title}`; }
+    if (suggestion.amount) form.elements.total.value = suggestion.amount;
+    if (suggestion.expenseDate) form.elements.receiptDate.value = suggestion.expenseDate;
+    renderQuickItemEditor(suggestion.items || []);
+    status.className = "receipt-status success";
+    status.textContent = suggestion.items?.length ? `${suggestion.items.length} kvittorader hittades. Kontrollera namn, antal och summor.` : "Inga säkra rader hittades. Lägg till rätterna manuellt.";
+  } catch (error) { status.className = "receipt-status warning"; status.textContent = `${error.message} Du kan fortfarande fylla i raderna manuellt.`; }
+});
+
+document.addEventListener("change", async (event) => {
+  const claim = event.target.closest?.("[data-quick-claim]");
+  if (!claim || !state.quickTab) return;
+  claim.disabled = true;
+  try {
+    const payload = await api(`/api/quick-tabs/${state.quickTab.id}/claims`, { method: "POST", body: JSON.stringify({ itemId: Number(claim.dataset.quickClaim), claimed: claim.checked }) });
+    state.quickTab = payload.quickTab; renderQuickTab();
+  } catch (error) { claim.checked = !claim.checked; toast(error.message); }
+});
+
+function showQuickTabInvitation(invitation) {
+  $("#quick-tab-invite-link").value = invitation.path;
+  $("#quick-tab-invite-qr").src = invitation.qrDataUrl;
+  $("#quick-tab-invite-output").classList.remove("hidden");
+}
+
+$("#quick-tab-invite-button").addEventListener("click", async () => {
+  try { const payload = await api(`/api/quick-tabs/${state.quickTab.id}/invitations`, { method: "POST", body: "{}" }); showQuickTabInvitation(payload.invitation); }
+  catch (error) { toast(error.message); }
+});
+$("#copy-quick-tab-invite").addEventListener("click", async () => { try { await copyText(new URL($("#quick-tab-invite-link").value, location.origin).href); toast("Inbjudningslänken kopierades"); } catch (error) { toast(error.message); } });
+$("#quick-tab-receipt-link").addEventListener("click", () => { if (state.quickTab) window.open(`/api/quick-tabs/${state.quickTab.id}/receipt`, "_blank", "noopener"); });
+$("#quick-tab-close-button").addEventListener("click", async () => {
+  if (!state.quickTab) return;
+  const closing = !state.quickTab.closedAt;
+  if (closing && !confirm("Avsluta snabbnotan? Alla markeringar sparas men kan inte ändras förrän du öppnar den igen.")) return;
+  try { const payload = await api(`/api/quick-tabs/${state.quickTab.id}/close`, { method: "POST", body: JSON.stringify({ closed: closing }) }); state.quickTab = payload.quickTab; renderQuickTab(); await loadDashboard(); toast(closing ? "Snabbnotan avslutades" : "Snabbnotan öppnades igen"); }
+  catch (error) { toast(error.message); }
+});
 
 $("#expense-receipt-input").addEventListener("change", async (event) => {
   const input = event.currentTarget;
@@ -746,6 +893,21 @@ $("#copy-friend-invite-button").addEventListener("click", async () => {
   const input = $("#friend-invite-link");
   try { await copyText(input.value); toast("Väninbjudan kopierades"); }
   catch { input.focus(); input.select(); input.setSelectionRange(0, input.value.length); toast("Länken är markerad — välj Kopiera i webbläsaren"); }
+});
+
+$("#quick-tab-form").addEventListener("submit", async (event) => {
+  event.preventDefault(); const form = event.currentTarget;
+  const rows = $$(".quick-edit-row", $("#quick-item-editor"));
+  const items = rows.map((row) => ({ name: $("[data-quick-item-name]", row).value, quantity: Number($("[data-quick-item-quantity]", row).value), amount: $("[data-quick-item-amount]", row).value }));
+  const data = { ...Object.fromEntries(new FormData(form)), items };
+  try {
+    const payload = await api("/api/quick-tabs", { method: "POST", body: JSON.stringify(data) });
+    if (pendingQuickTabReceipt) {
+      try { await api(`/api/quick-tabs/${payload.quickTab.id}/receipt`, { method: "POST", headers: { "Content-Type": pendingQuickTabReceipt.type }, body: pendingQuickTabReceipt }); payload.quickTab.hasReceipt = true; }
+      catch { toast("Snabbnotan skapades, men kvittobilden kunde inte sparas"); }
+    }
+    pendingQuickTabReceipt = null; form.reset(); $("#quick-tab-dialog").close(); await loadDashboard(); await showQuickTab(payload.quickTab.id); showQuickTabInvitation(payload.invitation); toast("Snabbnotan är live – dela länken med gänget");
+  } catch (error) { showFormError(form, error); }
 });
 
 $("#trip-form").addEventListener("submit", async (event) => {

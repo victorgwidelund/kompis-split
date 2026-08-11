@@ -18,6 +18,12 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /id="statistics-categories"/);
   assert.match(html, /id="statistics-merchants"/);
   assert.match(html, /id="statistics-payers"/);
+  assert.match(html, /id="quick-tab-view"/);
+  assert.match(html, /id="quick-tab-dialog"/);
+  assert.match(html, /id="quick-tab-receipt-input"/);
+  assert.match(html, /id="quick-tab-items"/);
+  assert.match(html, /id="quick-tab-person-totals"/);
+  assert.match(html, /id="quick-tab-invite-qr"/);
   assert.match(html, /id="dashboard-friends"/);
   assert.match(html, /id="expense-dialog-title"/);
   assert.match(html, /id="expense-submit-label"/);
@@ -37,6 +43,8 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(app, /data-delete-receipt/);
   assert.match(app, /navigator\.clipboard/);
   assert.match(app, /document\.execCommand\("copy"\)/);
+  assert.match(app, /new EventSource/);
+  assert.match(app, /data-quick-claim/);
   assert.doesNotMatch(html, /name="expenseDate"[^>]*required/);
   assert.equal(
     [...html.matchAll(/name="splitMode"/g)].length,

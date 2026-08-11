@@ -19,6 +19,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Lokal svensk kvittoavläsning som föreslår restaurang/plats, totalbelopp, datum och kategori
 - Mobilanpassade formulärfält som inte automatiskt zoomar in på iPhone
 - Egen statistikvy för kategorier, restauranger/platser, betalare och månadsutveckling
+- Fristående Snabbnota: skanna kvittorader, dela en säker länk och låt alla bocka av mat och dryck i realtid
 - PostgreSQL-healthcheck och dagliga komprimerade `pg_dump`-backuper
 
 ## Installation på Unraid
@@ -57,6 +58,12 @@ En push till `main` kör TypeScript-kontroll, finansiella tester, API-test mot P
 Produktionsstacken följer den publicerade `latest`-imagen. När workflowen är grön väljer du bara **Pull & Up** i Compose Manager; Compose-filen behöver inte redigeras. Varje publicering får även en oföränderlig `sha-<commit>`-tagg. Spara föregående fungerande tagg så att du vid behov kan använda den tillfälligt för rollback; databasvolymen påverkas inte av imagebytet.
 
 Appen visar ett enkelt releasenummer, exempelvis `Version 1.1`. Funktionsreleaser höjs stegvis till `1.2`, `1.3` och så vidare via `version` i `package.json`. Commit-taggarna används fortfarande i bakgrunden för exakt rollback.
+
+## Snabbnota
+
+Snabbnota är separat från resor och passar en restaurangnota där alla vill välja exakt vad de åt eller drack. Skaparen fotograferar kvittot, granskar de OCR-avlästa raderna och delar en tidsbegränsad länk eller QR-kod. Inloggade deltagare markerar sina egna rader och ser varandras markeringar via en realtidsanslutning till samma server. Om flera delar en rad fördelas den deterministiskt på heltalsöre. Skaparen kan avsluta och återöppna notan; data och kvittobild ligger i PostgreSQL och följer med i ordinarie backup.
+
+OCR kan misstolka en kvittorad. Skaparen måste därför alltid kontrollera namn, antal, radsummor och totalsumma innan snabbnotan skapas. Skillnaden mellan kvittots total och de avlästa raderna visas tydligt som ej fördelad.
 
 ## Reverse proxy och HTTPS
 
