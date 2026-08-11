@@ -4,7 +4,7 @@
 
 - The app is self-hosted on Unraid with Docker Compose Manager. Preserve the existing Compose workflow, `/mnt/user/kompis_split` paths, ports, labels, and environment interface unless a change is explicitly justified.
 - Persistent data must live outside containers. Never delete, recreate, rename, or overwrite a production volume or database during a routine update.
-- Keep production images pinned to a tested commit tag or digest. Do not deploy `latest`.
+- The Unraid Compose stack intentionally follows the published `latest` app image so routine updates do not require editing Compose. Keep the generated `sha-*` tags available and document the previous working tag for rollback.
 - Keep the backend suitable for an HTTPS reverse proxy. Port 8787 is for trusted LAN/proxy access, not direct public exposure.
 - Do not expose PostgreSQL or any other database port publicly.
 - Healthchecks must verify application and database readiness without mutating user data.

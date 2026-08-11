@@ -20,7 +20,7 @@ services:
     stop_grace_period: 60s
 
   kompis-split:
-    image: "${KOMPIS_SPLIT_IMAGE:?Set KOMPIS_SPLIT_IMAGE to the tested sha-* GHCR image}"
+    image: ghcr.io/victorgwidelund/kompis-split:latest
     container_name: kompis-split
     restart: unless-stopped
     pull_policy: always
