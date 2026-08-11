@@ -1,6 +1,6 @@
 {
   "name": "kompis-split",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "packageManager": "pnpm@11.16.0",
   "type": "module",
@@ -17,8 +17,10 @@
     "test": "tsc -p tsconfig.build.json && node --test"
   },
   "dependencies": {
+    "@tesseract.js-data/swe": "1.0.0",
     "pg": "8.16.3",
-    "qrcode": "1.5.4"
+    "qrcode": "1.5.4",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

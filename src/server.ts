@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
+import { closeReceiptOcr, recognizeReceipt } from "./receipt-ocr.js";
 import { calculateShares, simplifyDebts } from "./split.js";
 
 const scrypt = promisify(scryptCallback);
@@ -26,6 +27,7 @@ const appVersion = String(process.env.APP_VERSION || "dev").replace(/[^a-zA-Z0-9
 const receiptMaximumBytes = 8 * 1024 * 1024;
 const receiptMaximumCount = 5;
 const receiptMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+const receiptImageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 if (process.env.NODE_ENV === "production" && cookieSecret.length < 32) throw new Error("COOKIE_SECRET måste vara minst 32 tecken i produktion");
 await applyMigrations();
 
@@ -162,6 +164,44 @@ function receiptContentMatches(mimeType: string, content: Buffer) {
   if (mimeType === "image/webp") return content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP";
   if (mimeType === "application/pdf") return content.subarray(0, 5).toString("ascii") === "%PDF-";
   return false;
+}
+
+function jpegDimensions(content: Buffer) {
+  let offset = 2;
+  while (offset + 9 < content.length) {
+    if (content[offset] !== 0xff) { offset += 1; continue; }
+    const marker = content[offset + 1];
+    if (marker === undefined || marker === 0xd8 || marker === 0xd9) { offset += 2; continue; }
+    const length = content.readUInt16BE(offset + 2);
+    if (length < 2 || offset + 2 + length > content.length) return null;
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      return { width: content.readUInt16BE(offset + 7), height: content.readUInt16BE(offset + 5) };
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
+function webpDimensions(content: Buffer) {
+  const kind = content.subarray(12, 16).toString("ascii");
+  if (kind === "VP8X" && content.length >= 30) return { width: 1 + content.readUIntLE(24, 3), height: 1 + content.readUIntLE(27, 3) };
+  if (kind === "VP8 " && content.length >= 30) return { width: content.readUInt16LE(26) & 0x3fff, height: content.readUInt16LE(28) & 0x3fff };
+  if (kind === "VP8L" && content.length >= 25 && content[20] === 0x2f) {
+    const bits = content.readUInt32LE(21);
+    return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >> 14) & 0x3fff) };
+  }
+  return null;
+}
+
+function safeReceiptImageDimensions(mimeType: string, content: Buffer) {
+  const dimensions = mimeType === "image/png" && content.length >= 24
+    ? { width: content.readUInt32BE(16), height: content.readUInt32BE(20) }
+    : mimeType === "image/jpeg" ? jpegDimensions(content)
+      : mimeType === "image/webp" ? webpDimensions(content) : null;
+  if (!dimensions || dimensions.width < 20 || dimensions.height < 20) throw new HttpError(415, "Kvittofilens bildmått kunde inte läsas");
+  if (dimensions.width > 10_000 || dimensions.height > 10_000 || dimensions.width * dimensions.height > 20_000_000) {
+    throw new HttpError(413, "Kvittofotot är för stort. Välj en bild på högst 20 megapixlar.");
+  }
 }
 
 function safeReceiptName(value: unknown) {
@@ -418,6 +458,7 @@ async function joinInvitation(invitation: any, userId: number) {
 }
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
+const receiptAnalysisAttempts = new Map<number, { count: number; resetAt: number }>();
 function loginAllowed(ip: string) {
   const now = Date.now();
   const item = attempts.get(ip);
@@ -425,6 +466,15 @@ function loginAllowed(ip: string) {
   return item.count < 8;
 }
 function failedLogin(ip: string) { const item = attempts.get(ip) || { count: 0, resetAt: Date.now() + 15 * 60000 }; item.count += 1; attempts.set(ip, item); }
+
+function receiptAnalysisAllowed(userId: number) {
+  const now = Date.now();
+  const item = receiptAnalysisAttempts.get(userId);
+  if (!item || item.resetAt < now) { receiptAnalysisAttempts.set(userId, { count: 1, resetAt: now + 10 * 60000 }); return true; }
+  if (item.count >= 10) return false;
+  item.count += 1;
+  return true;
+}
 
 function clientIp(request: IncomingMessage) {
   if (trustProxy) {
@@ -694,14 +744,15 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     await Promise.all(entries.map((entry: any) => assertTripParticipant(tripId, entry.participantId)));
     if (new Set(entries.map((entry: { participantId: number }) => entry.participantId)).size !== entries.length) throw new Error("Varje deltagare får bara finnas en gång");
     const amounts = calculateShares(amountCents, String(body.splitMode || "equal"), entries);
-    await db.transaction(async () => {
+    const expenseId = await db.transaction(async () => {
       const result = await db.prepare("INSERT INTO expenses (trip_id, payer_id, title, amount_cents, expense_date, category, split_mode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
         .run(tripId, payerId, cleanText(body.title, "Beskrivning", 100), amountCents, validDate(body.expenseDate), category, String(body.splitMode || "equal"), user.id);
       const expenseId = Number(result.lastInsertRowid); const insertShare = db.prepare("INSERT INTO expense_shares (expense_id, participant_id, amount_cents) VALUES (?, ?, ?)");
       for (const [index, entry] of entries.entries()) await insertShare.run(expenseId, entry.participantId, amounts[index]);
       await audit(user.id, tripId, "expense.created", "expense", expenseId, { amountCents });
+      return expenseId;
     });
-    return json(response, 201, { trip: await loadTrip(tripId, user.id) });
+    return json(response, 201, { expenseId, trip: await loadTrip(tripId, user.id) });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/payments$/);
   if (request.method === "POST" && match) {
@@ -713,6 +764,21 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       .run(tripId, fromId, toId, amountCents, body.note ? cleanText(body.note, "Anteckning", 120) : null, user.id);
     await audit(user.id, tripId, "payment.created", "payment", Number(result.lastInsertRowid), { amountCents });
     return json(response, 201, { trip: await loadTrip(tripId, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/trips\/(\d+)\/receipts\/analyze$/);
+  if (request.method === "POST" && match) {
+    const tripId = Number(match[1]);
+    await requireAccess(tripId, user.id);
+    await requireActiveTrip(tripId);
+    if (!receiptAnalysisAllowed(Number(user.id))) throw new HttpError(429, "För många kvittoanalyser. Vänta en stund och försök igen.");
+    const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1);
+    const mimeType = contentType.trim().toLowerCase();
+    if (!receiptImageMimeTypes.has(mimeType)) throw new HttpError(415, "Automatisk avläsning stöder JPG, PNG och WebP");
+    const content = await readBytes(request, receiptMaximumBytes);
+    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda bildformatet");
+    safeReceiptImageDimensions(mimeType, content);
+    const result = await recognizeReceipt(content);
+    return json(response, 200, result);
   }
   match = url.pathname.match(/^\/api\/expenses\/(\d+)\/receipts$/);
   if (request.method === "POST" && match) {
@@ -828,7 +894,7 @@ function serveStatic(response: ServerResponse, pathname: string) {
   response.writeHead(200, {
     ...securityHeaders(),
     "Content-Type": mimeTypes[extname(filePath)] || "application/octet-stream",
-    "Cache-Control": extname(filePath) === ".html" ? "no-cache" : "public, max-age=3600",
+    "Cache-Control": [".html", ".css", ".js"].includes(extname(filePath)) ? "no-cache" : "public, max-age=3600",
   });
   response.end(readFileSync(filePath));
 }
@@ -856,5 +922,5 @@ server.listen(port, "0.0.0.0", () => {
   console.log(`Kompis Split körs på http://0.0.0.0:${port}`);
   if (!appPassword) console.warn("APP_PASSWORD saknas. Den första administratören kan inte skapas förrän det är konfigurerat.");
 });
-function shutdown() { server.close(() => { void closeDatabase().finally(() => process.exit(0)); }); }
+function shutdown() { server.close(() => { void Promise.allSettled([closeReceiptOcr(), closeDatabase()]).finally(() => process.exit(0)); }); }
 process.on("SIGINT", shutdown); process.on("SIGTERM", shutdown);

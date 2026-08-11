@@ -23,6 +23,8 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /id="dashboard-trips-panel"/);
   assert.match(html, /id="category-dialog"/);
   assert.match(html, /id="receipt-file-input"/);
+  assert.match(html, /id="expense-receipt-input"/);
+  assert.match(html, /id="expense-receipt-status"/);
   assert.match(html, /id="friend-invite-dialog"/);
   assert.match(html, /id="invite-qr"/);
   assert.match(html, /id="friend-invite-qr"/);
@@ -31,6 +33,11 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(app, /navigator\.clipboard/);
   assert.match(app, /document\.execCommand\("copy"\)/);
   assert.doesNotMatch(html, /name="expenseDate"[^>]*required/);
+  assert.equal(
+    [...html.matchAll(/name="splitMode"/g)].length,
+    4,
+    "utgiftsdialogen ska ha exakt fyra delningssätt",
+  );
 
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, "HTML innehåller dubbla id-attribut");

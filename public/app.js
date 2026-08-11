@@ -5,6 +5,8 @@ const money = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK
 const dateFormat = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short", year: "numeric" });
 const colors = ["#c7e6d2", "#f6ca67", "#bfc6fb", "#ffc6b7", "#d5c2e8", "#b9dcdf"];
 const categories = { food: "🍝", travel: "🚆", stay: "🏡", fun: "🎟️", other: "🧾" };
+let pendingExpenseReceipt = null;
+let pendingExpenseReceiptUrl = "";
 
 function formatMoney(ore) { return money.format((Number(ore) || 0) / 100).replace("SEK", "kr"); }
 function formatDate(value, fallback = "Inga datum angivna") {
@@ -401,9 +403,23 @@ function openCategoryDialog() {
   openDialog("category-dialog");
 }
 
+function resetExpenseReceipt() {
+  pendingExpenseReceipt = null;
+  if (pendingExpenseReceiptUrl) URL.revokeObjectURL(pendingExpenseReceiptUrl);
+  pendingExpenseReceiptUrl = "";
+  const input = $("#expense-receipt-input");
+  if (input) input.value = "";
+  $("#expense-receipt-preview")?.classList.add("hidden");
+  $("#expense-receipt-image")?.removeAttribute("src");
+  const status = $("#expense-receipt-status");
+  if (status) { status.className = "receipt-status"; status.textContent = "Du granskar alltid förslagen innan utgiften sparas."; }
+}
+
 function openExpenseDialog(expense = null) {
   if (!state.trip?.participants.length) { toast("Lägg till minst en person först"); return openPersonDialog(); }
   const form = $("#expense-form"); form.reset();
+  resetExpenseReceipt();
+  $("#expense-receipt-capture").classList.toggle("hidden", Boolean(expense));
   form.dataset.expenseId = expense?.id || "";
   form.elements.payerId.innerHTML = state.trip.participants.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
   renderCategorySelect(expense?.category || "other");
@@ -585,6 +601,42 @@ $("#active-trips-card").addEventListener("click", () => {
 [$("#add-expense-button"), $("#expenses-add-button")].forEach((button) => button.addEventListener("click", () => openExpenseDialog()));
 $("#manage-categories-button").addEventListener("click", openCategoryDialog);
 
+$("#expense-receipt-input").addEventListener("change", async (event) => {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (!file) return;
+  const status = $("#expense-receipt-status");
+  if (file.size > 8 * 1024 * 1024) { resetExpenseReceipt(); status.className = "receipt-status warning"; status.textContent = "Kvittofilen får vara högst 8 MB."; return; }
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { resetExpenseReceipt(); status.className = "receipt-status warning"; status.textContent = "Välj en bild i JPG-, PNG- eller WebP-format."; return; }
+  resetExpenseReceipt();
+  pendingExpenseReceipt = file;
+  pendingExpenseReceiptUrl = URL.createObjectURL(file);
+  $("#expense-receipt-image").src = pendingExpenseReceiptUrl;
+  $("#expense-receipt-preview").classList.remove("hidden");
+  status.className = "receipt-status reading";
+  status.textContent = "Läser kvittot på din server… Det kan ta några sekunder.";
+  try {
+    const payload = await api(`/api/trips/${state.trip.id}/receipts/analyze`, { method: "POST", headers: { "Content-Type": file.type }, body: file });
+    if (pendingExpenseReceipt !== file) return;
+    const suggestion = payload.suggestion || {};
+    const form = $("#expense-form");
+    if (suggestion.title) form.elements.title.value = suggestion.title;
+    if (suggestion.amount) form.elements.amount.value = suggestion.amount;
+    if (suggestion.expenseDate) form.elements.expenseDate.value = suggestion.expenseDate;
+    if (suggestion.category && [...form.elements.category.options].some((option) => option.value === suggestion.category)) form.elements.category.value = suggestion.category;
+    updateSplitSummary();
+    const found = [suggestion.title, suggestion.amount, suggestion.expenseDate].filter(Boolean).length;
+    status.className = `receipt-status ${found ? "success" : "warning"}`;
+    status.textContent = found ? `Förslag ifyllda (${payload.confidence || 0}% läskvalitet). Kontrollera namn, belopp och datum innan du sparar.` : "Kvittot bifogas, men texten kunde inte läsas tydligt. Fyll i uppgifterna manuellt.";
+  } catch (error) {
+    if (pendingExpenseReceipt !== file) return;
+    status.className = "receipt-status warning";
+    status.textContent = `${error.message} Kvittot kan fortfarande bifogas om du fyller i uppgifterna manuellt.`;
+  }
+});
+$("#clear-expense-receipt").addEventListener("click", resetExpenseReceipt);
+$("#expense-dialog").addEventListener("close", resetExpenseReceipt);
+
 $("#receipt-file-input").addEventListener("change", async (event) => {
   const input = event.currentTarget;
   const file = input.files?.[0];
@@ -687,7 +739,18 @@ $("#expense-form").addEventListener("submit", async (event) => {
   Object.keys(data).filter((key) => key.startsWith("splitValue-") || key === "splitPerson").forEach((key) => delete data[key]);
   const expenseId = form.dataset.expenseId;
   const path = expenseId ? `/api/expenses/${expenseId}` : `/api/trips/${state.trip.id}/expenses`;
-  try { await api(path, { method: expenseId ? "PATCH" : "POST", body: JSON.stringify(data) }); form.closest("dialog").close(); await refreshTrip(); toast(expenseId ? "Utgiften uppdaterades" : "Utgiften delades exakt på öret"); }
+  try {
+    const receipt = pendingExpenseReceipt;
+    const payload = await api(path, { method: expenseId ? "PATCH" : "POST", body: JSON.stringify(data) });
+    let receiptError = null;
+    if (!expenseId && receipt && payload.expenseId) {
+      try { await api(`/api/expenses/${payload.expenseId}/receipts`, { method: "POST", headers: { "Content-Type": receipt.type, "X-File-Name": encodeURIComponent(receipt.name || "kvitto.jpg") }, body: receipt }); }
+      catch (error) { receiptError = error; }
+    }
+    form.closest("dialog").close();
+    await refreshTrip();
+    toast(receiptError ? "Utgiften sparades, men kvittot kunde inte bifogas. Lägg till det under utgiften." : expenseId ? "Utgiften uppdaterades" : receipt ? "Utgiften och kvittot sparades" : "Utgiften delades exakt på öret");
+  }
   catch (error) { showFormError(form, error); }
 });
 
