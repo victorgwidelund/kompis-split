@@ -408,8 +408,23 @@ function updateSplitSummary() {
 function showFormError(form, error) { $(".form-error", form).textContent = error.message; }
 
 async function copyText(text) {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
-  const input = document.createElement("textarea"); input.value = text; input.setAttribute("readonly", ""); input.style.position = "fixed"; input.style.opacity = "0"; document.body.append(input); input.select(); document.execCommand("copy"); input.remove();
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return; }
+    catch { /* HTTP och vissa mobilwebbläsare nekar Clipboard API; använd reservmetoden. */ }
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.inset = "0 auto auto 0";
+  input.style.opacity = "0";
+  document.body.append(input);
+  input.focus();
+  input.select();
+  input.setSelectionRange(0, input.value.length);
+  const copied = document.execCommand("copy");
+  input.remove();
+  if (!copied) throw new Error("Webbläsaren blockerade kopieringen");
 }
 
 $("#setup-form").addEventListener("submit", async (event) => {
@@ -519,7 +534,14 @@ $("#create-invite-button").addEventListener("click", async () => {
   try { const payload = await api(`/api/trips/${state.trip.id}/invitations`, { method: "POST", body: "{}" }); const link = new URL(payload.invitation.path, location.origin).href; $("#invite-link").value = link; $("#invite-expiry").textContent = `Gäller till ${formatDate(payload.invitation.expiresAt)}.`; $("#invite-output").classList.remove("hidden"); }
   catch (error) { toast(error.message); }
 });
-$("#copy-invite-button").addEventListener("click", async () => { await copyText($("#invite-link").value); toast("Inbjudningslänken kopierades"); });
+$("#copy-invite-button").addEventListener("click", async () => {
+  const input = $("#invite-link");
+  try { await copyText(input.value); toast("Inbjudningslänken kopierades"); }
+  catch {
+    input.focus(); input.select(); input.setSelectionRange(0, input.value.length);
+    toast("Länken är markerad — välj Kopiera i webbläsaren");
+  }
+});
 
 $("#trip-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const form = event.currentTarget;
