@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-11  
-Appversion: 1.8.0
+Appversion: 1.9.0
 Databasschema: migration 6
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -25,7 +25,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 - Databas: PostgreSQL 17, endast tillgänglig inne i Compose-nätverket.
 - Databasåtkomst: `pg` med frågeadapter i `src/database.ts`.
 - Migreringar: ordnade, framåtriktade migreringar i `src/migrations.ts`, registrerade i `schema_migrations`.
-- OCR: lokal Qwen3-VL 4B via en intern Ollama-container med strukturerat kvittoschema, kompletterad med automatisk beskärning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. Qwen3-VL och Tesseract körs parallellt efter en gemensam bildförbehandling. Matematiskt inkonsekventa AI-resultat får en adaptiv andra kontroll.
+- OCR: lokal Qwen3-VL 4B via en intern Ollama-container med strukturerat kvittoschema, kompletterad med automatisk beskärning, perspektivuträtning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. AI startas parallellt men avbryts när den snabba lokala tolkningen redan summerar exakt. Matematiskt inkonsekventa AI-resultat får en adaptiv andra kontroll.
 - Realtid: Server-Sent Events för snabbnota.
 - Pakethanterare: pnpm 11.16.0.
 - Produktion: Docker Compose på Unraid och publicerad image i GitHub Container Registry.
@@ -105,6 +105,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.9.0 rätar ut fotograferade papperskvitton mot mörk bakgrund och kombinerar alternativa läsningar genom att välja radbelopp som får kvittot att summera exakt. Heltalsbelopp före `SEK`, prioriterade beställningsdatum, OCR-varianter av antalmarkören `x` och styckpris gånger antal hanteras deterministiskt. En exakt lokal tolkning avbryter den långsamma AI-körningen. Säkra loggar och klientstatus visar om Ollama användes, tog timeout, saknade modell, inte kunde nås eller returnerade ogiltigt svar; kvittobild och OCR-text loggas aldrig.
 - Version 1.8.0 byter huvudmodell från GLM-OCR 0,9B till Qwen3-VL 4B Q4_K_M. Modellen returnerar ett validerat kvittoschema och använder 8K kontext. Tesseract kör fortfarande parallellt, medan ofullständiga eller matematiskt inkonsekventa AI-resultat automatiskt får en andra kontroll. GTX 1080 Ti har 11 GB VRAM; Compose tillåter därför två samtidiga modellförfrågningar med Flash Attention och q8-KV-cache, medan två Tesseract-arbetare nyttjar CPU:n utan en global kö. Modellen är cirka 3,3 GB; första modellhämtningen tar därför längre tid än tidigare.
 - Version 1.7.0 beskär automatiskt bort iPhone-förhandsvisning, verktygsfält och tomma bildmarginaler innan kvittot skalas upp. GLM-OCR använder modellens dokumenterade textigenkänningsläge och kör parallellt med Tesseract, med 45 sekunders konfigurerbar timeout (`OLLAMA_OCR_TIMEOUT_MS`). Parsern bevarar kompakta antal som `3x` och `7x` och filtrerar betalningsrader.
 - Version 1.6.0 lägger till antalval på snabbnoter, deterministisk öresfördelning per vald mängd och en Swish-knapp till snabbnotans skapare. Befintliga rader migreras säkert som antal 1.

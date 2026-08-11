@@ -22,7 +22,7 @@ export type ReceiptSuggestion = {
   items: Array<{ name: string; quantity: number; amount: string }>;
 };
 
-const ignoredMerchantWords = /^(kassa)?kvitto$|^välkommen|^tack för|^org\.?\s*nr|^datum|^tid|^tel|^telefon|^www\.|^moms|^total|^summa|^att betala|^butik\s*nr|^[^\s]*örhandsvisning|tillbaka/i;
+const ignoredMerchantWords = /^(kassa)?kvitto$|^g[äa]stnota$|^välkommen|^tack för|^org\.?\s*nr|^datum|^tid|^tel|^telefon|^www\.|^moms|^total|^summa|^att betala|^butik\s*nr|^[^\s]*örhandsvisning|tillbaka/i;
 const totalWords = /att\s+betala|betalt|kortbelopp|belopp\s+sek|totalt?|f[öo]tatt|summa/i;
 const excludedTotalWords = /moms|vat|växel|change|rabatt|subtotal|delsumma/i;
 
@@ -30,8 +30,13 @@ type ReceiptPass = { text: string; confidence: number; suggestion: ReceiptSugges
 
 function normalizeNumericGlyphs(line: string) {
   return line
+    .replace(/^\s*[Il|]\s+[xX]{1,2}\s+/, "1 x ")
+    .replace(/^\s*[oO]{0,2}[1Il|]\s+[oO]?[xX][oO]?\s*/, "1 x ")
+    .replace(/^\s*[oO]{1,2}(\d{1,2})\s+[oO]?[xX][oO]?\s*/, "$1 x ")
     .replace(/(\d)\s+([.,])\s*(\d{2})(?!\d)/g, "$1$2$3")
     .replace(/(\d)([.,])\s+(\d{2})(?!\d)/g, "$1$2$3")
+    .replace(/(\d+[.,]\d{2})0(?=\s*(?:kr|sek)?$)/i, "$1")
+    .replace(/(?<![\d.,])(\d{1,6})(?=\s*(?:kr|sek)\s*$)/i, "$1.00")
     .replace(/(\d{1,5})\s+(\d{2})(?=\s*(?:kr|sek)?$)/i, "$1.$2")
     .replace(/(?<!\d)(\d{3,5})(?=\s*(?:kr|sek)?$)/i, (value) => `${value.slice(0, -2)}.${value.slice(-2)}`)
     .replace(/(?<![A-Za-zÅÄÖåäö])[\dOo]{1,8}[.,][\dOo]{2}(?![A-Za-zÅÄÖåäö])/g, (value) => value.replace(/[Oo]/g, "0"));
@@ -64,7 +69,8 @@ function validIsoDate(year: number, month: number, day: number, now: Date) {
 
 function receiptDate(lines: string[], now: Date) {
   const monthNumbers: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, maj: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, nov: 11, dec: 12 };
-  for (const line of lines) {
+  const orderedLines = [...lines.filter((line) => /beställd|bestalld|datum|köpt|kopdatum/i.test(line)), ...lines.filter((line) => !/beställd|bestalld|datum|köpt|kopdatum/i.test(line))];
+  for (const line of orderedLines) {
     const iso = line.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
     if (iso) {
       const value = validIsoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]), now);
@@ -88,15 +94,24 @@ function receiptDate(lines: string[], now: Date) {
 }
 
 function merchantName(lines: string[]) {
+  const candidates: string[] = [];
   for (const line of lines.slice(0, 14)) {
     if (line.length < 2 || line.length > 60 || ignoredMerchantWords.test(line)) continue;
     if (amountCandidates(line).length) continue;
     const letters = (line.match(/[A-Za-zÅÄÖåäö]/g) || []).length;
     const digits = (line.match(/\d/g) || []).length;
     if (letters < 3 || digits > letters) continue;
-    return line.replace(/^[^A-Za-zÅÄÖåäö]+|[^A-Za-zÅÄÖåäö0-9)&'. -]+$/g, "").slice(0, 60) || null;
+    const candidate = line.replace(/^[^A-Za-zÅÄÖåäö]+|[^A-Za-zÅÄÖåäö0-9)&'. -]+$/g, "").slice(0, 60);
+    if (candidate) candidates.push(candidate);
   }
-  return null;
+  return candidates.sort((first, second) => merchantNameScore(second) - merchantNameScore(first))[0] || null;
+}
+
+function merchantNameScore(value: string) {
+  const letters = (value.match(/[A-Za-zÅÄÖåäö]/g) || []).length;
+  const businessWord = /restaurang|restaurant|ste[a-z]{1,3}house|hotell|hotel|café|cafe|bistro|bar\b|grill|krog|butik/i.test(value);
+  const isolatedLetters = (value.match(/(?:^|\s)[A-Za-zÅÄÖåäö](?=\s|$)/g) || []).length;
+  return letters + (businessWord ? 100 : 0) - isolatedLetters * 4;
 }
 
 function receiptTotal(lines: string[]) {
@@ -131,11 +146,16 @@ function receiptItems(lines: string[]) {
     if (totalWords.test(line) || excludedTotalWords.test(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
     const amounts = amountCandidates(line);
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
-    const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[xX*]\s+)/;
+    const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s+|\s*\*\s+)/;
     const quantityMatch = line.match(quantityPattern);
     if (!quantityMatch && amounts.length > 1 && /^\s*\d+[,.]\d{2}\b/.test(line)) continue;
     const quantity = Math.min(20, Math.max(1, Number(quantityMatch?.[1] || 1)));
-    const amount = amounts.at(-1)!;
+    let amount = amounts.at(-1)!;
+    if (quantity > 1 && amounts.length > 1) {
+      const unitAmount = amounts.at(-2)!;
+      const calculatedRowAmount = unitAmount * quantity;
+      if (Math.abs(calculatedRowAmount - amount) <= Math.max(20, calculatedRowAmount * 0.12)) amount = calculatedRowAmount;
+    }
     const name = line
       .replace(quantityPattern, "")
       .replace(/\(\s*\d+[,.]\d{2}\s*\)/g, " ")
@@ -144,6 +164,7 @@ function receiptItems(lines: string[]) {
       .replace(/\b(?:kr|sek|st)\b/gi, " ")
       .replace(/[.·_-]{2,}/g, " ")
       .replace(/\s+/g, " ").trim()
+      .replace(/^(?:[oO]{0,2}[1Il|]\s*)?(?:[oO]?[xX][oO]?\s*)/, "")
       .replace(/^[^A-Za-zÅÄÖåäö]+|[^A-Za-zÅÄÖåäö0-9)&'. -]+$/g, "")
       .slice(0, 100);
     if ((name.match(/[A-Za-zÅÄÖåäö]/g) || []).length < 2 || amount <= 0) continue;
@@ -204,10 +225,14 @@ function normalizedItemName(value: string) {
   return value.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "");
 }
 
-function sameItem(first: ReceiptSuggestion["items"][number], second: ReceiptSuggestion["items"][number]) {
-  if (first.quantity !== second.quantity || itemCents(first) !== itemCents(second)) return false;
+function similarItem(first: ReceiptSuggestion["items"][number], second: ReceiptSuggestion["items"][number]) {
+  if (first.quantity !== second.quantity) return false;
   const left = normalizedItemName(first.name); const right = normalizedItemName(second.name);
   return left === right || editDistance(left, right) <= Math.max(2, Math.floor(Math.max(left.length, right.length) * 0.18));
+}
+
+function sameItem(first: ReceiptSuggestion["items"][number], second: ReceiptSuggestion["items"][number]) {
+  return itemCents(first) === itemCents(second) && similarItem(first, second);
 }
 
 function receiptPassScore(pass: ReceiptPass) {
@@ -229,7 +254,18 @@ export function combineReceiptPasses(passes: ReceiptPass[]) {
     for (const pass of ordered.slice(1)) {
       for (const item of pass.suggestion.items) {
         const cents = itemCents(item);
-        if (items.some((existing) => sameItem(existing, item)) || itemTotal + cents > total) continue;
+        if (items.some((existing) => sameItem(existing, item))) continue;
+        const similarIndex = items.findIndex((existing) => similarItem(existing, item));
+        if (similarIndex >= 0) {
+          const replacedTotal = itemTotal - itemCents(items[similarIndex]!) + cents;
+          if (Math.abs(total - replacedTotal) < Math.abs(total - itemTotal)) {
+            itemTotal = replacedTotal;
+            items[similarIndex] = item;
+          }
+          if (itemTotal === total) break;
+          continue;
+        }
+        if (itemTotal + cents > total) continue;
         items.push(item); itemTotal += cents;
         if (itemTotal === total) break;
       }
@@ -237,10 +273,11 @@ export function combineReceiptPasses(passes: ReceiptPass[]) {
     }
   }
   const firstValue = <Key extends "title" | "amount" | "expenseDate">(key: Key) => ordered.find((pass) => pass.suggestion[key])?.suggestion[key] || null;
+  const bestTitle = ordered.map((pass) => pass.suggestion.title).filter((title): title is string => Boolean(title)).sort((first, second) => merchantNameScore(second) - merchantNameScore(first))[0] || null;
   const combinedText = ordered.map((pass) => pass.text).join("\n");
   return {
     suggestion: {
-      title: firstValue("title"), amount: firstValue("amount"), expenseDate: firstValue("expenseDate"),
+      title: bestTitle, amount: firstValue("amount"), expenseDate: firstValue("expenseDate"),
       category: suggestedCategory(combinedText), items,
     },
     confidence: Math.max(...passes.map((pass) => pass.confidence)),
@@ -322,14 +359,22 @@ function balancedPass(pass: ReceiptPass) {
   return total !== null && pass.suggestion.items.length > 0 && itemTotal === total;
 }
 
-async function recognizeWithOllama(content: Buffer, verification = false) {
-  if (!ollamaUrl) return null;
+type AiAttempt = { pass: ReceiptPass | null; status: string; durationMs: number; httpStatus?: number };
+
+function logOcr(event: Record<string, string | number | boolean | null | undefined>) {
+  console.info(`[receipt-ocr] ${JSON.stringify(event)}`);
+}
+
+async function recognizeWithOllama(content: Buffer, verification = false, cancelled?: AbortSignal): Promise<AiAttempt> {
+  const startedAt = Date.now();
+  if (!ollamaUrl) return { pass: null, status: "disabled", durationMs: 0 };
   try {
     const timeout = Math.min(180_000, Math.max(15_000, Number(process.env.OLLAMA_OCR_TIMEOUT_MS) || 60_000));
+    const timeoutSignal = AbortSignal.timeout(timeout);
     const response = await fetch(`${ollamaUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(timeout),
+      signal: cancelled ? AbortSignal.any([timeoutSignal, cancelled]) : timeoutSignal,
       body: JSON.stringify({
         model: ollamaModel,
         stream: false,
@@ -339,23 +384,41 @@ async function recognizeWithOllama(content: Buffer, verification = false) {
         keep_alive: "10m",
       }),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const attempt = { pass: null, status: `http_${response.status}`, durationMs: Date.now() - startedAt, httpStatus: response.status } satisfies AiAttempt;
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs });
+      return attempt;
+    }
     const payload = await response.json() as { message?: { content?: unknown } };
     const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
-    if (!text) return null;
+    if (!text) {
+      const attempt = { pass: null, status: "empty_response", durationMs: Date.now() - startedAt } satisfies AiAttempt;
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs });
+      return attempt;
+    }
     try {
       const pass = parseOllamaReceipt(JSON.parse(text));
-      return pass ? { ...pass, confidence: verification ? 94 : 92 } : null;
+      const attempt = { pass: pass ? { ...pass, confidence: verification ? 94 : 92 } : null, status: pass ? "ok" : "invalid_schema", durationMs: Date.now() - startedAt } satisfies AiAttempt;
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass?.suggestion.items.length });
+      return attempt;
     } catch {
-      return { text, confidence: 70, suggestion: parseReceiptText(text) } satisfies ReceiptPass;
+      const attempt = { pass: { text, confidence: 70, suggestion: parseReceiptText(text) }, status: "unstructured", durationMs: Date.now() - startedAt } satisfies AiAttempt;
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass.suggestion.items.length });
+      return attempt;
     }
-  } catch { return null; }
+  } catch (error) {
+    const status = cancelled?.aborted ? "cancelled_local_complete" : error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError") ? "timeout" : "connection_error";
+    const attempt = { pass: null, status, durationMs: Date.now() - startedAt } satisfies AiAttempt;
+    logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status, durationMs: attempt.durationMs });
+    return attempt;
+  }
 }
 
 const localWorkerCount = Math.min(4, Math.max(1, Number(process.env.RECEIPT_OCR_WORKERS) || 2));
 const workerPromises: Array<Promise<Worker> | undefined> = Array(localWorkerCount);
 const queues: Promise<void>[] = Array.from({ length: localWorkerCount }, () => Promise.resolve());
 let nextWorker = 0;
+let nextScanId = 0;
 
 async function receiptWorker(index: number) {
   workerPromises[index] ||= createWorker("swe", OEM.LSTM_ONLY, {
@@ -422,6 +485,60 @@ function locateReceipt(data: Buffer, width: number, height: number): ReceiptCrop
   return { left, top, width: right - left + 1, height: bottom - top + 1, screenshotPreview };
 }
 
+function otsuThreshold(data: Buffer) {
+  const histogram = Array<number>(256).fill(0);
+  for (const value of data) histogram[value]! += 1;
+  let totalSum = 0;
+  for (let value = 0; value < 256; value += 1) totalSum += value * histogram[value]!;
+  let backgroundWeight = 0; let backgroundSum = 0; let bestVariance = 0; let threshold = 128;
+  for (let value = 0; value < 256; value += 1) {
+    backgroundWeight += histogram[value]!;
+    if (!backgroundWeight) continue;
+    const foregroundWeight = data.length - backgroundWeight;
+    if (!foregroundWeight) break;
+    backgroundSum += value * histogram[value]!;
+    const backgroundMean = backgroundSum / backgroundWeight;
+    const foregroundMean = (totalSum - backgroundSum) / foregroundWeight;
+    const variance = backgroundWeight * foregroundWeight * (backgroundMean - foregroundMean) ** 2;
+    if (variance > bestVariance) { bestVariance = variance; threshold = value; }
+  }
+  return threshold;
+}
+
+async function rectifiedPaperImage(data: Buffer, width: number, height: number, screenshotPreview: boolean) {
+  if (screenshotPreview) return null;
+  const threshold = otsuThreshold(data);
+  if (threshold < 25 || threshold > 205) return null;
+  const bounds: Array<[number, number] | null> = [];
+  for (let y = 0; y < height; y += 1) {
+    let left = width; let right = -1;
+    for (let x = 0; x < width; x += 1) {
+      if (data[y * width + x]! > threshold) { left = Math.min(left, x); right = Math.max(right, x); }
+    }
+    bounds.push(right - left >= width * 0.18 ? [left, right] : null);
+  }
+  const validRows = bounds.map((bound, index) => bound ? index : -1).filter((index) => index >= 0);
+  if (validRows.length < height * 0.55) return null;
+  const top = validRows[0]!; const bottom = validRows.at(-1)!;
+  const averageSpan = validRows.reduce((sum, row) => sum + (bounds[row]![1] - bounds[row]![0] + 1), 0) / validRows.length;
+  if (averageSpan > width * 0.97) return null;
+  const outputHeight = bottom - top + 1;
+  const output = Buffer.alloc(width * outputHeight);
+  let lastBound: [number, number] = [0, width - 1];
+  for (let outputY = 0; outputY < outputHeight; outputY += 1) {
+    const sourceY = top + outputY;
+    const bound = bounds[sourceY] || lastBound;
+    lastBound = bound;
+    for (let outputX = 0; outputX < width; outputX += 1) {
+      const sourceX = Math.min(width - 1, Math.max(0, Math.round(bound[0] + outputX * (bound[1] - bound[0]) / Math.max(1, width - 1))));
+      output[outputY * width + outputX] = data[sourceY * width + sourceX]!;
+    }
+  }
+  return sharp(output, { raw: { width, height: outputHeight, channels: 1 } })
+    .resize({ width: 1600, height: 3400, fit: "inside", withoutEnlargement: false })
+    .normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 1 }).png().toBuffer();
+}
+
 export async function prepareReceiptImages(content: Buffer) {
   const analyzed = await sharp(content, { limitInputPixels: 20_000_000, failOn: "error" })
     .rotate().flatten({ background: "#ffffff" })
@@ -429,14 +546,15 @@ export async function prepareReceiptImages(content: Buffer) {
     .png().toBuffer();
   const raw = await sharp(analyzed).grayscale().raw().toBuffer({ resolveWithObject: true });
   const crop = locateReceipt(raw.data, raw.info.width, raw.info.height);
+  const rectified = await rectifiedPaperImage(raw.data, raw.info.width, raw.info.height, crop.screenshotPreview);
   const base = sharp(analyzed).extract({ left: crop.left, top: crop.top, width: crop.width, height: crop.height })
     .resize({ width: 1600, height: 3400, fit: "inside", withoutEnlargement: false });
   const [ai, grayscale, binary] = await Promise.all([
     base.clone().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.8 }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer(),
     base.clone().grayscale().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.9 }).png().toBuffer(),
-    base.clone().grayscale().normalize({ lower: 2, upper: 98 }).threshold(180).png().toBuffer(),
+    rectified ? Promise.resolve(rectified) : base.clone().grayscale().normalize({ lower: 2, upper: 98 }).threshold(180).png().toBuffer(),
   ]);
-  return { ai, grayscale, binary, crop };
+  return { ai, grayscale, binary, crop, rectified: Boolean(rectified) };
 }
 
 async function recognizePass(worker: Worker, content: Buffer, pageMode: PSM, rotateAuto: boolean): Promise<ReceiptPass> {
@@ -457,7 +575,7 @@ async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepare
     const firstTotal = amountCents(first.suggestion.amount);
     const firstItemTotal = first.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
     if (first.confidence < 75 || first.suggestion.items.length < 2 || firstTotal === null || firstItemTotal !== firstTotal) {
-      passes.push(await recognizePass(worker, images.binary, PSM.SPARSE_TEXT, false));
+      passes.push(await recognizePass(worker, images.binary, images.rectified ? PSM.SINGLE_BLOCK : PSM.SPARSE_TEXT, false));
     }
     return { ...combineReceiptPasses(passes), passes: passes.length };
   });
@@ -466,30 +584,49 @@ async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepare
 }
 
 export async function recognizeReceipt(content: Buffer) {
+  const scanId = `${Date.now().toString(36)}-${(++nextScanId).toString(36)}`;
+  const startedAt = Date.now();
   const images = await prepareReceiptImages(content);
-  const [aiPass, local] = await Promise.all([
-    recognizeWithOllama(images.ai),
-    recognizeReceiptLocally(images),
-  ]);
+  const aiCancellation = new AbortController();
+  const aiPromise = recognizeWithOllama(images.ai, false, aiCancellation.signal);
+  const local = await recognizeReceiptLocally(images);
+  const localPass = { text: "", confidence: local.confidence, suggestion: local.suggestion } satisfies ReceiptPass;
+  if (balancedPass(localPass)) {
+    aiCancellation.abort();
+    const aiAttempt = await aiPromise;
+    const result = { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, rectified: images.rectified, ai: { model: ollamaModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs, used: false, retried: false }, needsReview: false };
+    logOcr({ scanId, stage: "complete", source: result.source, aiStatus: aiAttempt.status, durationMs: Date.now() - startedAt, items: result.suggestion.items.length, balanced: true, rectified: images.rectified });
+    return result;
+  }
+  const aiAttempt = await aiPromise;
+  const aiPass = aiAttempt.pass;
   if (!aiPass) {
     const localTotal = amountCents(local.suggestion.amount);
     const localItemTotal = local.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
-    return { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, needsReview: localTotal !== null && (!local.suggestion.items.length || localItemTotal !== localTotal) };
+    const balanced = localTotal !== null && local.suggestion.items.length > 0 && localItemTotal === localTotal;
+    const result = { ...local, source: "tesseract" as const, cropped: images.crop.screenshotPreview, rectified: images.rectified, ai: { model: ollamaModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs, used: false, retried: false }, needsReview: !balanced };
+    logOcr({ scanId, stage: "complete", source: result.source, aiStatus: aiAttempt.status, durationMs: Date.now() - startedAt, items: result.suggestion.items.length, balanced, rectified: images.rectified });
+    return result;
   }
   const aiPasses = [aiPass];
+  let verificationAttempt: AiAttempt | null = null;
   if (!balancedPass(aiPass) && String(process.env.OLLAMA_ACCURATE_RETRY || "true").toLowerCase() !== "false") {
-    const verification = await recognizeWithOllama(images.grayscale, true);
-    if (verification) aiPasses.push(verification);
+    verificationAttempt = await recognizeWithOllama(images.grayscale, true);
+    if (verificationAttempt.pass) aiPasses.push(verificationAttempt.pass);
   }
-  const combined = combineReceiptPasses([...aiPasses, { text: "", confidence: local.confidence, suggestion: local.suggestion }]);
+  const combined = combineReceiptPasses([...aiPasses, localPass]);
   const totals = aiPasses.map((pass) => pass.suggestion.amount).filter(Boolean);
   if (local.confidence >= 75 && local.suggestion.amount) totals.push(local.suggestion.amount);
   const itemTotal = combined.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
   const total = amountCents(combined.suggestion.amount);
-  return {
+  const result = {
     ...combined, passes: local.passes + aiPasses.length, source: "ollama+tesseract" as const, cropped: images.crop.screenshotPreview,
+    rectified: images.rectified,
+    ai: { model: ollamaModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs + (verificationAttempt?.durationMs || 0), used: true, retried: Boolean(verificationAttempt), verificationStatus: verificationAttempt?.status },
     needsReview: new Set(totals).size > 1 || total === null || !combined.suggestion.items.length || itemTotal !== total,
   };
+  logOcr({ scanId, stage: "complete", source: result.source, aiStatus: aiAttempt.status, aiRetried: Boolean(verificationAttempt), aiVerificationStatus: verificationAttempt?.status, durationMs: Date.now() - startedAt, items: result.suggestion.items.length, balanced: !result.needsReview, rectified: images.rectified });
+  return result;
 }
 
 export async function closeReceiptOcr() {

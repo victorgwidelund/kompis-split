@@ -68,6 +68,34 @@ test("missing OCR decimal separators are repaired without treating card IDs as p
   ]);
 });
 
+test("integer SEK totals, preferred order dates and unit prices repair a low-resolution restaurant receipt", () => {
+  const first = parseReceiptText(`
+    GÄSTNOTA
+    2018-01-23 21:22:37
+    Beställd: 2018-01-25 19:30:23
+    2 Xx Munn Cordon Roug à 131,00 252,00
+    2 x Ostron à 29,00 58,00
+    1 x Kalventrecote 250 gram 285,00
+    1 x Flankstek 200 gram 255,00
+    2 x La Croix Merlot à 95,00 190,00
+    1 x Créme Brölée 35,00
+    1 x Hasselnötskräm 105,00
+    1 x Bryggkaffe 32,00
+    1 x Dubbel Espresso 30,00
+    ATT BETALA 1312 SEK
+  `, new Date("2026-08-11T12:00:00Z"));
+  assert.equal(first.amount, "1312.00");
+  assert.equal(first.expenseDate, "2018-01-25");
+  assert.deepEqual(first.items[0], { name: "Munn Cordon Roug ", quantity: 2, amount: "262.00" });
+  const second = parseReceiptText("1 x Créme Brölée 95,00\nATT BETALA 1312 SEK");
+  const combined = combineReceiptPasses([
+    { text: "", confidence: 72, suggestion: first },
+    { text: "", confidence: 50, suggestion: second },
+  ]);
+  assert.equal(combined.suggestion.items.reduce((sum, item) => sum + Number(item.amount), 0), 1312);
+  assert.equal(combined.suggestion.items.find((item) => item.name.includes("Brölée"))?.amount, "95.00");
+});
+
 test("iPhone preview chrome and margins are cropped before OCR", async () => {
   const screenshot = await sharp(Buffer.from(`<svg width="590" height="1280" xmlns="http://www.w3.org/2000/svg">
     <rect width="590" height="1280" fill="#fffdfd"/>
