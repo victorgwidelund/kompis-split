@@ -102,6 +102,13 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const trip = await request(`/api/trips/${tripId}`, { cookie: ownerCookie });
     assert.equal(trip.payload.trip.participants.length, 2);
     const [ownerParticipant, memberParticipant] = trip.payload.trip.participants;
+    const defaultCategories = await request("/api/categories", { cookie: ownerCookie });
+    assert.equal(defaultCategories.payload.categories.length, 5);
+    const customCategory = await request("/api/categories", { method: "POST", cookie: ownerCookie, body: { name: "Fika", emoji: "☕" } });
+    assert.equal(customCategory.response.status, 201, JSON.stringify(customCategory.payload));
+    assert.match(customCategory.payload.createdSlug, /^custom-/);
+    const customCategoryRecord = customCategory.payload.categories.find((item) => item.slug === customCategory.payload.createdSlug);
+    assert.equal(customCategoryRecord.name, "Fika");
     const expense = await request(`/api/trips/${tripId}/expenses`, {
       method: "POST",
       cookie: ownerCookie,
@@ -121,13 +128,38 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const edited = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
       method: "PATCH",
       cookie: ownerCookie,
-      body: { title: "Middag uppdaterad", amount: "120.01", payerId: memberParticipant.id, expenseDate: "2026-12-11", category: "food", splitMode: "exact", entries: [{ participantId: ownerParticipant.id, value: "60.01" }, { participantId: memberParticipant.id, value: "60.00" }] },
+      body: { title: "Middag uppdaterad", amount: "120.01", payerId: memberParticipant.id, expenseDate: "2026-12-11", category: customCategory.payload.createdSlug, splitMode: "exact", entries: [{ participantId: ownerParticipant.id, value: "60.01" }, { participantId: memberParticipant.id, value: "60.00" }] },
     });
     assert.equal(edited.response.status, 200, JSON.stringify(edited.payload));
     assert.equal(edited.payload.trip.totalCents, 12001);
     assert.equal(edited.payload.trip.expenses[0].title, "Middag uppdaterad");
     assert.equal(edited.payload.trip.expenses[0].payerId, memberParticipant.id);
     assert.deepEqual(edited.payload.trip.expenses[0].shares.map((share) => share.amountCents), [6001, 6000]);
+
+    const archivedCategory = await request(`/api/categories/${customCategoryRecord.id}`, { method: "PATCH", cookie: ownerCookie, body: { archived: true } });
+    assert.ok(archivedCategory.payload.categories.find((item) => item.id === customCategoryRecord.id).archivedAt);
+    const rejectedArchivedCategory = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
+      method: "PATCH",
+      cookie: ownerCookie,
+      body: { title: "Ska nekas", amount: "120.01", payerId: memberParticipant.id, category: customCategory.payload.createdSlug, splitMode: "equal", entries: [{ participantId: ownerParticipant.id, value: 1 }, { participantId: memberParticipant.id, value: 1 }] },
+    });
+    assert.equal(rejectedArchivedCategory.response.status, 400);
+
+    const receiptBytes = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("kompis-split-test")]);
+    const receiptUploadResponse = await fetch(`${baseUrl}/api/expenses/${expense.payload.trip.expenses[0].id}/receipts`, {
+      method: "POST",
+      headers: { Cookie: ownerCookie, Origin: baseUrl, "Content-Type": "image/png", "X-File-Name": encodeURIComponent("middagskvitto.png") },
+      body: receiptBytes,
+    });
+    const receiptUpload = await receiptUploadResponse.json();
+    assert.equal(receiptUploadResponse.status, 201, JSON.stringify(receiptUpload));
+    assert.equal(receiptUpload.trip.expenses[0].receipts.length, 1);
+    const receiptId = receiptUpload.trip.expenses[0].receipts[0].id;
+    const downloadedReceipt = await fetch(`${baseUrl}/api/receipts/${receiptId}`, { headers: { Cookie: ownerCookie } });
+    assert.equal(downloadedReceipt.headers.get("content-type"), "image/png");
+    assert.deepEqual(Buffer.from(await downloadedReceipt.arrayBuffer()), receiptBytes);
+    const memberCannotDeleteReceipt = await request(`/api/receipts/${receiptId}`, { method: "DELETE", cookie: memberCookie, body: {} });
+    assert.equal(memberCannotDeleteReceipt.response.status, 403);
 
     const memberCannotVoid = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, { method: "DELETE", cookie: memberCookie, body: {} });
     assert.equal(memberCannotVoid.response.status, 403);
@@ -193,6 +225,8 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.deepEqual(revision.previous.shares.map((share) => Number(share.amountCents)), [5001, 5000]);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('trip.deleted', 'trip.undeleted')")).rows[0].count), 2);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'receipt.created'")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 3);

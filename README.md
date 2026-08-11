@@ -14,6 +14,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Lika, procentuell, exakt och viktad deterministisk fördelning
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
 - Frivilliga datum för både resor och utgifter
+- Egna, arkiverbara utgiftskategorier samt kvitton direkt under utgiften
 - PostgreSQL-healthcheck och dagliga komprimerade `pg_dump`-backuper
 
 ## Installation på Unraid
@@ -67,6 +68,8 @@ Proxyn ska vidarebefordra `Host` eller `X-Forwarded-Host`. `TRUST_PROXY=true` f�
 ## Backup och återställning
 
 `postgres-backup` gör omedelbart och därefter dagligen en PostgreSQL custom-format-backup. Retention styrs av `BACKUP_RETENTION_DAYS`. Kopiera även `/mnt/user/kompis_split/backups` till en annan disk eller maskin via ditt vanliga Unraid-backupflöde.
+
+Kvitton lagras i PostgreSQL och följer därför med i samma backup. JPG, PNG, WebP och PDF stöds, högst 8 MB per fil och fem filer per utgift. När en arkiverad resa flyttas till papperskorgen raderas dess kvittofiler permanent; utgifter, betalningar och audit-logg behålls så att den ekonomiska historiken fortfarande kan granskas och resan återställas.
 
 Testa återställning på en separat databas:
 

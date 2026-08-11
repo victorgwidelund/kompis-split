@@ -22,6 +22,9 @@ const cookieSecret = process.env.COOKIE_SECRET || createHash("sha256").update(ap
 const trustProxy = process.env.TRUST_PROXY === "true";
 const sessionDays = integerEnvironment("SESSION_DAYS", 30, 1, 365);
 const appVersion = String(process.env.APP_VERSION || "dev").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 80) || "dev";
+const receiptMaximumBytes = 8 * 1024 * 1024;
+const receiptMaximumCount = 5;
+const receiptMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 if (process.env.NODE_ENV === "production" && cookieSecret.length < 32) throw new Error("COOKIE_SECRET måste vara minst 32 tecken i produktion");
 await applyMigrations();
 
@@ -124,6 +127,39 @@ async function readJson(request: IncomingMessage): Promise<any> {
   catch { throw new Error("Ogiltig JSON"); }
 }
 
+async function readBytes(request: IncomingMessage, maximumBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maximumBytes) throw new HttpError(413, `Kvittofilen får vara högst ${Math.floor(maximumBytes / 1024 / 1024)} MB`);
+    chunks.push(Buffer.from(chunk));
+  }
+  if (!size) throw new Error("Kvittofilen är tom");
+  return Buffer.concat(chunks);
+}
+
+function receiptContentMatches(mimeType: string, content: Buffer) {
+  if (mimeType === "image/png") return content.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"));
+  if (mimeType === "image/jpeg") return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
+  if (mimeType === "image/webp") return content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP";
+  if (mimeType === "application/pdf") return content.subarray(0, 5).toString("ascii") === "%PDF-";
+  return false;
+}
+
+function safeReceiptName(value: unknown) {
+  let decoded = String(value || "kvitto");
+  try { decoded = decodeURIComponent(decoded); } catch { /* Behåll rubriken som den är. */ }
+  return cleanText(decoded.replace(/[\\/\0-\x1f\x7f]/g, "_").slice(0, 180), "Filnamn", 180);
+}
+
+async function activeCategorySlug(value: unknown) {
+  const slug = cleanText(value || "other", "Kategori", 40);
+  const category = await db.prepare("SELECT slug FROM expense_categories WHERE slug = ? AND archived_at IS NULL").get<any>(slug);
+  if (!category) throw new Error("Välj en aktiv kategori");
+  return slug;
+}
+
 function cookieValue(request: IncomingMessage, name: string) {
   const pair = String(request.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
   return pair ? decodeURIComponent(pair.slice(name.length + 1)) : "";
@@ -204,6 +240,10 @@ async function loadTrip(id: number, userId: number) {
     expenseDate: expense.expense_date, category: expense.category, splitMode: expense.split_mode,
     createdBy: expense.created_by,
     shares: (await db.prepare("SELECT participant_id, amount_cents FROM expense_shares WHERE expense_id = ? ORDER BY participant_id").all<any>(expense.id)).map((share) => ({ participantId: share.participant_id, amountCents: share.amount_cents })),
+    receipts: (await db.prepare("SELECT id, file_name, mime_type, byte_size, created_by, created_at FROM expense_receipts WHERE expense_id = ? ORDER BY id").all<any>(expense.id)).map((receipt) => ({
+      id: receipt.id, fileName: receipt.file_name, mimeType: receipt.mime_type, byteSize: receipt.byte_size,
+      createdBy: receipt.created_by, createdAt: receipt.created_at,
+    })),
   })));
   const paymentRows = await db.prepare("SELECT * FROM payments WHERE trip_id = ? AND voided_at IS NULL ORDER BY paid_at DESC, id DESC").all<any>(id);
   const payments = paymentRows.map((payment) => ({
@@ -258,6 +298,13 @@ async function dashboard(userId: number) {
     ORDER BY lower(u.display_name)
   `).all<any>(userId)).map(publicUser);
   return { trips, recentExpenses, contacts };
+}
+
+async function categoryList() {
+  return (await db.prepare("SELECT id, slug, name, emoji, is_builtin, created_by, archived_at FROM expense_categories ORDER BY is_builtin DESC, lower(name), id").all<any>()).map((category) => ({
+    id: category.id, slug: category.slug, name: category.name, emoji: category.emoji,
+    isBuiltin: Boolean(category.is_builtin), createdBy: category.created_by, archivedAt: category.archived_at,
+  }));
 }
 
 async function adminOverview() {
@@ -472,6 +519,34 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     return json(response, 200, { tripId: invitation.trip_id });
   }
   if (request.method === "GET" && url.pathname === "/api/dashboard") return json(response, 200, await dashboard(user.id));
+  if (request.method === "GET" && url.pathname === "/api/categories") {
+    return json(response, 200, { categories: await categoryList() });
+  }
+  if (request.method === "POST" && url.pathname === "/api/categories") {
+    const body = await readJson(request);
+    const name = cleanText(body.name, "Kategorinamn", 40);
+    const emoji = cleanText(body.emoji || "🧾", "Emoji", 16);
+    const slug = `custom-${randomBytes(9).toString("base64url").toLowerCase()}`;
+    const result = await db.prepare("INSERT INTO expense_categories (slug, name, emoji, created_by) VALUES (?, ?, ?, ?) RETURNING id")
+      .run(slug, name, emoji, user.id);
+    await audit(user.id, null, "category.created", "category", Number(result.lastInsertRowid), { slug, name });
+    return json(response, 201, { categories: await categoryList(), createdSlug: slug });
+  }
+  match = url.pathname.match(/^\/api\/categories\/(\d+)$/);
+  if (request.method === "PATCH" && match) {
+    const category = await db.prepare("SELECT * FROM expense_categories WHERE id = ?").get<any>(Number(match[1]));
+    if (!category) return json(response, 404, { error: "Kategorin finns inte" });
+    if (category.is_builtin) throw new HttpError(409, "Standardkategorier kan inte ändras");
+    if (!user.is_admin && Number(category.created_by) !== Number(user.id)) throw new HttpError(403, "Du kan bara ändra egna kategorier");
+    const body = await readJson(request);
+    const name = body.name === undefined ? category.name : cleanText(body.name, "Kategorinamn", 40);
+    const emoji = body.emoji === undefined ? category.emoji : cleanText(body.emoji, "Emoji", 16);
+    const archivedAt = typeof body.archived === "boolean" ? (body.archived ? new Date().toISOString() : null) : category.archived_at;
+    await db.prepare("UPDATE expense_categories SET name = ?, emoji = ?, archived_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(name, emoji, archivedAt, category.id);
+    await audit(user.id, null, "category.updated", "category", category.id, { name, emoji, archived: Boolean(archivedAt) });
+    return json(response, 200, { categories: await categoryList() });
+  }
   if (request.method === "GET" && url.pathname === "/api/contacts") {
     const contacts = (await db.prepare(`SELECT u.id, u.email, u.display_name, u.swish_phone FROM contacts c JOIN users u ON u.id = c.contact_user_id WHERE c.owner_user_id = ? ORDER BY lower(u.display_name)`).all<any>(user.id)).map(publicUser);
     return json(response, 200, { contacts });
@@ -529,10 +604,14 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const body = await readJson(request);
     const restoring = body.deleted === false;
     if (!restoring && !trip.archived_at) throw new HttpError(409, "Arkivera resan innan du tar bort den");
-    await db.prepare("UPDATE trips SET deleted_at = ?, deleted_by = ? WHERE id = ?")
-      .run(restoring ? null : new Date().toISOString(), restoring ? null : user.id, tripId);
-    await db.prepare("UPDATE invitations SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP) WHERE trip_id = ?").run(tripId);
-    await audit(user.id, tripId, restoring ? "trip.undeleted" : "trip.deleted", "trip", tripId);
+    await db.transaction(async () => {
+      const receiptCount = restoring ? 0 : Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE trip_id = ?").get<any>(tripId))?.count || 0);
+      if (!restoring) await db.prepare("DELETE FROM expense_receipts WHERE trip_id = ?").run(tripId);
+      await db.prepare("UPDATE trips SET deleted_at = ?, deleted_by = ? WHERE id = ?")
+        .run(restoring ? null : new Date().toISOString(), restoring ? null : user.id, tripId);
+      await db.prepare("UPDATE invitations SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP) WHERE trip_id = ?").run(tripId);
+      await audit(user.id, tripId, restoring ? "trip.undeleted" : "trip.deleted", "trip", tripId, { deletedReceiptCount: receiptCount });
+    });
     return json(response, 200, { ok: true });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/invitations$/);
@@ -565,13 +644,14 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const tripId = Number(match[1]); await requireAccess(tripId, user.id); await requireActiveTrip(tripId);
     const body = await readJson(request); const payerId = Number(body.payerId); await assertTripParticipant(tripId, payerId);
     const amountCents = parseAmount(body.amount);
+    const category = await activeCategorySlug(body.category);
     const entries: Array<{ participantId: number; value: unknown }> = Array.isArray(body.entries) ? body.entries.map((entry: any) => ({ participantId: Number(entry.participantId), value: entry.value })) : [];
     await Promise.all(entries.map((entry: any) => assertTripParticipant(tripId, entry.participantId)));
     if (new Set(entries.map((entry: { participantId: number }) => entry.participantId)).size !== entries.length) throw new Error("Varje deltagare får bara finnas en gång");
     const amounts = calculateShares(amountCents, String(body.splitMode || "equal"), entries);
     await db.transaction(async () => {
       const result = await db.prepare("INSERT INTO expenses (trip_id, payer_id, title, amount_cents, expense_date, category, split_mode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-        .run(tripId, payerId, cleanText(body.title, "Beskrivning", 100), amountCents, validDate(body.expenseDate), cleanText(body.category || "other", "Kategori", 30), String(body.splitMode || "equal"), user.id);
+        .run(tripId, payerId, cleanText(body.title, "Beskrivning", 100), amountCents, validDate(body.expenseDate), category, String(body.splitMode || "equal"), user.id);
       const expenseId = Number(result.lastInsertRowid); const insertShare = db.prepare("INSERT INTO expense_shares (expense_id, participant_id, amount_cents) VALUES (?, ?, ?)");
       for (const [index, entry] of entries.entries()) await insertShare.run(expenseId, entry.participantId, amounts[index]);
       await audit(user.id, tripId, "expense.created", "expense", expenseId, { amountCents });
@@ -588,6 +668,54 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       .run(tripId, fromId, toId, amountCents, body.note ? cleanText(body.note, "Anteckning", 120) : null, user.id);
     await audit(user.id, tripId, "payment.created", "payment", Number(result.lastInsertRowid), { amountCents });
     return json(response, 201, { trip: await loadTrip(tripId, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/expenses\/(\d+)\/receipts$/);
+  if (request.method === "POST" && match) {
+    const expense = await db.prepare("SELECT * FROM expenses WHERE id = ? AND voided_at IS NULL").get<any>(Number(match[1]));
+    if (!expense) return json(response, 404, { error: "Utgiften finns inte" });
+    await requireAccess(expense.trip_id, user.id);
+    await requireActiveTrip(expense.trip_id);
+    const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1);
+    const mimeType = contentType.trim().toLowerCase();
+    if (!receiptMimeTypes.has(mimeType)) throw new HttpError(415, "Kvitton måste vara JPG, PNG, WebP eller PDF");
+    const receiptCount = Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE expense_id = ?").get<any>(expense.id))?.count || 0);
+    if (receiptCount >= receiptMaximumCount) throw new HttpError(409, `Högst ${receiptMaximumCount} kvitton per utgift`);
+    const content = await readBytes(request, receiptMaximumBytes);
+    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda filformatet");
+    const fileName = safeReceiptName(request.headers["x-file-name"]);
+    const result = await db.prepare("INSERT INTO expense_receipts (expense_id, trip_id, file_name, mime_type, byte_size, content, created_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
+      .run(expense.id, expense.trip_id, fileName, mimeType, content.length, content, user.id);
+    await audit(user.id, expense.trip_id, "receipt.created", "receipt", Number(result.lastInsertRowid), { expenseId: expense.id, fileName, byteSize: content.length });
+    return json(response, 201, { trip: await loadTrip(expense.trip_id, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/receipts\/(\d+)$/);
+  if (request.method === "GET" && match) {
+    const receipt = await db.prepare("SELECT * FROM expense_receipts WHERE id = ?").get<any>(Number(match[1]));
+    if (!receipt) return json(response, 404, { error: "Kvittot finns inte" });
+    await requireAccess(receipt.trip_id, user.id);
+    const content = Buffer.from(receipt.content);
+    response.writeHead(200, {
+      ...securityHeaders(),
+      "Content-Type": receipt.mime_type,
+      "Content-Length": String(content.length),
+      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(receipt.file_name)}`,
+      "Cache-Control": "private, no-store",
+    });
+    response.end(content);
+    return;
+  }
+  if (request.method === "DELETE" && match) {
+    const receipt = await db.prepare("SELECT * FROM expense_receipts WHERE id = ?").get<any>(Number(match[1]));
+    if (!receipt) return json(response, 404, { error: "Kvittot finns inte" });
+    await requireRecordWriteAccess(receipt.trip_id, user.id, receipt.created_by);
+    await requireActiveTrip(receipt.trip_id);
+    await db.transaction(async () => {
+      await audit(user.id, receipt.trip_id, "receipt.deleted", "receipt", receipt.id, {
+        expenseId: receipt.expense_id, fileName: receipt.file_name, byteSize: receipt.byte_size,
+      });
+      await db.prepare("DELETE FROM expense_receipts WHERE id = ?").run(receipt.id);
+    });
+    return json(response, 200, { ok: true });
   }
   match = url.pathname.match(/^\/api\/expenses\/(\d+)$/);
   if (request.method === "PATCH" && match) {
@@ -608,7 +736,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const amounts = calculateShares(amountCents, splitMode, entries);
     const title = cleanText(body.title, "Beskrivning", 100);
     const expenseDate = validDate(body.expenseDate);
-    const category = cleanText(body.category || "other", "Kategori", 30);
+    const category = await activeCategorySlug(body.category);
     const previousShares = await db.prepare("SELECT participant_id, amount_cents FROM expense_shares WHERE expense_id = ? ORDER BY participant_id").all<any>(expense.id);
     await db.transaction(async () => {
       await db.prepare(`

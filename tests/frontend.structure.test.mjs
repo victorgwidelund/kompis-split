@@ -21,6 +21,10 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /id="delete-trip-button"/);
   assert.match(html, /id="active-trips-card"/);
   assert.match(html, /id="dashboard-trips-panel"/);
+  assert.match(html, /id="category-dialog"/);
+  assert.match(html, /id="receipt-file-input"/);
+  assert.match(app, /data-add-receipt/);
+  assert.match(app, /data-delete-receipt/);
   assert.match(app, /navigator\.clipboard/);
   assert.match(app, /document\.execCommand\("copy"\)/);
   assert.doesNotMatch(html, /name="expenseDate"[^>]*required/);
