@@ -58,6 +58,7 @@
       <aside class="sidebar">
         <button id="home-button" class="brand brand-button"><span class="brand-mark">KS</span><span>Kompis<br /><strong>Split</strong></span></button>
         <button id="new-trip-button" class="button dark wide"><span>＋</span> Ny resa</button>
+        <button id="statistics-button" class="button ghost wide statistics-nav"><span>⌁</span> Statistik</button>
         <button id="admin-button" class="button ghost wide admin-nav hidden"><span>⚙</span> Administration</button>
         <div class="side-heading"><span>Aktiva resor</span><span id="trip-count" class="count">0</span></div>
         <nav id="trip-list" class="trip-list" aria-label="Aktiva resor"></nav>
@@ -75,11 +76,11 @@
       <main class="main">
         <header class="mobile-header">
           <button id="mobile-home-button" class="brand brand-button"><span class="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></button>
-          <div class="mobile-actions"><small class="app-version mobile-version" title="Installerad appversion">…</small><button id="mobile-admin-button" class="icon-button admin-nav hidden" aria-label="Administration">⚙</button><button id="mobile-new-trip" class="icon-button dark" aria-label="Ny resa">＋</button></div>
+          <div class="mobile-actions"><small class="app-version mobile-version" title="Installerad appversion">…</small><button id="mobile-statistics-button" class="icon-button statistics-nav" aria-label="Statistik" title="Statistik">⌁</button><button id="mobile-admin-button" class="icon-button admin-nav hidden" aria-label="Administration">⚙</button><button id="mobile-new-trip" class="icon-button dark" aria-label="Ny resa">＋</button></div>
         </header>
 
         <section id="dashboard-view" class="home-dashboard">
-          <header class="dashboard-heading"><div><p class="eyebrow">Din överblick</p><h1 id="dashboard-greeting">Hej!</h1><p>Alla resor, utgifter och saldon på ett ställe.</p></div><button id="dashboard-new-trip" class="button primary">＋ Ny resa</button></header>
+          <header class="dashboard-heading"><div><p class="eyebrow">Din överblick</p><h1 id="dashboard-greeting">Hej!</h1><p>Alla resor, utgifter och saldon på ett ställe.</p></div><div class="dashboard-heading-actions"><button id="dashboard-statistics" class="button ghost">⌁ Statistik</button><button id="dashboard-new-trip" class="button primary">＋ Ny resa</button></div></header>
           <div class="summary-grid home-stats">
             <button id="active-trips-card" class="hero-stat coral stat-link" type="button" aria-controls="dashboard-trips-panel"><span class="stat-icon">✦</span><p>Aktiva resor</p><strong id="active-trip-total">0</strong><small>Visa pågående och kommande →</small></button>
             <article class="hero-stat cobalt"><span class="stat-icon">↗</span><p>Ditt nettosaldo</p><strong id="dashboard-balance">0 kr</strong><small id="dashboard-balance-caption">Du ligger jämnt</small></article>
@@ -91,6 +92,22 @@
           </div>
           <section class="panel friends-panel"><div class="panel-title"><div><p class="eyebrow">Ditt gäng</p><h2>Vänner</h2></div><button id="dashboard-invite-friend" class="button ghost small-button">＋ Bjud in vän</button></div><div id="dashboard-friends" class="friends-grid"></div></section>
           <section id="dashboard-archive-panel" class="panel archive-panel hidden"><div class="panel-title"><div><p class="eyebrow">Sparat</p><h2>Arkiverade resor</h2></div></div><div id="dashboard-archive" class="trip-card-grid compact"></div></section>
+        </section>
+
+        <section id="statistics-view" class="statistics-view hidden">
+          <header class="dashboard-heading"><div><button id="statistics-back-button" class="mobile-back visible-back">← Till startsidan</button><p class="eyebrow">För den nyfikne</p><h1>Rolig statistik</h1><p>Kategorier, platser, personer och trender från resorna du kan se.</p></div><button id="statistics-refresh-button" class="button ghost">Uppdatera</button></header>
+          <div class="summary-grid statistics-summary">
+            <article class="hero-stat coral"><span class="stat-icon">↗</span><p>Totalt registrerat</p><strong id="statistics-total">0 kr</strong><small id="statistics-trip-count">0 resor</small></article>
+            <article class="hero-stat cobalt"><span class="stat-icon">÷</span><p>Snittutgift</p><strong id="statistics-average">0 kr</strong><small>per registrerad utgift</small></article>
+            <article class="member-stat"><p>Antal utgifter</p><strong id="statistics-expense-count">0</strong><small>arkiverade resor räknas med</small></article>
+          </div>
+          <div class="statistics-grid">
+            <section class="panel statistics-trend-panel"><div class="panel-title"><div><p class="eyebrow">Över tid</p><h2>Månadsutveckling</h2></div><small>Senaste 12 månaderna med utgifter</small></div><div id="statistics-trend" class="trend-chart"></div></section>
+            <section class="panel"><div class="panel-title"><div><p class="eyebrow">Vad</p><h2>Kategorier</h2></div></div><div id="statistics-categories" class="rank-list"></div></section>
+            <section class="panel"><div class="panel-title"><div><p class="eyebrow">Var</p><h2>Restauranger &amp; platser</h2></div></div><div id="statistics-merchants" class="rank-list"></div></section>
+            <section class="panel"><div class="panel-title"><div><p class="eyebrow">Vem</p><h2>Tog notan</h2></div></div><div id="statistics-payers" class="rank-list"></div></section>
+          </div>
+          <p class="statistics-note">Statistiken omfattar aktiva och arkiverade resor du har tillgång till. Borttagna resor och borttagna utgifter räknas inte.</p>
         </section>
 
         <section id="admin-view" class="admin-view hidden">

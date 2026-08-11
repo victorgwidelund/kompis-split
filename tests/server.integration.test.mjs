@@ -147,6 +147,15 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(edited.payload.trip.expenses[0].payerId, memberParticipant.id);
     assert.deepEqual(edited.payload.trip.expenses[0].shares.map((share) => share.amountCents), [6001, 6000]);
 
+    const statistics = await request("/api/statistics", { cookie: ownerCookie });
+    assert.equal(statistics.response.status, 200, JSON.stringify(statistics.payload));
+    assert.deepEqual(statistics.payload.summary, { expenseCount: 1, tripCount: 1, totalCents: 12001, averageCents: 12001 });
+    assert.equal(statistics.payload.categories[0].name, "Fika");
+    assert.equal(statistics.payload.categories[0].totalCents, 12001);
+    assert.equal(statistics.payload.merchants[0].name, "Middag uppdaterad");
+    assert.equal(statistics.payload.payers[0].name, memberParticipant.name);
+    assert.equal(statistics.payload.trend[0].month, "2026-12");
+
     const archivedCategory = await request(`/api/categories/${customCategoryRecord.id}`, { method: "PATCH", cookie: ownerCookie, body: { archived: true } });
     assert.ok(archivedCategory.payload.categories.find((item) => item.id === customCategoryRecord.id).archivedAt);
     const rejectedArchivedCategory = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {

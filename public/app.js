@@ -1,8 +1,9 @@
-const state = { user: null, dashboard: null, trips: [], trip: null, admin: null, categories: [], tab: "overview", inviteToken: "", invitation: null, version: "dev" };
+const state = { user: null, dashboard: null, trips: [], trip: null, admin: null, statistics: null, categories: [], tab: "overview", inviteToken: "", invitation: null, version: "dev" };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const money = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 2 });
 const dateFormat = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short", year: "numeric" });
+const monthFormat = new Intl.DateTimeFormat("sv-SE", { month: "short", year: "2-digit" });
 const colors = ["#c7e6d2", "#f6ca67", "#bfc6fb", "#ffc6b7", "#d5c2e8", "#b9dcdf"];
 const categories = { food: "🍝", travel: "🚆", stay: "🏡", fun: "🎟️", other: "🧾" };
 let pendingExpenseReceipt = null;
@@ -139,6 +140,7 @@ async function enterApp() {
   await loadDashboard();
   const hashId = Number(location.hash.match(/^#trip-(\d+)$/)?.[1]);
   if (hashId && state.trips.some((trip) => trip.id === hashId)) await selectTrip(hashId);
+  else if (location.hash === "#statistics") await showStatistics();
   else if (location.hash === "#admin" && state.user.isAdmin) await showAdmin();
   else showDashboard(false);
 }
@@ -197,8 +199,48 @@ function showDashboard(updateHash = true) {
   state.trip = null;
   $("#trip-view").classList.add("hidden");
   $("#admin-view").classList.add("hidden");
+  $("#statistics-view").classList.add("hidden");
   $("#dashboard-view").classList.remove("hidden");
   if (updateHash) history.replaceState(null, "", location.pathname);
+  renderTripLists();
+}
+
+function renderRankList(selector, items, icon) {
+  const max = Math.max(...items.map((item) => Number(item.totalCents)), 1);
+  $(selector).innerHTML = items.length ? items.map((item, index) => {
+    const width = Math.max(3, Math.round(Number(item.totalCents) / max * 100));
+    return `<article class="rank-row"><span class="rank-icon">${icon(item, index)}</span><div class="rank-main"><div class="rank-copy"><span><strong>${escapeHtml(item.name)}</strong><small>${item.expenseCount} ${item.expenseCount === 1 ? "utgift" : "utgifter"}</small></span><b>${formatMoney(item.totalCents)}</b></div><span class="rank-track"><span style="width:${width}%"></span></span></div></article>`;
+  }).join("") : emptyState("Inte tillräckligt med data ännu", "Statistiken växer när ni lägger till utgifter.");
+}
+
+function renderStatistics() {
+  const data = state.statistics;
+  if (!data) return;
+  $("#statistics-total").textContent = formatMoney(data.summary.totalCents);
+  $("#statistics-average").textContent = formatMoney(data.summary.averageCents);
+  $("#statistics-expense-count").textContent = data.summary.expenseCount;
+  $("#statistics-trip-count").textContent = `${data.summary.tripCount} ${data.summary.tripCount === 1 ? "resa" : "resor"}`;
+  renderRankList("#statistics-categories", data.categories, (item) => escapeHtml(item.emoji || "🧾"));
+  renderRankList("#statistics-merchants", data.merchants, (_, index) => String(index + 1));
+  renderRankList("#statistics-payers", data.payers, (item, index) => escapeHtml(initials(item.name)) || String(index + 1));
+  const max = Math.max(...data.trend.map((item) => Number(item.totalCents)), 1);
+  $("#statistics-trend").innerHTML = data.trend.length ? data.trend.map((item) => {
+    const height = Math.max(8, Math.round(Number(item.totalCents) / max * 100));
+    const label = monthFormat.format(new Date(`${item.month}-01T12:00:00`));
+    return `<article class="trend-column" title="${escapeHtml(label)}: ${escapeHtml(formatMoney(item.totalCents))}"><strong>${formatMoney(item.totalCents)}</strong><span class="trend-bar-space"><span class="trend-bar" style="height:${height}%"></span></span><small>${escapeHtml(label)}</small><em>${item.expenseCount} st</em></article>`;
+  }).join("") : emptyState("Ingen trend ännu", "Månadsutvecklingen visas när en utgift har registrerats.");
+}
+
+async function showStatistics() {
+  const payload = await api("/api/statistics");
+  state.statistics = payload;
+  state.trip = null;
+  $("#dashboard-view").classList.add("hidden");
+  $("#trip-view").classList.add("hidden");
+  $("#admin-view").classList.add("hidden");
+  $("#statistics-view").classList.remove("hidden");
+  history.replaceState(null, "", `${location.pathname}#statistics`);
+  renderStatistics();
   renderTripLists();
 }
 
@@ -233,6 +275,7 @@ async function showAdmin() {
   state.trip = null;
   $("#dashboard-view").classList.add("hidden");
   $("#trip-view").classList.add("hidden");
+  $("#statistics-view").classList.add("hidden");
   $("#admin-view").classList.remove("hidden");
   history.replaceState(null, "", `${location.pathname}#admin`);
   renderAdmin();
@@ -268,6 +311,7 @@ async function selectTrip(id) {
   location.hash = `trip-${id}`;
   $("#dashboard-view").classList.add("hidden");
   $("#admin-view").classList.add("hidden");
+  $("#statistics-view").classList.add("hidden");
   $("#trip-view").classList.remove("hidden");
   renderTripLists();
   renderTrip();
@@ -586,8 +630,11 @@ document.addEventListener("click", async (event) => {
 });
 
 [$("#home-button"), $("#mobile-home-button"), $("#back-to-trips")].forEach((button) => button.addEventListener("click", () => showDashboard()));
+[$("#statistics-button"), $("#mobile-statistics-button"), $("#dashboard-statistics")].forEach((button) => button.addEventListener("click", () => showStatistics().catch((error) => toast(error.message))));
 [$("#admin-button"), $("#mobile-admin-button")].forEach((button) => button.addEventListener("click", () => showAdmin().catch((error) => toast(error.message))));
 $("#admin-back-button").addEventListener("click", () => showDashboard());
+$("#statistics-back-button").addEventListener("click", () => showDashboard());
+$("#statistics-refresh-button").addEventListener("click", () => showStatistics().catch((error) => toast(error.message)));
 $("#admin-refresh-button").addEventListener("click", () => showAdmin().catch((error) => toast(error.message)));
 $("#active-trips-card").addEventListener("click", () => {
   const panel = $("#dashboard-trips-panel");

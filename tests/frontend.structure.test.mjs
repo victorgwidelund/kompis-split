@@ -13,6 +13,11 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /id="dashboard-view"/);
   assert.match(html, /id="invite-dialog"/);
   assert.match(html, /id="admin-view"/);
+  assert.match(html, /id="statistics-view"/);
+  assert.match(html, /id="statistics-trend"/);
+  assert.match(html, /id="statistics-categories"/);
+  assert.match(html, /id="statistics-merchants"/);
+  assert.match(html, /id="statistics-payers"/);
   assert.match(html, /id="dashboard-friends"/);
   assert.match(html, /id="expense-dialog-title"/);
   assert.match(html, /id="expense-submit-label"/);

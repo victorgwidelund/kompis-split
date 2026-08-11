@@ -357,6 +357,73 @@ async function dashboard(userId: number) {
   return { trips, recentExpenses, contacts };
 }
 
+async function statistics(userId: number) {
+  const visibleExpense = `
+    FROM expenses e
+    JOIN trips t ON t.id = e.trip_id
+    JOIN trip_access ta ON ta.trip_id = t.id AND ta.user_id = ?
+  `;
+  const visibleFilter = "WHERE e.voided_at IS NULL AND t.deleted_at IS NULL";
+  const summary = await db.prepare(`
+    SELECT COUNT(*) expense_count, COUNT(DISTINCT e.trip_id) trip_count,
+      COALESCE(SUM(e.amount_cents), 0) total_cents,
+      COALESCE(ROUND(AVG(e.amount_cents)), 0) average_cents
+    ${visibleExpense} ${visibleFilter}
+  `).get<any>(userId);
+  const categoryRows = await db.prepare(`
+    SELECT e.category slug, COALESCE(c.name, e.category) name, COALESCE(c.emoji, '🧾') emoji,
+      COUNT(*) expense_count, SUM(e.amount_cents) total_cents
+    ${visibleExpense}
+    LEFT JOIN expense_categories c ON c.slug = e.category
+    ${visibleFilter}
+    GROUP BY e.category, c.name, c.emoji
+    ORDER BY total_cents DESC, lower(COALESCE(c.name, e.category))
+  `).all<any>(userId);
+  const merchantRows = await db.prepare(`
+    SELECT MIN(e.title) name, COUNT(*) expense_count, SUM(e.amount_cents) total_cents
+    ${visibleExpense} ${visibleFilter}
+    GROUP BY lower(trim(e.title))
+    ORDER BY total_cents DESC, lower(MIN(e.title))
+    LIMIT 12
+  `).all<any>(userId);
+  const payerRows = await db.prepare(`
+    SELECT p.user_id, p.name, COUNT(*) expense_count, SUM(e.amount_cents) total_cents
+    ${visibleExpense}
+    JOIN participants p ON p.id = e.payer_id
+    ${visibleFilter}
+    GROUP BY p.user_id, p.name
+    ORDER BY total_cents DESC, lower(p.name)
+    LIMIT 12
+  `).all<any>(userId);
+  const trendRows = await db.prepare(`
+    SELECT month, expense_count, total_cents FROM (
+      SELECT to_char(date_trunc('month', COALESCE(e.expense_date, e.created_at::date)), 'YYYY-MM') month,
+        COUNT(*) expense_count, SUM(e.amount_cents) total_cents
+      ${visibleExpense} ${visibleFilter}
+      GROUP BY date_trunc('month', COALESCE(e.expense_date, e.created_at::date))
+      ORDER BY date_trunc('month', COALESCE(e.expense_date, e.created_at::date)) DESC
+      LIMIT 12
+    ) recent_months ORDER BY month
+  `).all<any>(userId);
+  const mapTotals = (row: any) => ({
+    ...row,
+    expenseCount: Number(row.expense_count),
+    totalCents: Number(row.total_cents),
+    expense_count: undefined,
+    total_cents: undefined,
+  });
+  return {
+    summary: {
+      expenseCount: Number(summary.expense_count), tripCount: Number(summary.trip_count),
+      totalCents: Number(summary.total_cents), averageCents: Number(summary.average_cents),
+    },
+    categories: categoryRows.map(mapTotals),
+    merchants: merchantRows.map(mapTotals),
+    payers: payerRows.map((row) => ({ ...mapTotals(row), userId: row.user_id, user_id: undefined })),
+    trend: trendRows.map(mapTotals),
+  };
+}
+
 async function categoryList() {
   return (await db.prepare("SELECT id, slug, name, emoji, is_builtin, created_by, archived_at FROM expense_categories ORDER BY is_builtin DESC, lower(name), id").all<any>()).map((category) => ({
     id: category.id, slug: category.slug, name: category.name, emoji: category.emoji,
@@ -614,6 +681,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     return json(response, 201, { invitation: await invitationPayload(request, token, expiresAt) });
   }
   if (request.method === "GET" && url.pathname === "/api/dashboard") return json(response, 200, await dashboard(user.id));
+  if (request.method === "GET" && url.pathname === "/api/statistics") return json(response, 200, await statistics(user.id));
   if (request.method === "GET" && url.pathname === "/api/categories") {
     return json(response, 200, { categories: await categoryList() });
   }

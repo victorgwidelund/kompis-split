@@ -18,6 +18,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Egna, arkiverbara utgiftskategorier samt kvitton direkt under utgiften
 - Lokal svensk kvittoavläsning som föreslår restaurang/plats, totalbelopp, datum och kategori
 - Mobilanpassade formulärfält som inte automatiskt zoomar in på iPhone
+- Egen statistikvy för kategorier, restauranger/platser, betalare och månadsutveckling
 - PostgreSQL-healthcheck och dagliga komprimerade `pg_dump`-backuper
 
 ## Installation på Unraid
