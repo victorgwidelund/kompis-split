@@ -41,6 +41,7 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    BACKUP_RETENTION_DAYS=14
    OLLAMA_MODEL=qwen3-vl:4b
    OLLAMA_OCR_TIMEOUT_MS=60000
+   OLLAMA_OCR_MAX_TOKENS=768
    OLLAMA_ACCURATE_RETRY=true
    RECEIPT_OCR_WORKERS=2
    ```
@@ -131,6 +132,7 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `OLLAMA_URL` | `http://ollama:11434` i Compose | Intern adress till lokal dokument-AI; exponeras inte publikt |
 | `OLLAMA_MODEL` | `qwen3-vl:4b` | Lokal 4,44B visionmodell i Q4_K_M, cirka 3,3 GB och vald för GTX 1080 Ti |
 | `OLLAMA_OCR_TIMEOUT_MS` | `60000` | Maximal väntetid i millisekunder per lokal AI-kontroll innan Tesseract-resultatet används |
+| `OLLAMA_OCR_MAX_TOKENS` | `768` | Hård gräns för AI-svarets längd; hindrar visionmodellen från att fortsätta tills timeout |
 | `OLLAMA_ACCURATE_RETRY` | `true` | Kör en extra AI-kontroll endast när den första tolkningen inte summerar exakt |
 | `RECEIPT_OCR_WORKERS` | `2` | Antal parallella Tesseract-arbetare; två matchar AI-parallelliteten och serverns 40 CPU-trådar |
 

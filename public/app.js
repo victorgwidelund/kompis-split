@@ -796,6 +796,7 @@ function receiptAiStatus(ai) {
   if (ai.status === "unstructured") return ` AI svarade${seconds}, men svaret behövde reservtolkas.`;
   if (ai.status === "cancelled_local_complete") return ` Snabb OCR summerade exakt${seconds}, så AI-körningen avbröts.`;
   if (ai.status === "timeout") return ` AI nådde tidsgränsen${seconds}; reserv-OCR användes.`;
+  if (ai.status === "token_limit") return ` AI nådde sin svarsgräns${seconds}; reserv-OCR användes.`;
   if (ai.status === "http_404") return " AI-modellen hittades inte i Ollama; reserv-OCR användes.";
   if (ai.status === "http_503") return " AI-kön var full; reserv-OCR användes.";
   if (ai.status === "disabled") return " AI är inte konfigurerad; reserv-OCR användes.";

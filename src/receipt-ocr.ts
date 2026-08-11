@@ -5,6 +5,7 @@ import { createWorker, OEM, PSM, type Worker } from "tesseract.js";
 const require = createRequire(import.meta.url);
 const swedishLanguage = require("@tesseract.js-data/swe") as { langPath: string; gzip: boolean };
 const ollamaModel = String(process.env.OLLAMA_MODEL || "qwen3-vl:4b").trim();
+const ollamaMaxTokens = Math.min(1_536, Math.max(256, Number(process.env.OLLAMA_OCR_MAX_TOKENS) || 768));
 const ollamaUrl = (() => {
   const value = String(process.env.OLLAMA_URL || "").trim();
   if (!value) return null;
@@ -323,6 +324,7 @@ const ollamaReceiptSchema = {
     total: { type: "number", description: "Slutsumman att betala i SEK, annars 0" },
     items: {
       type: "array",
+      maxItems: 40,
       items: {
         type: "object",
         properties: {
@@ -347,7 +349,7 @@ Regler:
 - En rad som \"7x Smirnoff ICE 665.00\" betyder quantity 7 och amount 665.00.
 - En rad som \"2st * 55 kr 110.00\" betyder quantity 2 och amount 110.00.
 - amount är alltid hela radens summa, aldrig styckpriset inom parentes.
-- Ta med varje köpt mat- och dryckesrad samt eventuell tydlig dricks/extraavgift.
+- Ta med varje synlig köpt rad exakt en gång. Upprepa aldrig samma fysiska kvittorad.
 - Ta inte med moms, delsumma, total, betalning, kortnummer, terminaldata eller kvittonummer som artiklar.
 - total är den tydliga slutsumman/att betala, inte moms eller delsumma.
 - Kontrollera att antal och decimaler återges exakt. Använd tom sträng eller 0 när ett fält inte går att läsa.`;
@@ -365,6 +367,18 @@ function logOcr(event: Record<string, string | number | boolean | null | undefin
   console.info(`[receipt-ocr] ${JSON.stringify(event)}`);
 }
 
+export function ollamaReceiptRequest(content: Buffer, verification = false) {
+  return {
+    model: ollamaModel,
+    stream: false,
+    think: false,
+    format: ollamaReceiptSchema,
+    messages: [{ role: "user", content: receiptPrompt(verification), images: [content.toString("base64")] }],
+    options: { temperature: 0, seed: verification ? 239017 : 837451, num_ctx: 8192, num_predict: ollamaMaxTokens },
+    keep_alive: "10m",
+  };
+}
+
 async function recognizeWithOllama(content: Buffer, verification = false, cancelled?: AbortSignal): Promise<AiAttempt> {
   const startedAt = Date.now();
   if (!ollamaUrl) return { pass: null, status: "disabled", durationMs: 0 };
@@ -375,35 +389,45 @@ async function recognizeWithOllama(content: Buffer, verification = false, cancel
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: cancelled ? AbortSignal.any([timeoutSignal, cancelled]) : timeoutSignal,
-      body: JSON.stringify({
-        model: ollamaModel,
-        stream: false,
-        format: ollamaReceiptSchema,
-        messages: [{ role: "user", content: receiptPrompt(verification), images: [content.toString("base64")] }],
-        options: { temperature: 0, seed: verification ? 239017 : 837451, num_ctx: 8192, num_predict: 4096 },
-        keep_alive: "10m",
-      }),
+      body: JSON.stringify(ollamaReceiptRequest(content, verification)),
     });
     if (!response.ok) {
       const attempt = { pass: null, status: `http_${response.status}`, durationMs: Date.now() - startedAt, httpStatus: response.status } satisfies AiAttempt;
       logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs });
       return attempt;
     }
-    const payload = await response.json() as { message?: { content?: unknown } };
+    const payload = await response.json() as {
+      message?: { content?: unknown };
+      done_reason?: unknown;
+      eval_count?: unknown;
+      eval_duration?: unknown;
+      prompt_eval_count?: unknown;
+      prompt_eval_duration?: unknown;
+      load_duration?: unknown;
+    };
     const text = typeof payload.message?.content === "string" ? payload.message.content.trim() : "";
+    const metrics = {
+      doneReason: typeof payload.done_reason === "string" ? payload.done_reason : undefined,
+      outputTokens: Number.isFinite(Number(payload.eval_count)) ? Number(payload.eval_count) : undefined,
+      outputMs: Number.isFinite(Number(payload.eval_duration)) ? Math.round(Number(payload.eval_duration) / 1_000_000) : undefined,
+      promptTokens: Number.isFinite(Number(payload.prompt_eval_count)) ? Number(payload.prompt_eval_count) : undefined,
+      promptMs: Number.isFinite(Number(payload.prompt_eval_duration)) ? Math.round(Number(payload.prompt_eval_duration) / 1_000_000) : undefined,
+      loadMs: Number.isFinite(Number(payload.load_duration)) ? Math.round(Number(payload.load_duration) / 1_000_000) : undefined,
+    };
     if (!text) {
       const attempt = { pass: null, status: "empty_response", durationMs: Date.now() - startedAt } satisfies AiAttempt;
-      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs });
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, ...metrics });
       return attempt;
     }
     try {
       const pass = parseOllamaReceipt(JSON.parse(text));
       const attempt = { pass: pass ? { ...pass, confidence: verification ? 94 : 92 } : null, status: pass ? "ok" : "invalid_schema", durationMs: Date.now() - startedAt } satisfies AiAttempt;
-      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass?.suggestion.items.length });
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass?.suggestion.items.length, ...metrics });
       return attempt;
     } catch {
-      const attempt = { pass: { text, confidence: 70, suggestion: parseReceiptText(text) }, status: "unstructured", durationMs: Date.now() - startedAt } satisfies AiAttempt;
-      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass.suggestion.items.length });
+      const tokenLimited = metrics.doneReason === "length";
+      const attempt = { pass: tokenLimited ? null : { text, confidence: 70, suggestion: parseReceiptText(text) }, status: tokenLimited ? "token_limit" : "unstructured", durationMs: Date.now() - startedAt } satisfies AiAttempt;
+      logOcr({ stage: verification ? "ai_verify" : "ai", model: ollamaModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass?.suggestion.items.length, ...metrics });
       return attempt;
     }
   } catch (error) {
@@ -550,7 +574,7 @@ export async function prepareReceiptImages(content: Buffer) {
   const base = sharp(analyzed).extract({ left: crop.left, top: crop.top, width: crop.width, height: crop.height })
     .resize({ width: 1600, height: 3400, fit: "inside", withoutEnlargement: false });
   const [ai, grayscale, binary] = await Promise.all([
-    base.clone().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.8 }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer(),
+    base.clone().resize({ width: 1024, height: 2048, fit: "inside" }).normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.8 }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer(),
     base.clone().grayscale().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.9 }).png().toBuffer(),
     rectified ? Promise.resolve(rectified) : base.clone().grayscale().normalize({ lower: 2, upper: 98 }).threshold(180).png().toBuffer(),
   ]);
