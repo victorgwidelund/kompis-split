@@ -1,6 +1,6 @@
 # Kompis Split
 
-En liten självhostad app för att dela resekostnader med vänner. Frontend är vanlig HTML/CSS/JavaScript. Backend är Node.js 24 med TypeScript och PostgreSQL 17. Alla pengar lagras som heltalsöre.
+En liten självhostad app för att dela resekostnader med vänner. Frontend är React 19, Vite och strikt TypeScript. Backend är Node.js 24 med TypeScript och PostgreSQL 17. Alla pengar lagras som heltalsöre.
 
 ## Funktioner
 
@@ -144,6 +144,9 @@ Kräver Node.js 24, pnpm 11 och en PostgreSQL-databas:
 ```sh
 pnpm install --frozen-lockfile
 pnpm run typecheck
+pnpm run lint
 pnpm test
 DATABASE_URL=postgresql://user:password@localhost:5432/kompis_split pnpm dev
 ```
+
+Starta `pnpm dev:frontend` i en andra terminal för Vites utvecklingsserver på port 5173; `/api` och `/health` proxas då till backend på port 8787. `pnpm build` bygger både backend och React-frontenden. Node-servern serverar det färdiga Vite-bygget, så produktionen använder fortfarande en enda appcontainer och samma port.

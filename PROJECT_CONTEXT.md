@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-11  
-Appversion: 1.12.0
+Appversion: 1.13.0
 Databasschema: migration 6
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -20,7 +20,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 
 ## Nuvarande arkitektur
 
-- Frontend: statisk HTML, CSS och vanlig JavaScript i `public/`.
+- Frontend: React 19, Vite och strikt TypeScript i `frontend/src/`, uppdelad i `api`, `components`, `features`, `types` och `utils`.
 - Backend: Node.js 24 och TypeScript i `src/`.
 - Databas: PostgreSQL 17, endast tillgänglig inne i Compose-nätverket.
 - Databasåtkomst: `pg` med frågeadapter i `src/database.ts`.
@@ -29,6 +29,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 - Realtid: Server-Sent Events för snabbnota.
 - Pakethanterare: pnpm 11.16.0.
 - Produktion: Docker Compose på Unraid och publicerad image i GitHub Container Registry.
+- Statisk leverans: Vite bygger hashade assets. Samma Node-process som tidigare serverar bygget, så port, reverse proxy, sessionscookies och appcontainer är oförändrade.
 
 Bevara denna arkitektur om inte en större förändring uttryckligen har godkänts och motiverats.
 
@@ -82,7 +83,7 @@ Nya schemaändringar ska få nästa migrationsnummer. Ändra inte en redan distr
 
 - Svenska konton, sessionsinloggning och adminvy.
 - Startsida med resor, utgifter och kontakter.
-- Skapa, redigera, arkivera, återställa och mjukradera resor.
+- Skapa, arkivera, återställa och mjukradera resor.
 - Skapa och redigera utgifter med flera delningsmetoder.
 - Kategorier, kvittouppladdning och statistik.
 - Vän-, rese- och snabbnoteinbjudningar med länk och QR-kod.
@@ -105,6 +106,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.13.0 ersätter den tidigare globala vanilla-JavaScript-klienten med React 19, Vite och strikt TypeScript. Alla befintliga arbetsflöden använder samma server-API: konton och inbjudningar, dashboard och vänner, resor, deltagare, utgifter och fyra delningssätt, kategorier, kvitton/OCR, saldon och betalningar, snabbnota med gästläge/SSE/Swish-länk, statistik, administration och versionsvisning. Docker bygger frontend och backend i samma build stage och slutcontainern är fortfarande en enda read-only Node-app. Databasschema, OCR-tjänster, Compose-portar, volymer och miljövariabler ändrades inte.
 - Version 1.12.0 byter den lokala dokumentmodellen till PaddleOCR-VL 1.6 via dess officiella GGUF-distribution och en intern, versionspinnad llama.cpp CUDA-server. Modellen använder det dokumenterade `OCR:`-kommandot utan framtvingat JSON-schema. Parsern hanterar både traditionella artikelrader och PaddleOCR-resultat där flera produktnamn följs av ett separat prisblock, samt totalrubrik och totalbelopp på skilda rader. Modellfilerna hämtas atomiskt till en beständig Unraid-katalog. Tesseract och alla säkra reservvägar behålls.
 - Version 1.11.0 byter till den officiella `qwen3-vl:4b-instruct-q4_K_M`, eftersom thinking-varianten kan returnera hundratals tokens i `message.thinking` men lämna `message.content` tomt för bilder. Reserv-OCR använder en naturligare gråskalebild och behandlar inte längre största artikelpriset som totalsumma när en oläslig totalrad faktiskt finns. `thinking_only` loggas separat utan att modellens resonemang eller kvittodata sparas.
 - Version 1.10.0 begränsar Qwen3-VL:s kvittosvar till 768 tokens, stänger uttryckligen av thinking-läge och skickar en mindre AI-bild utan att minska Tesseracts upplösning. Detta förhindrar minutlånga svar som annars fortsatte till timeout. Säkra loggar visar nu avslutsorsak, prompt- och svarstokens samt modellens laddnings- och inferenstid utan att logga kvittodata.

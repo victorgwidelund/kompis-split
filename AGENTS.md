@@ -12,8 +12,9 @@
 
 ## Architecture
 
-- Preserve the current static HTML/CSS/JavaScript frontend and Node.js TypeScript backend unless a migration is approved.
-- If a mobile frontend is approved later, use React Native, Expo, and TypeScript. Never place secrets or privileged operations in the client.
+- The frontend is React 19 with Vite and strict TypeScript under `frontend/`. Keep UI functionality split into typed pages, features, components, hooks, API, and utility modules rather than rebuilding a global DOM script.
+- The Node.js TypeScript backend serves the generated Vite assets in production. Preserve the single app-container deployment and the existing API contracts unless a change is explicitly justified.
+- If a separate native mobile frontend is approved later, use React Native, Expo, and TypeScript. Never place secrets or privileged operations in any client.
 - The backend is TypeScript and must pass strict typechecking before release.
 - The current database is PostgreSQL. Every schema change uses ordered, forward-only migrations recorded in `schema_migrations`.
 - Preserve existing infrastructure instead of replacing it for novelty. Explain the need, data impact, migration stages, and rollback before major architecture changes.

@@ -66,10 +66,13 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const indexResponse = await fetch(`${baseUrl}/`);
     const indexHtml = await indexResponse.text();
     assert.match(indexHtml, /href="\/styles\.css\?v=1\.1"/);
-    assert.match(indexHtml, /src="\/app\.js\?v=1\.1"/);
+    const assetPath = indexHtml.match(/src="(\/assets\/index-[A-Za-z0-9_-]+\.js)"/)?.[1];
+    assert.ok(assetPath, "Vite-manifestet ska referera till en hashad React-bundle");
     assert.equal(indexResponse.headers.get("cache-control"), "no-store");
 
-    const appResponse = await fetch(`${baseUrl}/app.js?v=1.1`);
+    const appResponse = await fetch(`${baseUrl}${assetPath}`);
+    assert.equal(appResponse.status, 200);
+    assert.match(appResponse.headers.get("content-type"), /text\/javascript/);
     assert.equal(appResponse.headers.get("cache-control"), "public, max-age=31536000, immutable");
 
     const rejectedOrigin = await request("/api/setup", { method: "POST", origin: "https://evil.example", body: {} });

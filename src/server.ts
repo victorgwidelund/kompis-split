@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,8 @@ function integerEnvironment(name: string, fallback: number, minimum: number, max
   return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
 }
 const here = dirname(fileURLToPath(import.meta.url));
-const publicDirectory = join(here, "..", "public");
+const builtFrontendDirectory = join(here, "..", "frontend", "dist");
+const publicDirectory = existsSync(builtFrontendDirectory) ? builtFrontendDirectory : join(here, "..", "public");
 const port = Number(process.env.PORT || 8787);
 const appPassword = process.env.APP_PASSWORD || "";
 const cookieSecure = process.env.COOKIE_SECURE === "true";
@@ -1286,7 +1287,6 @@ function serveStatic(response: ServerResponse, pathname: string) {
   const content = isHtml
     ? readFileSync(filePath, "utf8")
       .replace('href="/styles.css"', `href="/styles.css?v=${appVersion}"`)
-      .replace('src="/app.js"', `src="/app.js?v=${appVersion}"`)
     : readFileSync(filePath);
   response.writeHead(200, {
     ...securityHeaders(),

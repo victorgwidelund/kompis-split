@@ -1,9 +1,11 @@
 FROM node:24.17.0-alpine3.23 AS build
 WORKDIR /app
 RUN npm install --global pnpm@11.16.0
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.build.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.build.json eslint.config.js ./
 RUN pnpm install --frozen-lockfile
 COPY src ./src
+COPY frontend ./frontend
+COPY public/styles.css ./public/styles.css
 RUN npm run build
 
 FROM node:24.17.0-alpine3.23
@@ -14,7 +16,7 @@ RUN npm install --global pnpm@11.16.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --prod --frozen-lockfile && pnpm store prune
 COPY --from=build /app/dist ./dist
-COPY public ./public
+COPY --from=build /app/frontend/dist ./public
 RUN chown -R node:node /app
 USER node
 EXPOSE 8787

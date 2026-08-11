@@ -1,5 +1,6 @@
 data
 dist
+frontend/dist
 .git
 .env*
 node_modules
