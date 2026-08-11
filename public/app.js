@@ -76,9 +76,9 @@ function setAuthMode(mode) {
   $$(".auth-form").forEach((form) => form.classList.add("hidden"));
   $(`#${mode}-form`).classList.remove("hidden");
   if (mode === "register") {
-    $("#auth-subtitle").textContent = "Skapa ditt eget konto för att gå med i resan.";
+    $("#auth-subtitle").textContent = state.invitation?.kind === "friend" ? "Skapa ditt konto för att lägga till vännen." : "Skapa ditt eget konto för att gå med i resan.";
   } else if (mode === "login" && state.invitation) {
-    $("#auth-subtitle").textContent = "Logga in så läggs resan till på ditt konto.";
+    $("#auth-subtitle").textContent = state.invitation.kind === "friend" ? "Logga in så sparas ni som vänner." : "Logga in så läggs resan till på ditt konto.";
   }
 }
 
@@ -87,7 +87,9 @@ function showAuth(needsSetup) {
   $("#login-screen").classList.remove("hidden");
   const summary = $("#invite-summary");
   summary.classList.toggle("hidden", !state.invitation);
-  if (state.invitation) summary.innerHTML = `<strong>${escapeHtml(state.invitation.inviterName)}</strong> har bjudit in dig till <strong>${escapeHtml(state.invitation.tripName)}</strong>.`;
+  if (state.invitation) summary.innerHTML = state.invitation.kind === "friend"
+    ? `<strong>${escapeHtml(state.invitation.inviterName)}</strong> vill lägga till dig som vän i Kompis Split.`
+    : `<strong>${escapeHtml(state.invitation.inviterName)}</strong> har bjudit in dig till <strong>${escapeHtml(state.invitation.tripName)}</strong>.`;
   $("#show-register-button").classList.toggle("hidden", !state.invitation);
   if (needsSetup) {
     $("#auth-subtitle").textContent = "Skapa det första administratörskontot. Dina befintliga resor bevaras.";
@@ -217,6 +219,8 @@ const activityLabels = {
   "payment.voided": "Betalning togs bort från beräkningen",
   "invitation.created": "Inbjudan skapades",
   "invitation.joined": "Inbjudan användes",
+  "friend_invitation.created": "Väninbjudan skapades",
+  "friend_invitation.joined": "Väninbjudan användes",
   "admin.user.updated": "Användarkonto uppdaterades",
 };
 
@@ -610,9 +614,9 @@ $("#delete-trip-button").addEventListener("click", async () => {
   catch (error) { toast(error.message); }
 });
 
-$("#invite-button").addEventListener("click", () => { $("#invite-output").classList.add("hidden"); openDialog("invite-dialog"); });
+$("#invite-button").addEventListener("click", () => { $("#invite-output").classList.add("hidden"); $("#invite-qr").removeAttribute("src"); openDialog("invite-dialog"); });
 $("#create-invite-button").addEventListener("click", async () => {
-  try { const payload = await api(`/api/trips/${state.trip.id}/invitations`, { method: "POST", body: "{}" }); const link = new URL(payload.invitation.path, location.origin).href; $("#invite-link").value = link; $("#invite-expiry").textContent = `Gäller till ${formatDate(payload.invitation.expiresAt)}.`; $("#invite-output").classList.remove("hidden"); }
+  try { const payload = await api(`/api/trips/${state.trip.id}/invitations`, { method: "POST", body: "{}" }); const link = new URL(payload.invitation.path, location.origin).href; $("#invite-link").value = link; $("#invite-qr").src = payload.invitation.qrDataUrl; $("#invite-expiry").textContent = `Gäller till ${formatDate(payload.invitation.expiresAt)}.`; $("#invite-output").classList.remove("hidden"); }
   catch (error) { toast(error.message); }
 });
 $("#copy-invite-button").addEventListener("click", async () => {
@@ -622,6 +626,27 @@ $("#copy-invite-button").addEventListener("click", async () => {
     input.focus(); input.select(); input.setSelectionRange(0, input.value.length);
     toast("Länken är markerad — välj Kopiera i webbläsaren");
   }
+});
+
+$("#dashboard-invite-friend").addEventListener("click", () => {
+  $("#friend-invite-output").classList.add("hidden");
+  $("#friend-invite-qr").removeAttribute("src");
+  openDialog("friend-invite-dialog");
+});
+$("#create-friend-invite-button").addEventListener("click", async () => {
+  try {
+    const payload = await api("/api/friend-invitations", { method: "POST", body: "{}" });
+    const link = new URL(payload.invitation.path, location.origin).href;
+    $("#friend-invite-link").value = link;
+    $("#friend-invite-qr").src = payload.invitation.qrDataUrl;
+    $("#friend-invite-expiry").textContent = `Gäller till ${formatDate(payload.invitation.expiresAt)} och kan användas en gång.`;
+    $("#friend-invite-output").classList.remove("hidden");
+  } catch (error) { toast(error.message); }
+});
+$("#copy-friend-invite-button").addEventListener("click", async () => {
+  const input = $("#friend-invite-link");
+  try { await copyText(input.value); toast("Väninbjudan kopierades"); }
+  catch { input.focus(); input.select(); input.setSelectionRange(0, input.value.length); toast("Länken är markerad — välj Kopiera i webbläsaren"); }
 });
 
 $("#trip-form").addEventListener("submit", async (event) => {

@@ -71,19 +71,30 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const ownerCookie = cookieFrom(setup.response);
     assert.match(ownerCookie, /^kompis_session=/);
 
+    const friendInvite = await request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} });
+    assert.equal(friendInvite.response.status, 201, JSON.stringify(friendInvite.payload));
+    assert.match(friendInvite.payload.invitation.qrDataUrl, /^data:image\/png;base64,/);
+    const friendPreview = await request("/api/invitations/preview", { method: "POST", body: { token: friendInvite.payload.invitation.token } });
+    assert.equal(friendPreview.payload.invitation.kind, "friend");
+    assert.equal(friendPreview.payload.invitation.tripName, null);
+
+    const registration = await request("/api/register", { method: "POST", body: { inviteToken: friendInvite.payload.invitation.token, name: "Anna", email: "anna@example.test", password: "another-secure-password", swishPhone: "0709876543" } });
+    assert.equal(registration.response.status, 201, JSON.stringify(registration.payload));
+    assert.equal(registration.payload.tripId, null);
+    const memberCookie = cookieFrom(registration.response);
+
     const created = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Sälen", startDate: "2026-12-10", endDate: "2026-12-13" } });
     assert.equal(created.response.status, 201, JSON.stringify(created.payload));
     const tripId = created.payload.trip.id;
-
     const invite = await request(`/api/trips/${tripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
     assert.equal(invite.response.status, 201, JSON.stringify(invite.payload));
+    assert.match(invite.payload.invitation.qrDataUrl, /^data:image\/png;base64,/);
     const token = invite.payload.invitation.token;
     const preview = await request("/api/invitations/preview", { method: "POST", body: { token } });
+    assert.equal(preview.payload.invitation.kind, "trip");
     assert.equal(preview.payload.invitation.tripName, "Sälen");
-
-    const registration = await request("/api/register", { method: "POST", body: { inviteToken: token, name: "Anna", email: "anna@example.test", password: "another-secure-password", swishPhone: "0709876543" } });
-    assert.equal(registration.response.status, 201, JSON.stringify(registration.payload));
-    const memberCookie = cookieFrom(registration.response);
+    const joinedTrip = await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token } });
+    assert.equal(joinedTrip.payload.tripId, tripId);
 
     const memberDashboard = await request("/api/dashboard", { cookie: memberCookie });
     assert.equal(memberDashboard.payload.trips.length, 1);
@@ -226,6 +237,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('trip.deleted', 'trip.undeleted')")).rows[0].count), 2);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'receipt.created'")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('friend_invitation.created', 'friend_invitation.joined')")).rows[0].count), 2);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);

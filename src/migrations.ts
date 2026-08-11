@@ -126,6 +126,15 @@ const schema = `
     revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS friend_invitations (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    invited_by BIGINT NOT NULL REFERENCES users(id),
+    expires_at TIMESTAMPTZ NOT NULL,
+    use_count INTEGER NOT NULL DEFAULT 0 CHECK(use_count BETWEEN 0 AND 1),
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS audit_log (
     id BIGSERIAL PRIMARY KEY,
     actor_user_id BIGINT REFERENCES users(id),
@@ -146,6 +155,7 @@ const schema = `
   CREATE INDEX IF NOT EXISTS idx_trip_access_user ON trip_access(user_id, trip_id);
   CREATE INDEX IF NOT EXISTS idx_users_name ON users(lower(display_name));
   CREATE INDEX IF NOT EXISTS idx_invites_hash ON invitations(token_hash);
+  CREATE INDEX IF NOT EXISTS idx_friend_invites_hash ON friend_invitations(token_hash);
   CREATE INDEX IF NOT EXISTS idx_audit_trip ON audit_log(trip_id, created_at);
 `;
 
@@ -192,7 +202,7 @@ export async function applyMigrations(): Promise<void> {
     `);
     await client.query(
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
-      [3, "trip-trash-categories-and-receipts"],
+      [3, "trip-trash-categories-receipts-and-friend-invites"],
     );
     await client.query("COMMIT");
   } catch (error) {

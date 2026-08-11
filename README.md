@@ -6,6 +6,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 
 - Personliga konton, hashade lösenord och utgående serverlagrade sessioner
 - Hashade inbjudningstoken med 14 dagars giltighet
+- Väninbjudningar utan resa samt lokalt genererade QR-koder för vän- och reseinbjudningar
 - Serverkontrollerad åtkomst per resa: ägare, administratör eller medlem
 - Sökbara användare, kontakter och gästdeltagare
 - Vänner direkt på startsidan
@@ -83,6 +84,10 @@ Kontrollera sedan tabeller, antal resor/utgifter och saldon innan en produktions
 ## Swish
 
 Nuvarande funktion öppnar Swish app-to-app och räknar aldrig en öppnad länk som betalningsbevis. Användaren registrerar betalningen manuellt efteråt. Detta är inte Swish Commerce API; framtida certifikat och nycklar ska endast ligga på servern och bara använda dokumenterad Swish-funktionalitet.
+
+## Inbjudningar och QR-koder
+
+Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger åtkomst till den valda resan. En vanlig väninbjudan från startsidan är inte kopplad till någon resa, kan användas en gång och sparar båda användarna som kontakter. Båda typerna gäller i 14 dagar. QR-koden skapas på den egna servern från samma inbjudningslänk; ingen länk eller token skickas till en extern QR-tjänst.
 
 ## Konfiguration
 

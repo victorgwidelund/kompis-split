@@ -23,6 +23,9 @@ test("the Swedish account UI has unique IDs and every direct selector exists", a
   assert.match(html, /id="dashboard-trips-panel"/);
   assert.match(html, /id="category-dialog"/);
   assert.match(html, /id="receipt-file-input"/);
+  assert.match(html, /id="friend-invite-dialog"/);
+  assert.match(html, /id="invite-qr"/);
+  assert.match(html, /id="friend-invite-qr"/);
   assert.match(app, /data-add-receipt/);
   assert.match(app, /data-delete-receipt/);
   assert.match(app, /navigator\.clipboard/);

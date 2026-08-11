@@ -4,6 +4,7 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
 import { calculateShares, simplifyDebts } from "./split.js";
@@ -77,6 +78,22 @@ function safeEqualStrings(first: unknown, second: unknown) {
   const left = Buffer.from(String(first));
   const right = Buffer.from(String(second));
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function requestOrigin(request: IncomingMessage) {
+  const forwardedHost = trustProxy ? String(request.headers["x-forwarded-host"] || "").split(",")[0]?.trim() : "";
+  const forwardedProtocol = trustProxy ? String(request.headers["x-forwarded-proto"] || "").split(",")[0]?.trim().toLowerCase() : "";
+  const protocol = forwardedProtocol === "https" ? "https" : forwardedProtocol === "http" ? "http" : cookieSecure ? "https" : "http";
+  const host = forwardedHost || String(request.headers.host || "localhost");
+  try { return new URL(`${protocol}://${host}`).origin; }
+  catch { throw new HttpError(400, "Ogiltig värdadress"); }
+}
+
+async function invitationPayload(request: IncomingMessage, token: string, expiresAt: string) {
+  const path = `/#invite=${encodeURIComponent(token)}`;
+  const link = new URL(path, requestOrigin(request)).href;
+  const qrDataUrl = await QRCode.toDataURL(link, { errorCorrectionLevel: "M", margin: 1, width: 320, color: { dark: "#17201cff", light: "#fffdf8ff" } });
+  return { token, path, expiresAt, qrDataUrl };
 }
 
 function securityHeaders() {
@@ -359,14 +376,31 @@ async function adminOverview() {
 
 async function invitationByToken(token: string) {
   if (!token) return null;
-  return await db.prepare(`
+  const tripInvitation = await db.prepare(`
     SELECT i.*, t.name trip_name, u.display_name inviter_name
     FROM invitations i JOIN trips t ON t.id = i.trip_id JOIN users u ON u.id = i.invited_by
     WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < i.max_uses AND t.deleted_at IS NULL
-  `).get<any>(sha256(token)) || null;
+  `).get<any>(sha256(token));
+  if (tripInvitation) return { ...tripInvitation, kind: "trip" as const };
+  const friendInvitation = await db.prepare(`
+    SELECT i.*, u.display_name inviter_name
+    FROM friend_invitations i JOIN users u ON u.id = i.invited_by
+    WHERE i.token_hash = ? AND i.revoked_at IS NULL AND i.expires_at > CURRENT_TIMESTAMP AND i.use_count < 1
+  `).get<any>(sha256(token));
+  return friendInvitation ? { ...friendInvitation, trip_id: null, trip_name: null, kind: "friend" as const } : null;
 }
 
 async function joinInvitationRecords(invitation: any, userId: number) {
+  if (invitation.kind === "friend") {
+    if (Number(invitation.invited_by) === Number(userId)) throw new HttpError(409, "Du kan inte använda din egen väninbjudan");
+    if (await db.prepare("SELECT 1 FROM contacts WHERE owner_user_id = ? AND contact_user_id = ?").get(invitation.invited_by, userId)) return false;
+    const changed = await db.prepare("UPDATE friend_invitations SET use_count = use_count + 1 WHERE id = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND use_count < 1").run(invitation.id);
+    if (!changed.changes) throw new HttpError(409, "Inbjudan har redan använts eller gått ut");
+    await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(invitation.invited_by, userId);
+    await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(userId, invitation.invited_by);
+    await audit(userId, null, "friend_invitation.joined", "friend_invitation", invitation.id);
+    return true;
+  }
   if (await db.prepare("SELECT role FROM trip_access WHERE trip_id = ? AND user_id = ?").get(invitation.trip_id, userId)) return false;
   const changed = await db.prepare("UPDATE invitations SET use_count = use_count + 1 WHERE id = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND use_count < max_uses").run(invitation.id);
   if (!changed.changes) throw new HttpError(409, "Inbjudan har redan använts fullt ut eller gått ut");
@@ -425,7 +459,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "POST" && url.pathname === "/api/invitations/preview") {
     const body = await readJson(request);
     const invitation = await invitationByToken(String(body.token || ""));
-    return invitation ? json(response, 200, { invitation: { tripName: invitation.trip_name, inviterName: invitation.inviter_name, expiresAt: invitation.expires_at } }) : json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
+    return invitation ? json(response, 200, { invitation: { kind: invitation.kind, tripName: invitation.trip_name, inviterName: invitation.inviter_name, expiresAt: invitation.expires_at } }) : json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
   }
   if (request.method === "POST" && url.pathname === "/api/setup") {
     if (userCount !== 0) return json(response, 409, { error: "Appen är redan konfigurerad" });
@@ -467,7 +501,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       if ((error as any)?.code === "23505") return json(response, 409, { error: "E-postadressen finns redan. Logga in i stället." });
       throw error;
     }
-    return json(response, 201, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(userId)), tripId: invitation.trip_id }, { "Set-Cookie": sessionCookie(await createSession(userId)) });
+    return json(response, 201, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(userId)), tripId: invitation.trip_id || null }, { "Set-Cookie": sessionCookie(await createSession(userId)) });
   }
   if (request.method === "POST" && url.pathname === "/api/login") {
     const ip = clientIp(request);
@@ -517,6 +551,17 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     if (!invitation) return json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
     await joinInvitation(invitation, user.id);
     return json(response, 200, { tripId: invitation.trip_id });
+  }
+  if (request.method === "POST" && url.pathname === "/api/friend-invitations") {
+    const token = randomBytes(24).toString("base64url");
+    const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
+    await db.transaction(async () => {
+      await db.prepare("UPDATE friend_invitations SET revoked_at = CURRENT_TIMESTAMP WHERE invited_by = ? AND revoked_at IS NULL AND use_count = 0").run(user.id);
+      const result = await db.prepare("INSERT INTO friend_invitations (token_hash, invited_by, expires_at) VALUES (?, ?, ?) RETURNING id")
+        .run(sha256(token), user.id, expiresAt);
+      await audit(user.id, null, "friend_invitation.created", "friend_invitation", Number(result.lastInsertRowid));
+    });
+    return json(response, 201, { invitation: await invitationPayload(request, token, expiresAt) });
   }
   if (request.method === "GET" && url.pathname === "/api/dashboard") return json(response, 200, await dashboard(user.id));
   if (request.method === "GET" && url.pathname === "/api/categories") {
@@ -621,7 +666,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
     const result = await db.prepare("INSERT INTO invitations (trip_id, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?) RETURNING id").run(tripId, sha256(token), user.id, expiresAt);
     await audit(user.id, tripId, "invitation.created", "invitation", Number(result.lastInsertRowid));
-    return json(response, 201, { invitation: { token, path: `/#invite=${token}`, expiresAt } });
+    return json(response, 201, { invitation: await invitationPayload(request, token, expiresAt) });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/participants$/);
   if (request.method === "POST" && match) {
