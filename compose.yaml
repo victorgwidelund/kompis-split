@@ -1,19 +1,83 @@
 services:
+  postgres:
+    image: postgres:17.10-alpine3.22
+    container_name: kompis-split-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kompis_split
+      POSTGRES_USER: kompis_split
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Compose Manager}"
+    volumes:
+      - /mnt/user/kompis_split/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kompis_split -d kompis_split"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+
   kompis-split:
-    image: ghcr.io/victorgwidelund/kompis-split:latest
+    image: "${KOMPIS_SPLIT_IMAGE:?Set KOMPIS_SPLIT_IMAGE to the tested sha-* GHCR image}"
     container_name: kompis-split
     restart: unless-stopped
     pull_policy: always
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8787:8787"
     environment:
       PORT: "8787"
-      DB_PATH: /data/kompis-split.db
-      APP_PASSWORD: "${APP_PASSWORD:?Set APP_PASSWORD in the Compose Manager environment tab}"
-      COOKIE_SECRET: "${COOKIE_SECRET:?Set COOKIE_SECRET in the Compose Manager environment tab}"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: kompis_split
+      PGUSER: kompis_split
+      PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Compose Manager}"
+      APP_PASSWORD: "${APP_PASSWORD:?Set APP_PASSWORD in Compose Manager}"
+      COOKIE_SECRET: "${COOKIE_SECRET:?Set COOKIE_SECRET in Compose Manager}"
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
-    volumes:
-      - /mnt/user/kompis_split/data:/data
+      TRUST_PROXY: "${TRUST_PROXY:-false}"
+      SESSION_DAYS: "${SESSION_DAYS:-30}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
     labels:
       net.unraid.docker.managed: "composeman"
       net.unraid.docker.webui: "http://[IP]:[PORT:8787]/"
+
+  postgres-backup:
+    image: postgres:17.10-alpine3.22
+    container_name: kompis-split-postgres-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: kompis_split
+      PGUSER: kompis_split
+      PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Compose Manager}"
+      BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:-14}"
+    volumes:
+      - /mnt/user/kompis_split/backups:/backups
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        while true; do
+          target="/backups/kompis-split-$$(date -u +%F-%H%M%S).dump"
+          pg_dump --format=custom --file="$$target"
+          find /backups -type f -name 'kompis-split-*.dump' -mtime +"$$BACKUP_RETENTION_DAYS" -delete
+          sleep 86400
+        done
+    security_opt:
+      - no-new-privileges:true

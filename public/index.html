@@ -1,176 +1,137 @@
 <!doctype html>
-<html lang="en">
+<html lang="sv">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f3eb" />
-    <meta name="description" content="Split trip expenses with friends and settle up with Swish." />
+    <meta name="description" content="Dela resekostnader med vänner och gör upp med Swish." />
     <title>Kompis Split</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <section id="login-screen" class="login-screen hidden" aria-labelledby="login-title">
+    <section id="login-screen" class="login-screen hidden" aria-labelledby="auth-title">
       <div class="login-art" aria-hidden="true">
         <span class="orbit orbit-one"></span><span class="orbit orbit-two"></span>
-        <div class="receipt-card">
-          <p>Sälen weekend</p><strong>4 286 kr</strong><small>All sorted.</small>
-        </div>
+        <div class="receipt-card"><p>Helg i Sälen</p><strong>4 286 kr</strong><small>Allt uträknat.</small></div>
       </div>
-      <form id="login-form" class="login-card">
+      <div class="login-card">
         <div class="brand-mark">KS</div>
         <p class="eyebrow">Kompis Split</p>
-        <h1 id="login-title">Money sorted.<br />Friendship intact.</h1>
-        <p class="muted">Enter the shared password to see your trips.</p>
-        <label>Password<input name="password" type="password" autocomplete="current-password" required autofocus /></label>
-        <button class="button primary wide" type="submit">Open the app <span>→</span></button>
-        <p id="login-error" class="form-error" role="alert"></p>
-      </form>
+        <h1 id="auth-title">Pengarna lösta.<br />Vänskapen kvar.</h1>
+        <p id="auth-subtitle" class="muted">Logga in för att se dina resor.</p>
+        <div id="invite-summary" class="invite-summary hidden"></div>
+
+        <form id="setup-form" class="auth-form hidden">
+          <label>Installationslösenord<input name="setupPassword" type="password" autocomplete="one-time-code" required /></label>
+          <label>Ditt namn<input name="name" maxlength="60" autocomplete="name" required /></label>
+          <label>E-post<input name="email" type="email" maxlength="180" autocomplete="email" required /></label>
+          <label>Swish-nummer<input name="swishPhone" inputmode="tel" autocomplete="tel" placeholder="070 123 45 67" /></label>
+          <label>Nytt lösenord<input name="password" type="password" minlength="10" autocomplete="new-password" required /><small>Minst 10 tecken.</small></label>
+          <button class="button primary wide" type="submit">Skapa administratör <span>→</span></button>
+          <p class="form-error" role="alert"></p>
+        </form>
+
+        <form id="login-form" class="auth-form hidden">
+          <label>E-post<input name="email" type="email" autocomplete="email" required /></label>
+          <label>Lösenord<input name="password" type="password" autocomplete="current-password" required /></label>
+          <button class="button primary wide" type="submit">Logga in <span>→</span></button>
+          <p class="form-error" role="alert"></p>
+          <button id="show-register-button" class="text-button hidden" type="button">Ny här? Skapa konto med inbjudan</button>
+        </form>
+
+        <form id="register-form" class="auth-form hidden">
+          <label>Ditt namn<input name="name" maxlength="60" autocomplete="name" required /></label>
+          <label>E-post<input name="email" type="email" maxlength="180" autocomplete="email" required /></label>
+          <label>Swish-nummer<input name="swishPhone" inputmode="tel" autocomplete="tel" placeholder="070 123 45 67" /></label>
+          <label>Lösenord<input name="password" type="password" minlength="10" autocomplete="new-password" required /><small>Minst 10 tecken.</small></label>
+          <button class="button primary wide" type="submit">Skapa konto och gå med <span>→</span></button>
+          <p class="form-error" role="alert"></p>
+          <button id="show-login-button" class="text-button" type="button">Har du redan konto? Logga in</button>
+        </form>
+      </div>
     </section>
 
     <div id="app" class="app-shell hidden">
       <aside class="sidebar">
-        <div class="brand"><span class="brand-mark">KS</span><span>Kompis<br /><strong>Split</strong></span></div>
-        <button id="new-trip-button" class="button dark wide"><span>＋</span> New trip</button>
-        <div class="side-heading"><span>Your trips</span><span id="trip-count" class="count">0</span></div>
-        <nav id="trip-list" class="trip-list" aria-label="Trips"></nav>
+        <button id="home-button" class="brand brand-button"><span class="brand-mark">KS</span><span>Kompis<br /><strong>Split</strong></span></button>
+        <button id="new-trip-button" class="button dark wide"><span>＋</span> Ny resa</button>
+        <div class="side-heading"><span>Aktiva resor</span><span id="trip-count" class="count">0</span></div>
+        <nav id="trip-list" class="trip-list" aria-label="Aktiva resor"></nav>
+        <div id="archive-section" class="archive-section hidden">
+          <div class="side-heading"><span>Arkiv</span><span id="archive-count" class="count">0</span></div>
+          <nav id="archive-list" class="trip-list archive-list" aria-label="Arkiverade resor"></nav>
+        </div>
         <div class="sidebar-footer">
-          <div class="security-dot"></div><div><strong>Private & self-hosted</strong><small>Your data stays on your server</small></div>
-          <button id="logout-button" class="icon-button" aria-label="Sign out" title="Sign out">↗</button>
+          <div class="security-dot"></div><div><strong id="sidebar-user-name">Inloggad</strong><small id="sidebar-user-email">Privat och självhostad</small></div>
+          <button id="logout-button" class="icon-button" aria-label="Logga ut" title="Logga ut">↗</button>
         </div>
       </aside>
 
       <main class="main">
         <header class="mobile-header">
-          <div class="brand"><span class="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></div>
-          <button id="mobile-new-trip" class="icon-button dark" aria-label="New trip">＋</button>
+          <button id="mobile-home-button" class="brand brand-button"><span class="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></button>
+          <button id="mobile-new-trip" class="icon-button dark" aria-label="Ny resa">＋</button>
         </header>
-        <section id="welcome" class="welcome">
-          <p class="eyebrow">Start fresh</p>
-          <h1>Where are you<br />heading next?</h1>
-          <p>Create a trip, add your friends, and let the app keep every krona fair.</p>
-          <button id="welcome-new-trip" class="button primary">Create your first trip <span>→</span></button>
-          <div class="welcome-cards" aria-hidden="true">
-            <div class="mini-card tilt-left"><span>🏡</span><strong>Cabin</strong><small>Shared fairly</small></div>
-            <div class="mini-card tilt-right"><span>🚆</span><strong>Train</strong><small>Paid by Alex</small></div>
-            <div class="mini-card tilt-more"><span>🍝</span><strong>Dinner</strong><small>Split 4 ways</small></div>
+
+        <section id="dashboard-view" class="home-dashboard">
+          <header class="dashboard-heading"><div><p class="eyebrow">Din överblick</p><h1 id="dashboard-greeting">Hej!</h1><p>Alla resor, utgifter och saldon på ett ställe.</p></div><button id="dashboard-new-trip" class="button primary">＋ Ny resa</button></header>
+          <div class="summary-grid home-stats">
+            <article class="hero-stat coral"><span class="stat-icon">✦</span><p>Aktiva resor</p><strong id="active-trip-total">0</strong><small>pågående och kommande</small></article>
+            <article class="hero-stat cobalt"><span class="stat-icon">↗</span><p>Ditt nettosaldo</p><strong id="dashboard-balance">0 kr</strong><small id="dashboard-balance-caption">Du ligger jämnt</small></article>
+            <article class="member-stat"><p>Totalt registrerat</p><strong id="dashboard-spent">0 kr</strong><small>i aktiva resor</small></article>
           </div>
+          <div class="dashboard-grid home-grid">
+            <section class="panel"><div class="panel-title"><div><p class="eyebrow">På gång</p><h2>Dina resor</h2></div></div><div id="dashboard-trips" class="trip-card-grid"></div></section>
+            <section class="panel"><div class="panel-title"><div><p class="eyebrow">Senaste</p><h2>Utgifter</h2></div></div><div id="dashboard-expenses" class="expense-list"></div></section>
+          </div>
+          <section id="dashboard-archive-panel" class="panel archive-panel hidden"><div class="panel-title"><div><p class="eyebrow">Sparat</p><h2>Arkiverade resor</h2></div></div><div id="dashboard-archive" class="trip-card-grid compact"></div></section>
         </section>
 
         <section id="trip-view" class="trip-view hidden">
           <header class="trip-header">
-            <div>
-              <button id="back-to-trips" class="mobile-back">← Trips</button>
-              <p id="trip-date" class="eyebrow">TRIP</p>
-              <h1 id="trip-name">Trip name</h1>
-            </div>
+            <div><button id="back-to-trips" class="mobile-back">← Alla resor</button><p id="trip-date" class="eyebrow">RESA</p><h1 id="trip-name">Resans namn</h1><p id="trip-archive-note" class="archive-note hidden">Den här resan är arkiverad och skrivskyddad.</p></div>
             <div class="header-actions">
-              <button id="add-person-button" class="button ghost">Add friend</button>
-              <button id="add-expense-button" class="button primary">＋ Add expense</button>
+              <button id="invite-button" class="button ghost">Bjud in</button>
+              <button id="archive-button" class="button ghost">Arkivera</button>
+              <button id="add-person-button" class="button ghost">Lägg till vän</button>
+              <button id="add-expense-button" class="button primary">＋ Lägg till utgift</button>
             </div>
           </header>
 
-          <nav class="tabs" aria-label="Trip views">
-            <button class="tab active" data-tab="overview">Overview</button>
-            <button class="tab" data-tab="expenses">Expenses</button>
-            <button class="tab" data-tab="settle">Settle up <span id="settlement-count" class="tab-count">0</span></button>
-            <button class="tab" data-tab="people">People</button>
+          <nav class="tabs" aria-label="Resans vyer">
+            <button class="tab active" data-tab="overview">Översikt</button><button class="tab" data-tab="expenses">Utgifter</button><button class="tab" data-tab="settle">Gör upp <span id="settlement-count" class="tab-count">0</span></button><button class="tab" data-tab="people">Personer</button>
           </nav>
 
           <div id="tab-overview" class="tab-panel">
             <div class="summary-grid">
-              <article class="hero-stat coral">
-                <span class="stat-icon">↗</span><p>Total spent</p><strong id="total-spent">0 kr</strong><small id="expense-count">No expenses yet</small>
-              </article>
-              <article class="hero-stat cobalt">
-                <span class="stat-icon">◎</span><p>To settle</p><strong id="to-settle">0 kr</strong><small id="settle-caption">Everyone is even</small>
-              </article>
-              <article class="member-stat">
-                <p>Travelling together</p><div id="avatar-stack" class="avatar-stack"></div><strong id="people-count">0 friends</strong>
-                <button id="summary-add-person" class="text-button">Add someone →</button>
-              </article>
+              <article class="hero-stat coral"><span class="stat-icon">↗</span><p>Totalt spenderat</p><strong id="total-spent">0 kr</strong><small id="expense-count">Inga utgifter ännu</small></article>
+              <article class="hero-stat cobalt"><span class="stat-icon">◎</span><p>Kvar att göra upp</p><strong id="to-settle">0 kr</strong><small id="settle-caption">Alla ligger jämnt</small></article>
+              <article class="member-stat"><p>Reser tillsammans</p><div id="avatar-stack" class="avatar-stack"></div><strong id="people-count">0 vänner</strong><button id="summary-add-person" class="text-button">Lägg till någon →</button></article>
             </div>
             <div class="dashboard-grid">
-              <section class="panel">
-                <div class="panel-title"><div><p class="eyebrow">The latest</p><h2>Recent expenses</h2></div><button class="text-button" data-go-tab="expenses">View all →</button></div>
-                <div id="recent-expenses" class="expense-list"></div>
-              </section>
-              <section class="panel balance-panel">
-                <div class="panel-title"><div><p class="eyebrow">At a glance</p><h2>Balances</h2></div></div>
-                <div id="balance-list" class="balance-list"></div>
-                <button class="button dark wide" data-go-tab="settle">See who pays whom <span>→</span></button>
-              </section>
+              <section class="panel"><div class="panel-title"><div><p class="eyebrow">Det senaste</p><h2>Senaste utgifterna</h2></div><button class="text-button" data-go-tab="expenses">Visa alla →</button></div><div id="recent-expenses" class="expense-list"></div></section>
+              <section class="panel balance-panel"><div class="panel-title"><div><p class="eyebrow">Snabbkoll</p><h2>Saldon</h2></div></div><div id="balance-list" class="balance-list"></div><button class="button dark wide" data-go-tab="settle">Se vem som betalar vem <span>→</span></button></section>
             </div>
           </div>
 
-          <div id="tab-expenses" class="tab-panel hidden">
-            <section class="panel full-panel">
-              <div class="panel-title"><div><p class="eyebrow">Every krona</p><h2>All expenses</h2></div><button id="expenses-add-button" class="button dark">＋ Add expense</button></div>
-              <div id="all-expenses" class="expense-list roomy"></div>
-            </section>
-          </div>
-
-          <div id="tab-settle" class="tab-panel hidden">
-            <div class="settle-intro"><p class="eyebrow">The shortest route to even</p><h2>Settle with fewer payments.</h2><p>We combine everyone’s expenses so your group only makes the payments that matter.</p></div>
-            <div id="settlement-list" class="settlement-grid"></div>
-            <section class="panel payment-history"><div class="panel-title"><div><p class="eyebrow">Done & dusted</p><h2>Recorded payments</h2></div></div><div id="payment-list" class="expense-list"></div></section>
-          </div>
-
-          <div id="tab-people" class="tab-panel hidden">
-            <section class="panel full-panel">
-              <div class="panel-title"><div><p class="eyebrow">The crew</p><h2>Friends on this trip</h2></div><button id="people-add-button" class="button dark">＋ Add friend</button></div>
-              <div id="people-list" class="people-grid"></div>
-            </section>
-          </div>
+          <div id="tab-expenses" class="tab-panel hidden"><section class="panel full-panel"><div class="panel-title"><div><p class="eyebrow">Varje öre</p><h2>Alla utgifter</h2></div><button id="expenses-add-button" class="button dark">＋ Lägg till utgift</button></div><div id="all-expenses" class="expense-list roomy"></div></section></div>
+          <div id="tab-settle" class="tab-panel hidden"><div class="settle-intro"><p class="eyebrow">Kortaste vägen till jämnt</p><h2>Gör upp med färre betalningar.</h2><p>Vi räknar ihop allt så gruppen bara behöver göra betalningarna som faktiskt behövs.</p></div><div id="settlement-list" class="settlement-grid"></div><section class="panel payment-history"><div class="panel-title"><div><p class="eyebrow">Klart</p><h2>Registrerade betalningar</h2></div></div><div id="payment-list" class="expense-list"></div></section></div>
+          <div id="tab-people" class="tab-panel hidden"><section class="panel full-panel"><div class="panel-title"><div><p class="eyebrow">Gänget</p><h2>Personer på resan</h2></div><button id="people-add-button" class="button dark">＋ Lägg till vän</button></div><div id="people-list" class="people-grid"></div></section></div>
         </section>
       </main>
     </div>
 
-    <dialog id="trip-dialog">
-      <form id="trip-form" class="dialog-card">
-        <div class="dialog-header"><div><p class="eyebrow">A new adventure</p><h2>Create a trip</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
-        <label>Trip name<input name="name" placeholder="e.g. Sälen weekend" maxlength="80" required /></label>
-        <div class="form-row"><label>Starts<input name="startDate" type="date" /></label><label>Ends<input name="endDate" type="date" /></label></div>
-        <p class="form-error" role="alert"></p>
-        <button class="button primary wide" type="submit">Create trip <span>→</span></button>
-      </form>
-    </dialog>
+    <dialog id="trip-dialog"><form id="trip-form" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">Ett nytt äventyr</p><h2>Skapa resa</h2></div><button type="button" class="dialog-close" aria-label="Stäng">×</button></div><label>Resans namn<input name="name" placeholder="t.ex. Helg i Sälen" maxlength="80" required /></label><div class="form-row"><label>Startar<input name="startDate" type="date" /></label><label>Slutar<input name="endDate" type="date" /></label></div><p class="form-error" role="alert"></p><button class="button primary wide" type="submit">Skapa resa <span>→</span></button></form></dialog>
 
-    <dialog id="person-dialog">
-      <form id="person-form" class="dialog-card">
-        <div class="dialog-header"><div><p class="eyebrow">Make room</p><h2>Add a friend</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
-        <label>Name<input name="name" placeholder="Friend’s name" maxlength="60" required /></label>
-        <label>Swish number <input name="swishPhone" inputmode="tel" placeholder="070 123 45 67" /><small>Optional — needed to prefill Swish payments to them.</small></label>
-        <p class="form-error" role="alert"></p>
-        <button class="button primary wide" type="submit">Add to the trip <span>→</span></button>
-      </form>
-    </dialog>
+    <dialog id="person-dialog"><div class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">Fyll på gänget</p><h2>Lägg till en vän</h2></div><button type="button" class="dialog-close" aria-label="Stäng">×</button></div><label>Sök registrerad användare<input id="person-search" type="search" placeholder="Namn eller e-post" autocomplete="off" /></label><div id="contact-results" class="contact-results"></div><div class="form-divider"><span>eller lägg till som gäst</span></div><form id="person-form" class="nested-form"><label>Namn<input name="name" placeholder="Vännens namn" maxlength="60" required /></label><label>Swish-nummer<input name="swishPhone" inputmode="tel" placeholder="070 123 45 67" /><small>Valfritt. Behövs för förifylld Swish-betalning.</small></label><p class="form-error" role="alert"></p><button class="button primary wide" type="submit">Lägg till på resan <span>→</span></button></form></div></dialog>
 
-    <dialog id="expense-dialog">
-      <form id="expense-form" class="dialog-card wide-dialog">
-        <div class="dialog-header"><div><p class="eyebrow">Add it to the tab</p><h2>New expense</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
-        <div class="form-row unequal"><label class="grow">What was it?<input name="title" placeholder="e.g. Groceries" maxlength="100" required /></label><label>Amount (SEK)<input name="amount" type="number" min="0.01" max="10000000" step="0.01" placeholder="0.00" required /></label></div>
-        <div class="form-row"><label>Paid by<select name="payerId" required></select></label><label>Date<input name="expenseDate" type="date" required /></label><label>Category<select name="category"><option value="food">Food & drink</option><option value="travel">Travel</option><option value="stay">Accommodation</option><option value="fun">Activities</option><option value="other">Other</option></select></label></div>
-        <fieldset><legend>Split it</legend><div class="segmented"><label><input type="radio" name="splitMode" value="equal" checked /><span>Equally</span></label><label><input type="radio" name="splitMode" value="percentage" /><span>Percentage</span></label><label><input type="radio" name="splitMode" value="exact" /><span>Exact SEK</span></label><label><input type="radio" name="splitMode" value="shares" /><span>Shares</span></label></div></fieldset>
-        <div id="split-people" class="split-people"></div>
-        <div id="split-summary" class="split-summary">Select the friends who shared this expense.</div>
-        <p class="form-error" role="alert"></p>
-        <button class="button primary wide" type="submit">Add expense <span>→</span></button>
-      </form>
-    </dialog>
+    <dialog id="invite-dialog"><div class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">Dela resan</p><h2>Bjud in med länk</h2></div><button type="button" class="dialog-close" aria-label="Stäng">×</button></div><p class="muted">Länken gäller i 14 dagar. Nya vänner skapar ett eget konto, och befintliga användare loggar bara in.</p><button id="create-invite-button" class="button primary wide" type="button">Skapa säker inbjudningslänk</button><div id="invite-output" class="hidden"><label>Inbjudningslänk<input id="invite-link" readonly /></label><button id="copy-invite-button" class="button dark wide" type="button">Kopiera länk</button><p id="invite-expiry" class="muted"></p></div></div></dialog>
 
-    <dialog id="payment-dialog">
-      <form id="payment-form" class="dialog-card">
-        <div class="dialog-header"><div><p class="eyebrow">Payment sent?</p><h2>Record payment</h2></div><button type="button" class="dialog-close" aria-label="Close">×</button></div>
-        <input name="fromId" type="hidden" /><input name="toId" type="hidden" />
-        <p id="payment-route" class="payment-route"></p>
-        <label>Amount (SEK)<input name="amount" type="number" min="0.01" step="0.01" required /></label>
-        <label>Note<input name="note" maxlength="120" placeholder="Swish payment" /></label>
-        <p class="form-error" role="alert"></p>
-        <button class="button primary wide" type="submit">Mark as paid <span>✓</span></button>
-      </form>
-    </dialog>
+    <dialog id="expense-dialog"><form id="expense-form" class="dialog-card wide-dialog"><div class="dialog-header"><div><p class="eyebrow">Lägg till på notan</p><h2>Ny utgift</h2></div><button type="button" class="dialog-close" aria-label="Stäng">×</button></div><div class="form-row unequal"><label class="grow">Vad köptes?<input name="title" placeholder="t.ex. Matvaror" maxlength="100" required /></label><label>Belopp (SEK)<input name="amount" type="number" min="0.01" max="10000000" step="0.01" placeholder="0,00" required /></label></div><div class="form-row"><label>Betalat av<select name="payerId" required></select></label><label>Datum<input name="expenseDate" type="date" required /></label><label>Kategori<select name="category"><option value="food">Mat och dryck</option><option value="travel">Resa</option><option value="stay">Boende</option><option value="fun">Aktiviteter</option><option value="other">Övrigt</option></select></label></div><fieldset><legend>Fördela</legend><div class="segmented"><label><input type="radio" name="splitMode" value="equal" checked /><span>Lika</span></label><label><input type="radio" name="splitMode" value="percentage" /><span>Procent</span></label><label><input type="radio" name="splitMode" value="exact" /><span>Exakt SEK</span></label><label><input type="radio" name="splitMode" value="shares" /><span>Andelar</span></label></div></fieldset><div id="split-people" class="split-people"></div><div id="split-summary" class="split-summary">Välj vilka som delade utgiften.</div><p class="form-error" role="alert"></p><button class="button primary wide" type="submit">Lägg till utgift <span>→</span></button></form></dialog>
+
+    <dialog id="payment-dialog"><form id="payment-form" class="dialog-card"><div class="dialog-header"><div><p class="eyebrow">Betalningen skickad?</p><h2>Registrera betalning</h2></div><button type="button" class="dialog-close" aria-label="Stäng">×</button></div><input name="fromId" type="hidden" /><input name="toId" type="hidden" /><p id="payment-route" class="payment-route"></p><label>Belopp (SEK)<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Anteckning<input name="note" maxlength="120" placeholder="Swish-betalning" /></label><p class="form-error" role="alert"></p><button class="button primary wide" type="submit">Markera som betald <span>✓</span></button></form></dialog>
 
     <script type="module" src="/app.js"></script>
   </body>

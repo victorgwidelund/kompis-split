@@ -1,9 +1,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { allocateByWeights, calculateShares, simplifyDebts } from "../src/split.mjs";
+import { allocateByWeights, calculateShares, simplifyDebts } from "../dist/split.js";
 
 test("equal splits preserve every öre", () => {
   assert.deepEqual(allocateByWeights(10000, [1, 1, 1]), [3334, 3333, 3333]);
+});
+
+test("weighted allocations always conserve the original amount", () => {
+  for (let total = 0; total <= 1_000; total += 17) {
+    for (const weights of [[1], [1, 1], [1, 2, 3], [0, 5, 0, 7]]) {
+      const shares = allocateByWeights(total, weights);
+      assert.equal(shares.reduce((sum, amount) => sum + amount, 0), total);
+      assert.ok(shares.every(Number.isInteger));
+      assert.ok(shares.every((amount) => amount >= 0));
+    }
+  }
+});
+
+test("equal balances use stable participant IDs", () => {
+  const participants = [{ id: 3 }, { id: 1 }, { id: 2 }];
+  const expenses = [{ payerId: 3, amountCents: 300, shares: participants.map((participant) => ({ participantId: participant.id, amountCents: 100 })) }];
+  assert.deepEqual(simplifyDebts(participants, expenses).settlements, [
+    { fromId: 1, toId: 3, amountCents: 100 },
+    { fromId: 2, toId: 3, amountCents: 100 },
+  ]);
+});
+
+test("invalid weights are rejected", () => {
+  assert.throws(() => allocateByWeights(100, []), /participant/);
+  assert.throws(() => allocateByWeights(100, [0, 0]), /positive/);
+  assert.throws(() => allocateByWeights(100, [1, -1]), /non-negative/);
+  assert.throws(() => allocateByWeights(1.5, [1]), /non-negative number of cents/);
 });
 
 test("percentage and exact splits validate totals", () => {

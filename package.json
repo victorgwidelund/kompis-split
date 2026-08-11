@@ -1,14 +1,28 @@
 {
   "name": "kompis-split",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
+  "packageManager": "pnpm@11.16.0",
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "start": "node src/server.mjs",
-    "dev": "node --watch src/server.mjs",
-    "test": "node --test"
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit && node --check public/app.js",
+    "lint": "tsc --noEmit && node --check public/app.js",
+    "test": "tsc -p tsconfig.build.json && node --test"
+  },
+  "dependencies": {
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/pg": "8.15.6",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
   }
 }

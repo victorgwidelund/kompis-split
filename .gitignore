@@ -1,7 +1,11 @@
 .env
+.env.*
+!.env.example
 data/
 *.db
 *.db-shm
 *.db-wal
 node_modules/
+dist/
+.compose-validator/
 .DS_Store
