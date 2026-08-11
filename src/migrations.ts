@@ -1,6 +1,6 @@
 import { pool } from "./database.js";
 
-export const migrationVersions = [1] as const;
+export const migrationVersions = [1, 2] as const;
 
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -15,6 +15,8 @@ const schema = `
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
     swish_phone TEXT,
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    is_disabled BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -42,7 +44,7 @@ const schema = `
     payer_id BIGINT NOT NULL REFERENCES participants(id),
     title TEXT NOT NULL CHECK(char_length(title) BETWEEN 1 AND 100),
     amount_cents BIGINT NOT NULL CHECK(amount_cents > 0),
-    expense_date DATE NOT NULL,
+    expense_date DATE,
     category TEXT NOT NULL DEFAULT 'other',
     split_mode TEXT NOT NULL CHECK(split_mode IN ('equal','shares','percentage','exact')),
     created_by BIGINT REFERENCES users(id),
@@ -130,6 +132,18 @@ export async function applyMigrations(): Promise<void> {
     await client.query(
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [1, "initial-postgresql-schema"],
+    );
+    await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE");
+    await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN NOT NULL DEFAULT FALSE");
+    await client.query("ALTER TABLE expenses ALTER COLUMN expense_date DROP NOT NULL");
+    await client.query(`
+      UPDATE users SET is_admin = TRUE
+      WHERE id = (SELECT MIN(id) FROM users)
+        AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin = TRUE)
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [2, "global-admin-and-optional-expense-date"],
     );
     await client.query("COMMIT");
   } catch (error) {

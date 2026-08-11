@@ -8,9 +8,12 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Hashade inbjudningstoken med 14 dagars giltighet
 - Serverkontrollerad åtkomst per resa: ägare, administratör eller medlem
 - Sökbara användare, kontakter och gästdeltagare
+- Vänner direkt på startsidan
+- Globalt adminläge för alla användare, resor, kontostatusar och senaste aktivitet
 - Aktiva och arkiverade resor utan att ekonomiska poster försvinner
 - Lika, procentuell, exakt och viktad deterministisk fördelning
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
+- Frivilliga datum för både resor och utgifter
 - PostgreSQL-healthcheck och dagliga komprimerade `pg_dump`-backuper
 
 ## Installation på Unraid
