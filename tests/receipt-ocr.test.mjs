@@ -142,6 +142,28 @@ test("local AI receipt output is validated and merged by exact öre", () => {
   assert.deepEqual(combined.suggestion.items.map((item) => item.name), ["Chipspåse FS", "Valenciamandlar burk", "Heineken Draft"]);
 });
 
+test("structured vision output keeps row totals, quantities and exact receipt total", () => {
+  const ai = parseOllamaReceipt({
+    merchant: "Restaurangen", date: "", total: 2400,
+    items: [
+      { name: "Friterade risottobollar", quantity: 1, amount: 80 },
+      { name: "Ostron Flambadou", quantity: 2, amount: 110 },
+      { name: "Rödräka Pil Pil", quantity: 1, amount: 89 },
+      { name: "Saltgurka", quantity: 1, amount: 50 },
+      { name: "Mixed Grill", quantity: 1, amount: 595 },
+      { name: "Heineken", quantity: 1, amount: 130 },
+      { name: "Flaska vin", quantity: 1, amount: 950 },
+      { name: "Öl", quantity: 1, amount: 79 },
+      { name: "Negroni", quantity: 1, amount: 149 },
+      { name: "Extra", quantity: 1, amount: 168 },
+    ],
+  });
+  assert.ok(ai);
+  assert.equal(ai.suggestion.amount, "2400.00");
+  assert.equal(ai.suggestion.items.reduce((sum, item) => sum + Number(item.amount), 0), 2400);
+  assert.deepEqual(ai.suggestion.items[1], { name: "Ostron Flambadou", quantity: 2, amount: "110.00" });
+});
+
 test("receipt parser handles European dates and ignores headings as merchants", () => {
   const suggestion = parseReceiptText(`
     KASSAKVITTO

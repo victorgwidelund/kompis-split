@@ -16,7 +16,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
 - Frivilliga datum för både resor och utgifter
 - Egna, arkiverbara utgiftskategorier samt kvitton direkt under utgiften
-- Lokal svensk kvittoavläsning med GLM-OCR, bildförbehandling och Tesseract-reserv som föreslår restaurang/plats, totalbelopp, datum, kategori och artikelrader
+- Lokal svensk kvittoavläsning med Qwen3-VL 4B, bildförbehandling och Tesseract-reserv som föreslår restaurang/plats, totalbelopp, datum, kategori och artikelrader
 - Mobilanpassade formulärfält som inte automatiskt zoomar in på iPhone
 - Egen statistikvy för kategorier, restauranger/platser, betalare och månadsutveckling
 - Fristående Snabbnota: skanna kvittorader, dela en säker länk och låt alla bocka av mat och dryck i realtid
@@ -39,11 +39,12 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    TRUST_PROXY=false
    SESSION_DAYS=30
    BACKUP_RETENTION_DAYS=14
-   OLLAMA_MODEL=glm-ocr:q8_0
-   OLLAMA_OCR_TIMEOUT_MS=45000
+   OLLAMA_MODEL=qwen3-vl:4b
+   OLLAMA_OCR_TIMEOUT_MS=60000
+   OLLAMA_ACCURATE_RETRY=true
    ```
 
-4. Välj **Compose Up**. Första starten laddar ner GLM-OCR-modellen och kan därför ta några minuter.
+4. Välj **Compose Up**. Första starten laddar ner Qwen3-VL-modellen på cirka 3,3 GB och kan därför ta några minuter.
 5. Öppna `http://DIN-UNRAID-IP:8787` och skapa första administratören med `APP_PASSWORD`.
 
 PostgreSQL publicerar ingen port på Unraid. Endast appen finns på port 8787. Beständig data och backup ligger utanför containrarna:
@@ -87,7 +88,7 @@ Proxyn ska vidarebefordra `Host` eller `X-Forwarded-Host`. `TRUST_PROXY=true` f�
 
 Kvitton lagras i PostgreSQL och följer därför med i samma backup. JPG, PNG, WebP och PDF stöds, högst 8 MB per fil och fem filer per utgift. När en arkiverad resa flyttas till papperskorgen raderas dess kvittofiler permanent; utgifter, betalningar och audit-logg behålls så att den ekonomiska historiken fortfarande kan granskas och resan återställas.
 
-När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen skickar bilden över det interna Compose-nätverket till den lokala GLM-OCR-modellen och jämför resultatet med Tesseract och exakt öresmatematik. Bilden lämnar aldrig Unraid-servern. Om Ollama eller GPU:n inte är tillgänglig används Tesseract automatiskt. Kontrollera alltid belopp, datum, namn och artikelrader innan du sparar. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
+När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen skickar bilden över det interna Compose-nätverket till den lokala Qwen3-VL-modellen och jämför resultatet med Tesseract och exakt öresmatematik. Ett inkonsekvent AI-resultat kontrolleras automatiskt en andra gång. Bilden lämnar aldrig Unraid-servern. Om Ollama eller GPU:n inte är tillgänglig används Tesseract automatiskt. Kontrollera alltid belopp, datum, namn och artikelrader innan du sparar. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
 
 Testa återställning på en separat databas:
 
@@ -121,8 +122,9 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `SESSION_DAYS` | `30` | Sessionernas livslängd |
 | `BACKUP_RETENTION_DAYS` | `14` | Retention för dagliga dumpfiler |
 | `OLLAMA_URL` | `http://ollama:11434` i Compose | Intern adress till lokal dokument-AI; exponeras inte publikt |
-| `OLLAMA_MODEL` | `glm-ocr:q8_0` | Kvantiserad lokal OCR-modell, vald för GTX 1080 Ti-kompatibilitet |
-| `OLLAMA_OCR_TIMEOUT_MS` | `45000` | Maximal väntetid i millisekunder på lokal GLM-OCR innan Tesseract-resultatet används |
+| `OLLAMA_MODEL` | `qwen3-vl:4b` | Lokal 4,44B visionmodell i Q4_K_M, cirka 3,3 GB och vald för GTX 1080 Ti |
+| `OLLAMA_OCR_TIMEOUT_MS` | `60000` | Maximal väntetid i millisekunder per lokal AI-kontroll innan Tesseract-resultatet används |
+| `OLLAMA_ACCURATE_RETRY` | `true` | Kör en extra AI-kontroll endast när den första tolkningen inte summerar exakt |
 
 ## Lokal utveckling
 
