@@ -1,14 +1,62 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { closeReceiptOcr, combineReceiptPasses, ollamaReceiptRequest, parseOllamaReceipt, parseReceiptText, prepareReceiptImages, recognizeReceipt } from "../dist/receipt-ocr.js";
+import { closeReceiptOcr, combineReceiptPasses, paddleOcrReceiptRequest, parseOllamaReceipt, parseReceiptText, prepareReceiptImages, recognizeReceipt } from "../dist/receipt-ocr.js";
 
-test("Ollama receipt requests disable thinking and cap structured output", () => {
-  const request = ollamaReceiptRequest(Buffer.from("test-image"));
-  assert.equal(request.think, false);
+test("PaddleOCR receipt requests use the documented OCR prompt without forced JSON", () => {
+  const request = paddleOcrReceiptRequest(Buffer.from("test-image"));
   assert.equal(request.stream, false);
-  assert.equal(request.options.num_predict, 768);
-  assert.equal(request.format.properties.items.maxItems, 40);
+  assert.equal(request.model, "PaddleOCR-VL-1.6");
+  assert.equal(request.max_tokens, 512);
+  assert.equal(request.messages[0].content[1].text, "OCR:");
+  assert.match(request.messages[0].content[0].image_url.url, /^data:image\/jpeg;base64,/);
+  assert.equal("format" in request, false);
+});
+
+test("PaddleOCR name and price blocks are paired without losing quantities", () => {
+  const suggestion = parseReceiptText(`
+    RESTAURANG MAIZ
+    Sankt Eriksgatan 92
+    2019-10-29 18:01
+    2x Läsk
+    1x Asado
+    1x Atun
+    1x Zetas
+    1x Chicharron
+    1x Pollo
+    1x Crudo
+    1x Salmon
+    64,00
+    68,00
+    69,00
+    62,00
+    96,00
+    89,00
+    59,00
+    55,00
+    TOTALT (kr)
+    562,00
+  `, new Date("2026-08-11T12:00:00Z"));
+  assert.equal(suggestion.title, "RESTAURANG MAIZ");
+  assert.equal(suggestion.amount, "562.00");
+  assert.equal(suggestion.expenseDate, "2019-10-29");
+  assert.deepEqual(suggestion.items, [
+    { name: "Läsk", quantity: 2, amount: "64.00" },
+    { name: "Asado", quantity: 1, amount: "68.00" },
+    { name: "Atun", quantity: 1, amount: "69.00" },
+    { name: "Zetas", quantity: 1, amount: "62.00" },
+    { name: "Chicharron", quantity: 1, amount: "96.00" },
+    { name: "Pollo", quantity: 1, amount: "89.00" },
+    { name: "Crudo", quantity: 1, amount: "59.00" },
+    { name: "Salmon", quantity: 1, amount: "55.00" },
+  ]);
+  assert.equal(suggestion.items.reduce((sum, item) => sum + Math.round(Number(item.amount) * 100), 0), 56_200);
+});
+
+test("an unreadable explicit total is not replaced by the largest item price", () => {
+  const suggestion = parseReceiptText("1x Asado 68,00\n1x Atun 69,00\nTOTALT (kr)");
+  assert.equal(suggestion.amount, null);
+  assert.deepEqual(suggestion.items.map((item) => item.amount), ["68.00", "69.00"]);
 });
 
 test("Swedish receipt fields are extracted as editable suggestions", () => {

@@ -797,6 +797,7 @@ function receiptAiStatus(ai) {
   if (ai.status === "cancelled_local_complete") return ` Snabb OCR summerade exakt${seconds}, så AI-körningen avbröts.`;
   if (ai.status === "timeout") return ` AI nådde tidsgränsen${seconds}; reserv-OCR användes.`;
   if (ai.status === "token_limit") return ` AI nådde sin svarsgräns${seconds}; reserv-OCR användes.`;
+  if (ai.status === "thinking_only") return ` AI lade svaret i thinking-fältet${seconds}; byt till instruct-modellen.`;
   if (ai.status === "http_404") return " AI-modellen hittades inte i Ollama; reserv-OCR användes.";
   if (ai.status === "http_503") return " AI-kön var full; reserv-OCR användes.";
   if (ai.status === "disabled") return " AI är inte konfigurerad; reserv-OCR användes.";
@@ -808,18 +809,21 @@ async function analyzeQuickTabReceipt(event) {
   const file = event.currentTarget.files?.[0]; if (!file) return;
   const status = $("#quick-tab-receipt-status");
   if (file.size > 8 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) { status.className = "receipt-status warning"; status.textContent = "Välj en JPG-, PNG- eller WebP-bild på högst 8 MB."; return; }
-  pendingQuickTabReceipt = file; status.className = "receipt-status reading"; status.textContent = "AI:n läser och kontrollerar kvittoraderna … Svåra kvitton kan ta upp till en minut.";
+  pendingQuickTabReceipt = file; status.className = "receipt-status reading"; status.textContent = "AI:n läser och kontrollerar kvittoraderna … Det tar normalt några sekunder.";
   try {
     const payload = await api("/api/quick-tabs/analyze", { method: "POST", headers: { "Content-Type": file.type }, body: file });
     const suggestion = payload.suggestion || {}; const form = $("#quick-tab-form");
     if (suggestion.title) { form.elements.merchant.value = suggestion.title; form.elements.name.value = `Nota på ${suggestion.title}`; }
-    if (suggestion.amount) form.elements.total.value = suggestion.amount;
+    const suggestedItems = suggestion.items || [];
+    const itemTotalOre = suggestedItems.reduce((sum, item) => sum + Math.round((Number(item.amount) || 0) * 100), 0);
+    const totalWasDerived = !suggestion.amount && itemTotalOre > 0;
+    if (suggestion.amount || totalWasDerived) form.elements.total.value = suggestion.amount || (itemTotalOre / 100).toFixed(2);
     if (suggestion.expenseDate) form.elements.receiptDate.value = suggestion.expenseDate;
-    renderQuickItemEditor(suggestion.items || []);
+    renderQuickItemEditor(suggestedItems);
     const engine = payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR";
     status.className = `receipt-status ${payload.needsReview ? "warning" : "success"}`;
     status.textContent = suggestion.items?.length
-      ? `${suggestion.items.length} kvittorader hittades med ${engine}.${receiptAiStatus(payload.ai)}${payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}`
+      ? `${suggestion.items.length} kvittorader hittades med ${engine}.${receiptAiStatus(payload.ai)}${totalWasDerived ? ` Den tryckta totalsumman kunde inte läsas, så radernas summa ${(itemTotalOre / 100).toFixed(2).replace(".", ",")} kr fylldes i – kontrollera den.` : payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}`
       : "Inga säkra rader hittades. Lägg till rätterna manuellt.";
   } catch (error) { status.className = "receipt-status warning"; status.textContent = `${error.message} Du kan fortfarande fylla i raderna manuellt.`; }
 }
