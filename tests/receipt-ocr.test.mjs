@@ -275,6 +275,9 @@ test("real Strandbryggan PaddleOCR-VL output: terminal code, wrapped names and t
   ]);
   const total = suggestion.items.reduce((sum, item) => sum + Math.round(Number(item.amount) * 100), 0);
   assert.equal(total, 182500, "the 7 real items must sum to the receipt's exact total, 1825.00 SEK");
+  // "Strandbryggan" is printed twice (header + above the order details) with no digits; the street
+  // address "Stranvägskajen 27" only appears once and has digits — the merchant name must win.
+  assert.equal(suggestion.title, "Strandbryggan");
 });
 
 test("a brand-new, never-seen-before header field is excluded structurally, not by keyword", () => {
