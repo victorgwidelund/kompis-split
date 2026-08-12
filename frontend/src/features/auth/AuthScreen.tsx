@@ -22,10 +22,10 @@ export function AuthScreen({ mode, needsSetup, invitation, version, onModeChange
     catch (caught) { setError(caught instanceof Error ? caught.message : "Något gick fel"); }
     finally { setBusy(false); }
   };
-  const subtitle = needsSetup ? "Skapa det första administratörskontot. Dina befintliga resor bevaras."
+  const subtitle = needsSetup ? "Skapa det första administratörskontot. Dina befintliga grupper bevaras."
     : mode === "quick-guest" ? "Ange bara namn och nummer för att bocka av din del."
     : mode === "register" ? invitation?.kind === "friend" ? "Skapa ditt konto för att lägga till vännen." : "Skapa ditt eget konto för att gå med."
-    : invitation?.kind === "friend" ? "Logga in så sparas ni som vänner." : invitation?.kind === "trip" ? "Logga in så läggs resan till på ditt konto." : "Logga in för att se dina resor.";
+    : invitation?.kind === "friend" ? "Logga in så sparas ni som vänner." : invitation?.kind === "trip" ? "Logga in så läggs gruppen till på ditt konto." : "Logga in för att se dina grupper.";
   const summary = invitation?.kind === "friend"
     ? <><strong>{invitation.inviterName}</strong> vill lägga till dig som vän i Kompis Split.</>
     : invitation?.kind === "quick_tab"
