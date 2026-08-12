@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -7,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
-import { closeReceiptOcr, recognizeReceipt } from "./receipt-ocr.js";
+import { closeReceiptOcr, maxReceiptInputPixels, normalizeReceiptImage, recognizeReceipt } from "./receipt-ocr.js";
 import { allocateItemQuantities, calculateShares, simplifyDebts } from "./split.js";
 
 const scrypt = promisify(scryptCallback);
@@ -25,7 +26,10 @@ const cookieSecret = process.env.COOKIE_SECRET || createHash("sha256").update(ap
 const trustProxy = process.env.TRUST_PROXY === "true";
 const sessionDays = integerEnvironment("SESSION_DAYS", 30, 1, 365);
 const appVersion = String(process.env.APP_VERSION || "dev").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 80) || "dev";
-const receiptMaximumBytes = 8 * 1024 * 1024;
+// Client-side compression normally shrinks images well below this before they ever reach the
+// server; this is the hard backend cap (also covers PDFs, which aren't compressed client-side).
+// See DEPLOYMENT.md for the matching Nginx/Cloudflare body-size note.
+const receiptMaximumBytes = 20 * 1024 * 1024;
 const receiptMaximumCount = 5;
 const receiptMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const receiptImageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -200,8 +204,8 @@ function safeReceiptImageDimensions(mimeType: string, content: Buffer) {
     : mimeType === "image/jpeg" ? jpegDimensions(content)
       : mimeType === "image/webp" ? webpDimensions(content) : null;
   if (!dimensions || dimensions.width < 20 || dimensions.height < 20) throw new HttpError(415, "Kvittofilens bildmått kunde inte läsas");
-  if (dimensions.width > 10_000 || dimensions.height > 10_000 || dimensions.width * dimensions.height > 20_000_000) {
-    throw new HttpError(413, "Kvittofotot är för stort. Välj en bild på högst 20 megapixlar.");
+  if (dimensions.width > 14_000 || dimensions.height > 14_000 || dimensions.width * dimensions.height > maxReceiptInputPixels) {
+    throw new HttpError(413, `Kvittofotot är för stort. Välj en bild på högst ${Math.round(maxReceiptInputPixels / 1_000_000)} megapixlar.`);
   }
 }
 
@@ -246,10 +250,18 @@ async function sessionUser(request: IncomingMessage) {
   const token = cookieValue(request, "kompis_session");
   if (!token) return null;
   return await db.prepare(`
-    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled
+    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, s.demo_mode, s.demo_batch_id
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.is_disabled = FALSE
   `).get(sessionId(token)) || null;
+}
+
+// Demo mode is bound to the server-side session record, never a client-supplied flag. It is carried
+// through request-scoped AsyncLocalStorage (the same pattern src/database.ts uses for transactions)
+// so every data-access function can enforce it without threading a parameter through every call site.
+const demoContext = new AsyncLocalStorage<boolean>();
+function inDemoMode(): boolean {
+  return demoContext.getStore() || false;
 }
 
 type QuickTabViewer = { kind: "user" | "guest"; id: number; key: string; role: "owner" | "member" };
@@ -279,6 +291,10 @@ function requireAdmin(user: any) {
 }
 
 async function requireAccess(tripId: number, userId: number, roles: string[] | null = null) {
+  // A demo session must never reach a real trip, and a normal session must never reach a demo trip —
+  // checked before the global-admin bypass below, which would otherwise ignore the boundary entirely.
+  const trip = await db.prepare("SELECT is_demo FROM trips WHERE id = ?").get<any>(tripId);
+  if (!trip || Boolean(trip.is_demo) !== inDemoMode()) throw new HttpError(403, "Du har inte tillgång till den här resan");
   const globalAdmin = await db.prepare("SELECT is_admin FROM users WHERE id = ? AND is_disabled = FALSE").get<any>(userId);
   if (globalAdmin?.is_admin) return "admin";
   const access = await db.prepare("SELECT role FROM trip_access WHERE trip_id = ? AND user_id = ?").get<any>(tripId, userId);
@@ -308,7 +324,7 @@ async function assertTripParticipant(tripId: number, participantId: number) {
 
 async function loadTrip(id: number, userId: number) {
   const trip = await db.prepare("SELECT * FROM trips WHERE id = ?").get<any>(id);
-  if (!trip || trip.deleted_at) return null;
+  if (!trip || trip.deleted_at || Boolean(trip.is_demo) !== inDemoMode()) return null;
   const role = await requireAccess(id, userId);
   const participantRows = await db.prepare("SELECT * FROM participants WHERE trip_id = ? ORDER BY id").all<any>(id);
   const participants = participantRows.map((person) => ({
@@ -351,14 +367,15 @@ async function loadTrip(id: number, userId: number) {
 }
 
 async function dashboard(userId: number) {
+  const demoMode = inDemoMode();
   const rows = await db.prepare(`
     SELECT t.*, ta.role,
       (SELECT COUNT(*) FROM participants p WHERE p.trip_id = t.id) participant_count,
       (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e WHERE e.trip_id = t.id AND e.voided_at IS NULL) total_cents
     FROM trip_access ta JOIN trips t ON t.id = ta.trip_id
-    WHERE ta.user_id = ? AND t.deleted_at IS NULL
+    WHERE ta.user_id = ? AND t.deleted_at IS NULL AND t.is_demo = ?
     ORDER BY (t.archived_at IS NOT NULL), COALESCE(t.start_date, t.created_at::date) DESC, t.id DESC
-  `).all<any>(userId);
+  `).all<any>(userId, demoMode);
   const trips = await Promise.all(rows.map(async (row) => {
     const full = await loadTrip(row.id, userId);
     if (!full) throw new Error("Resan försvann under laddningen");
@@ -376,13 +393,14 @@ async function dashboard(userId: number) {
     JOIN trips t ON t.id = e.trip_id
     JOIN trip_access ta ON ta.trip_id = t.id AND ta.user_id = ?
     JOIN participants p ON p.id = e.payer_id
-    WHERE e.voided_at IS NULL AND t.archived_at IS NULL AND t.deleted_at IS NULL
+    WHERE e.voided_at IS NULL AND t.archived_at IS NULL AND t.deleted_at IS NULL AND t.is_demo = ?
     ORDER BY e.expense_date DESC NULLS LAST, e.id DESC LIMIT 12
-  `).all<any>(userId)).map((item) => ({
+  `).all<any>(userId, demoMode)).map((item) => ({
     id: item.id, tripId: item.trip_id, tripName: item.trip_name, title: item.title,
     amountCents: item.amount_cents, expenseDate: item.expense_date, category: item.category, payerName: item.payer_name,
   }));
-  const contacts = (await db.prepare(`
+  // Real contacts (names, emails, Swish numbers) must never surface inside the demo context.
+  const contacts = demoMode ? [] : (await db.prepare(`
     SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin
     FROM contacts c JOIN users u ON u.id = c.contact_user_id
     WHERE c.owner_user_id = ? AND u.is_disabled = FALSE
@@ -392,18 +410,19 @@ async function dashboard(userId: number) {
 }
 
 async function statistics(userId: number) {
+  const demoMode = inDemoMode();
   const visibleExpense = `
     FROM expenses e
     JOIN trips t ON t.id = e.trip_id
     JOIN trip_access ta ON ta.trip_id = t.id AND ta.user_id = ?
   `;
-  const visibleFilter = "WHERE e.voided_at IS NULL AND t.deleted_at IS NULL";
+  const visibleFilter = "WHERE e.voided_at IS NULL AND t.deleted_at IS NULL AND t.is_demo = ?";
   const summary = await db.prepare(`
     SELECT COUNT(*) expense_count, COUNT(DISTINCT e.trip_id) trip_count,
       COALESCE(SUM(e.amount_cents), 0) total_cents,
       COALESCE(ROUND(AVG(e.amount_cents)), 0) average_cents
     ${visibleExpense} ${visibleFilter}
-  `).get<any>(userId);
+  `).get<any>(userId, demoMode);
   const categoryRows = await db.prepare(`
     SELECT e.category slug, COALESCE(c.name, e.category) name, COALESCE(c.emoji, '🧾') emoji,
       COUNT(*) expense_count, SUM(e.amount_cents) total_cents
@@ -412,14 +431,14 @@ async function statistics(userId: number) {
     ${visibleFilter}
     GROUP BY e.category, c.name, c.emoji
     ORDER BY total_cents DESC, lower(COALESCE(c.name, e.category))
-  `).all<any>(userId);
+  `).all<any>(userId, demoMode);
   const merchantRows = await db.prepare(`
     SELECT MIN(e.title) name, COUNT(*) expense_count, SUM(e.amount_cents) total_cents
     ${visibleExpense} ${visibleFilter}
     GROUP BY lower(trim(e.title))
     ORDER BY total_cents DESC, lower(MIN(e.title))
     LIMIT 12
-  `).all<any>(userId);
+  `).all<any>(userId, demoMode);
   const payerRows = await db.prepare(`
     SELECT p.user_id, p.name, COUNT(*) expense_count, SUM(e.amount_cents) total_cents
     ${visibleExpense}
@@ -428,7 +447,7 @@ async function statistics(userId: number) {
     GROUP BY p.user_id, p.name
     ORDER BY total_cents DESC, lower(p.name)
     LIMIT 12
-  `).all<any>(userId);
+  `).all<any>(userId, demoMode);
   const trendRows = await db.prepare(`
     SELECT month_key, expense_count, total_cents FROM (
       SELECT to_char(date_trunc('month', COALESCE(e.expense_date, e.created_at::date)), 'YYYY-MM') AS month_key,
@@ -438,7 +457,7 @@ async function statistics(userId: number) {
       ORDER BY date_trunc('month', COALESCE(e.expense_date, e.created_at::date)) DESC
       LIMIT 12
     ) recent_months ORDER BY month_key
-  `).all<any>(userId);
+  `).all<any>(userId, demoMode);
   const mapTotals = (row: any) => ({
     ...row,
     expenseCount: Number(row.expense_count),
@@ -581,6 +600,8 @@ function broadcastQuickTab(quickTabId: number) {
 }
 
 async function quickTabAccess(quickTabId: number, userId: number) {
+  const tab = await db.prepare("SELECT is_demo FROM quick_tabs WHERE id = ?").get<any>(quickTabId);
+  if (!tab || Boolean(tab.is_demo) !== inDemoMode()) throw new HttpError(403, "Du har inte tillgång till snabbnotan");
   const access = await db.prepare("SELECT role FROM quick_tab_access WHERE quick_tab_id = ? AND user_id = ?").get<any>(quickTabId, userId);
   if (!access) throw new HttpError(403, "Du har inte tillgång till snabbnotan");
   return String(access.role) as "owner" | "member";
@@ -667,12 +688,82 @@ async function quickTabList(userId: number) {
       (SELECT COALESCE(SUM(i.quantity), 0) FROM quick_tab_items i WHERE i.quick_tab_id = q.id) item_count,
       (SELECT COALESCE(SUM(c.quantity), 0) FROM quick_tab_claims c JOIN quick_tab_items i ON i.id = c.item_id WHERE i.quick_tab_id = q.id AND c.user_id = ?) my_claim_count
     FROM quick_tab_access a JOIN quick_tabs q ON q.id = a.quick_tab_id
-    WHERE a.user_id = ? ORDER BY (q.closed_at IS NOT NULL), q.created_at DESC
-  `).all<any>(userId, userId)).map((tab) => ({
+    WHERE a.user_id = ? AND q.is_demo = ? ORDER BY (q.closed_at IS NOT NULL), q.created_at DESC
+  `).all<any>(userId, userId, inDemoMode())).map((tab) => ({
     id: Number(tab.id), name: tab.name, merchant: tab.merchant, totalCents: Number(tab.total_cents),
     closedAt: tab.closed_at, createdAt: tab.created_at, role: tab.role,
     itemCount: Number(tab.item_count), myClaimCount: Number(tab.my_claim_count),
   }));
+}
+
+// Admin-only demo mode: a fresh, disposable batch of realistic fictional data an admin can explore
+// and edit without ever touching real users/trips/expenses/contacts. Demo rows are ordinary
+// trips/quick_tabs (is_demo = TRUE, demo_batch_id set) — reusing every existing table, query, and
+// React component instead of a parallel demo system. requireAccess/quickTabAccess/dashboard/
+// statistics/quickTabList already refuse to cross the is_demo boundary in either direction.
+async function seedDemoData(adminUserId: number, batchId: string) {
+  await db.transaction(async () => {
+    const trip1 = await db.prepare("INSERT INTO trips (name, start_date, end_date, created_by, is_demo, demo_batch_id) VALUES (?, ?, ?, ?, TRUE, ?) RETURNING id")
+      .run("Weekend i Göteborg", "2026-09-11", "2026-09-13", adminUserId, batchId);
+    const trip1Id = Number(trip1.lastInsertRowid);
+    await db.prepare("INSERT INTO trip_access (trip_id, user_id, role) VALUES (?, ?, 'owner')").run(trip1Id, adminUserId);
+    const you = Number((await db.prepare("INSERT INTO participants (trip_id, name, user_id) VALUES (?, 'Du (demo)', ?) RETURNING id").run(trip1Id, adminUserId)).lastInsertRowid);
+    const guestId: Record<string, number> = {};
+    for (const name of ["Anna", "Erik", "Johan", "Sofia"]) {
+      guestId[name] = Number((await db.prepare("INSERT INTO participants (trip_id, name) VALUES (?, ?) RETURNING id").run(trip1Id, name)).lastInsertRowid);
+    }
+    const trip1Participants = [you, guestId.Anna!, guestId.Erik!, guestId.Johan!, guestId.Sofia!];
+    const addExpense = async (tripId: number, participants: number[], title: string, amountCents: number, payerId: number, category: string, date: string) => {
+      const shares = calculateShares(amountCents, "equal", participants.map(() => ({ value: 1 })));
+      const expenseId = Number((await db.prepare("INSERT INTO expenses (trip_id, payer_id, title, amount_cents, expense_date, category, split_mode, created_by) VALUES (?, ?, ?, ?, ?, ?, 'equal', ?) RETURNING id")
+        .run(tripId, payerId, title, amountCents, date, category, adminUserId)).lastInsertRowid);
+      const insertShare = db.prepare("INSERT INTO expense_shares (expense_id, participant_id, amount_cents) VALUES (?, ?, ?)");
+      for (const [index, participantId] of participants.entries()) await insertShare.run(expenseId, participantId, shares[index]);
+    };
+    await addExpense(trip1Id, trip1Participants, "Hotell", 420000, you, "stay", "2026-09-11");
+    await addExpense(trip1Id, trip1Participants, "Middag på Skeppet", 185000, guestId.Anna!, "food", "2026-09-11");
+    await addExpense(trip1Id, trip1Participants, "Taxi till hotellet", 38000, guestId.Erik!, "travel", "2026-09-11");
+    await addExpense(trip1Id, trip1Participants, "ICA Maxi", 64550, guestId.Johan!, "food", "2026-09-12");
+    await addExpense(trip1Id, trip1Participants, "Öl på puben", 92000, guestId.Sofia!, "food", "2026-09-12");
+
+    const trip2 = await db.prepare("INSERT INTO trips (name, start_date, end_date, created_by, is_demo, demo_batch_id) VALUES (?, ?, ?, ?, TRUE, ?) RETURNING id")
+      .run("Åre 2026", "2027-02-19", "2027-02-22", adminUserId, batchId);
+    const trip2Id = Number(trip2.lastInsertRowid);
+    await db.prepare("INSERT INTO trip_access (trip_id, user_id, role) VALUES (?, ?, 'owner')").run(trip2Id, adminUserId);
+    const trip2You = Number((await db.prepare("INSERT INTO participants (trip_id, name, user_id) VALUES (?, 'Du (demo)', ?) RETURNING id").run(trip2Id, adminUserId)).lastInsertRowid);
+    const trip2Anna = Number((await db.prepare("INSERT INTO participants (trip_id, name) VALUES (?, 'Anna') RETURNING id").run(trip2Id)).lastInsertRowid);
+    const trip2Participants = [trip2You, trip2Anna];
+    await addExpense(trip2Id, trip2Participants, "Liftkort", 285000, trip2You, "travel", "2027-02-20");
+    await addExpense(trip2Id, trip2Participants, "Fjällrestaurang", 98000, trip2Anna, "food", "2027-02-21");
+
+    const quickTabResult = await db.prepare("INSERT INTO quick_tabs (name, merchant, receipt_date, total_cents, created_by, is_demo, demo_batch_id) VALUES (?, ?, ?, ?, ?, TRUE, ?) RETURNING id")
+      .run("Fredagsmiddag", "Bistro Nord", "2026-09-05", 68600, adminUserId, batchId);
+    const quickTabId = Number(quickTabResult.lastInsertRowid);
+    await db.prepare("INSERT INTO quick_tab_access (quick_tab_id, user_id, role) VALUES (?, ?, 'owner')").run(quickTabId, adminUserId);
+    const insertItem = db.prepare("INSERT INTO quick_tab_items (quick_tab_id, name, amount_cents, quantity, position) VALUES (?, ?, ?, ?, ?)");
+    const items: Array<[string, number, number]> = [["Pasta Carbonara", 2, 29800], ["Öl", 3, 23700], ["Tiramisu", 1, 15100]];
+    for (const [position, [name, quantity, amountCents]] of items.entries()) await insertItem.run(quickTabId, name, amountCents, quantity, position);
+  });
+}
+
+async function clearDemoData(batchId: string) {
+  await db.transaction(async () => {
+    await db.prepare("DELETE FROM trips WHERE demo_batch_id = ?").run(batchId);
+    await db.prepare("DELETE FROM quick_tabs WHERE demo_batch_id = ?").run(batchId);
+  });
+}
+
+// Catches demo data left behind when an admin closes the tab instead of clicking "Avsluta demoläge"
+// (or the session simply expires) — never grows unbounded even if exit is never explicitly called.
+async function sweepOrphanedDemoData() {
+  await db.prepare(`
+    DELETE FROM trips WHERE demo_batch_id IS NOT NULL
+      AND demo_batch_id NOT IN (SELECT demo_batch_id FROM sessions WHERE demo_batch_id IS NOT NULL AND expires_at > CURRENT_TIMESTAMP)
+  `).run();
+  await db.prepare(`
+    DELETE FROM quick_tabs WHERE demo_batch_id IS NOT NULL
+      AND demo_batch_id NOT IN (SELECT demo_batch_id FROM sessions WHERE demo_batch_id IS NOT NULL AND expires_at > CURRENT_TIMESTAMP)
+  `).run();
 }
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -739,9 +830,21 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   verifyOrigin(request);
   const user = await sessionUser(request);
   const userCount = Number((await db.prepare("SELECT COUNT(*) count FROM users").get<any>())?.count);
+  return demoContext.run(Boolean(user?.demo_mode), routes);
+
+  async function routes(): Promise<void> {
+  // Demo mode never sends real invitations, never exposes real contacts/phone numbers, and can never
+  // reach global admin data — enforced in one place rather than scattered per-endpoint checks. The
+  // demo enter/exit toggle itself is deliberately not in this list.
+  if (user?.demo_mode && [
+    /^\/api\/users\/search$/, /^\/api\/contacts$/, /^\/api\/admin$/, /^\/api\/admin\/users\/\d+$/,
+    /^\/api\/friend-invitations$/, /^\/api\/trips\/\d+\/invitations$/, /^\/api\/quick-tabs\/\d+\/invitations$/,
+  ].some((pattern) => pattern.test(url.pathname))) {
+    throw new HttpError(403, "Den här funktionen är inte tillgänglig i demoläge");
+  }
 
   if (request.method === "GET" && url.pathname === "/api/session") {
-    return json(response, 200, { authenticated: Boolean(user), needsSetup: userCount === 0, version: appVersion, user: user ? publicUser(user) : null });
+    return json(response, 200, { authenticated: Boolean(user), needsSetup: userCount === 0, version: appVersion, user: user ? publicUser(user) : null, demoMode: Boolean(user?.demo_mode) });
   }
   if (request.method === "POST" && url.pathname === "/api/invitations/preview") {
     const body = await readJson(request);
@@ -805,6 +908,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "POST" && url.pathname === "/api/logout") {
     const token = cookieValue(request, "kompis_session");
     if (token) await db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId(token));
+    if (user?.demo_batch_id) await clearDemoData(String(user.demo_batch_id));
     return json(response, 200, { ok: true }, { "Set-Cookie": clearSessionCookie() });
   }
   if (request.method === "POST" && url.pathname === "/api/quick-tabs/guest-join") {
@@ -814,6 +918,22 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     if (!invitation || invitation.kind !== "quick_tab") return json(response, 404, { error: "Snabbnoteinbjudan är ogiltig eller har gått ut" });
     const tab = await db.prepare("SELECT closed_at FROM quick_tabs WHERE id = ?").get<any>(invitation.quick_tab_id);
     if (!tab || tab.closed_at) throw new HttpError(409, "Snabbnotan är avslutad");
+    // Idempotency: reopening the same invitation link in a browser that already has a valid guest
+    // session for this quick tab must reconnect, not spawn a duplicate guest with fresh claims.
+    const existingGuestToken = cookieValue(request, `kompis_quick_guest_${invitation.quick_tab_id}`);
+    if (existingGuestToken) {
+      const existingGuest = await db.prepare(`
+        SELECT id, display_name, swish_phone FROM quick_tab_guests
+        WHERE quick_tab_id = ? AND session_id = ? AND expires_at > CURRENT_TIMESTAMP
+      `).get<any>(invitation.quick_tab_id, sessionId(existingGuestToken));
+      if (existingGuest) {
+        const refreshedExpiresAt = new Date(Math.min(new Date(invitation.expires_at).getTime(), Date.now() + 14 * 86400000)).toISOString();
+        await db.prepare("UPDATE quick_tab_guests SET expires_at = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").run(refreshedExpiresAt, existingGuest.id);
+        return json(response, 200, {
+          quickTabId: Number(invitation.quick_tab_id), guest: { id: Number(existingGuest.id), name: existingGuest.display_name, swishPhone: existingGuest.swish_phone },
+        }, { "Set-Cookie": quickGuestCookie(Number(invitation.quick_tab_id), existingGuestToken) });
+      }
+    }
     const name = cleanText(body.name, "Namn", 60);
     const swishPhone = normalizePhone(body.swishPhone);
     if (!swishPhone) throw new Error("Mobil- eller Swish-nummer krävs");
@@ -877,6 +997,26 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (!user) return json(response, 401, { error: "Logga in för att fortsätta" });
 
   let match;
+  if (request.method === "POST" && url.pathname === "/api/admin/demo/enter") {
+    requireAdmin(user);
+    const token = cookieValue(request, "kompis_session");
+    let batchId = user.demo_batch_id as string | null;
+    if (!user.demo_mode || !batchId) {
+      batchId = randomBytes(12).toString("base64url");
+      await seedDemoData(user.id, batchId);
+    }
+    await db.prepare("UPDATE sessions SET demo_mode = TRUE, demo_batch_id = ? WHERE id = ?").run(batchId, sessionId(token));
+    await audit(user.id, null, "admin.demo.entered", "session", null, null);
+    return json(response, 200, { demoMode: true });
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/demo/exit") {
+    requireAdmin(user);
+    if (user.demo_batch_id) await clearDemoData(String(user.demo_batch_id));
+    const token = cookieValue(request, "kompis_session");
+    await db.prepare("UPDATE sessions SET demo_mode = FALSE, demo_batch_id = NULL WHERE id = ?").run(sessionId(token));
+    await audit(user.id, null, "admin.demo.exited", "session", null, null);
+    return json(response, 200, { demoMode: false });
+  }
   if (request.method === "GET" && url.pathname === "/api/admin") {
     requireAdmin(user);
     return json(response, 200, await adminOverview());
@@ -948,8 +1088,8 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const token = randomBytes(24).toString("base64url");
     const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
     const quickTabId = await db.transaction(async () => {
-      const result = await db.prepare("INSERT INTO quick_tabs (name, merchant, receipt_date, total_cents, created_by) VALUES (?, ?, ?, ?, ?) RETURNING id")
-        .run(cleanText(body.name || body.merchant || "Snabbnota", "Namn", 100), body.merchant ? cleanText(body.merchant, "Plats", 100) : null, validDate(body.receiptDate), totalCents, user.id);
+      const result = await db.prepare("INSERT INTO quick_tabs (name, merchant, receipt_date, total_cents, created_by, is_demo, demo_batch_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
+        .run(cleanText(body.name || body.merchant || "Snabbnota", "Namn", 100), body.merchant ? cleanText(body.merchant, "Plats", 100) : null, validDate(body.receiptDate), totalCents, user.id, Boolean(user.demo_mode), user.demo_mode ? user.demo_batch_id : null);
       const id = Number(result.lastInsertRowid);
       await db.prepare("INSERT INTO quick_tab_access (quick_tab_id, user_id, role) VALUES (?, ?, 'owner')").run(id, user.id);
       const insert = db.prepare("INSERT INTO quick_tab_items (quick_tab_id, name, amount_cents, quantity, position) VALUES (?, ?, ?, ?, ?)");
@@ -1006,7 +1146,8 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const content = await readBytes(request, receiptMaximumBytes);
     if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte bildformatet");
     safeReceiptImageDimensions(mimeType, content);
-    await db.prepare("UPDATE quick_tabs SET receipt_mime_type = ?, receipt_content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(mimeType, content, quickTabId);
+    const normalized = await normalizeReceiptImage(content);
+    await db.prepare("UPDATE quick_tabs SET receipt_mime_type = ?, receipt_content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(normalized.mimeType, normalized.content, quickTabId);
     return json(response, 201, { ok: true });
   }
   if (request.method === "GET" && match) {
@@ -1029,6 +1170,9 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     return json(response, 200, { categories: await categoryList() });
   }
   if (request.method === "POST" && url.pathname === "/api/categories") {
+    // Categories are global, not trip-scoped, so a demo session must never be able to create one —
+    // unlike trips/expenses/quick tabs, there is no is_demo boundary that would contain the side effect.
+    if (user.demo_mode) throw new HttpError(403, "Kategorier kan inte skapas i demoläge");
     const body = await readJson(request);
     const name = cleanText(body.name, "Kategorinamn", 40);
     const emoji = cleanText(body.emoji || "🧾", "Emoji", 16);
@@ -1043,6 +1187,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const category = await db.prepare("SELECT * FROM expense_categories WHERE id = ?").get<any>(Number(match[1]));
     if (!category) return json(response, 404, { error: "Kategorin finns inte" });
     if (category.is_builtin) throw new HttpError(409, "Standardkategorier kan inte ändras");
+    if (user.demo_mode) throw new HttpError(403, "Kategorier kan inte ändras i demoläge");
     if (!user.is_admin && Number(category.created_by) !== Number(user.id)) throw new HttpError(403, "Du kan bara ändra egna kategorier");
     const body = await readJson(request);
     const name = body.name === undefined ? category.name : cleanText(body.name, "Kategorinamn", 40);
@@ -1094,8 +1239,8 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "POST" && url.pathname === "/api/trips") {
     const body = await readJson(request);
     return db.transaction(async () => {
-      const result = await db.prepare("INSERT INTO trips (name, start_date, end_date, created_by) VALUES (?, ?, ?, ?) RETURNING id")
-        .run(cleanText(body.name, "Resans namn", 80), validDate(body.startDate), validDate(body.endDate), user.id);
+      const result = await db.prepare("INSERT INTO trips (name, start_date, end_date, created_by, is_demo, demo_batch_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
+        .run(cleanText(body.name, "Resans namn", 80), validDate(body.startDate), validDate(body.endDate), user.id, Boolean(user.demo_mode), user.demo_mode ? user.demo_batch_id : null);
       const tripId = Number(result.lastInsertRowid);
       await db.prepare("INSERT INTO trip_access (trip_id, user_id, role) VALUES (?, ?, 'owner')").run(tripId, user.id);
       await db.prepare("INSERT INTO participants (trip_id, name, swish_phone, user_id) VALUES (?, ?, ?, ?)").run(tripId, user.display_name, user.swish_phone, user.id);
@@ -1216,9 +1361,20 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1);
     const mimeType = contentType.trim().toLowerCase();
     if (!receiptMimeTypes.has(mimeType)) throw new HttpError(415, "Kvitton måste vara JPG, PNG, WebP eller PDF");
-    const content = await readBytes(request, receiptMaximumBytes);
-    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda filformatet");
-    const fileName = safeReceiptName(request.headers["x-file-name"]);
+    const uploaded = await readBytes(request, receiptMaximumBytes);
+    if (!receiptContentMatches(mimeType, uploaded)) throw new HttpError(415, "Filens innehåll matchar inte det valda filformatet");
+    let content = uploaded;
+    let storedMimeType = mimeType;
+    let fileName = safeReceiptName(request.headers["x-file-name"]);
+    if (receiptImageMimeTypes.has(mimeType)) {
+      // Never trust client-side compression: re-validate dimensions and re-normalize with Sharp
+      // before anything gets stored, regardless of what the uploader's browser already did.
+      safeReceiptImageDimensions(mimeType, uploaded);
+      const normalized = await normalizeReceiptImage(uploaded);
+      content = normalized.content;
+      storedMimeType = normalized.mimeType;
+      fileName = `${fileName.replace(/\.\w+$/, "")}.jpg`;
+    }
     const receiptId = await db.transaction(async () => {
       // Lock the expense row so two concurrent uploads on the same expense can't both pass the count
       // check before either insert commits and end up exceeding receiptMaximumCount.
@@ -1226,7 +1382,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       const receiptCount = Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE expense_id = ?").get<any>(expense.id))?.count || 0);
       if (receiptCount >= receiptMaximumCount) throw new HttpError(409, `Högst ${receiptMaximumCount} kvitton per utgift`);
       const result = await db.prepare("INSERT INTO expense_receipts (expense_id, trip_id, file_name, mime_type, byte_size, content, created_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
-        .run(expense.id, expense.trip_id, fileName, mimeType, content.length, content, user.id);
+        .run(expense.id, expense.trip_id, fileName, storedMimeType, content.length, content, user.id);
       return Number(result.lastInsertRowid);
     });
     await audit(user.id, expense.trip_id, "receipt.created", "receipt", receiptId, { expenseId: expense.id, fileName, byteSize: content.length });
@@ -1315,6 +1471,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     await audit(user.id, payment.trip_id, "payment.voided", "payment", payment.id, { amountCents: payment.amount_cents }); return json(response, 200, { ok: true });
   }
   return json(response, 404, { error: "Sidan finns inte" });
+  }
 }
 
 const mimeTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".png": "image/png", ".ico": "image/x-icon" };
@@ -1340,6 +1497,8 @@ function serveStatic(response: ServerResponse, pathname: string) {
 }
 
 await db.prepare("DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP").run();
+await sweepOrphanedDemoData();
+setInterval(() => { void sweepOrphanedDemoData(); }, 60 * 60000).unref();
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
   try {

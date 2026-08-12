@@ -33,9 +33,17 @@ export type ReceiptSuggestion = {
   items: Array<{ name: string; quantity: number; amount: string }>;
 };
 
-const ignoredMerchantWords = /^(kassa)?kvitto$|^g[äa]stnota$|^välkommen|^tack för|^org\.?\s*nr|^datum|^tid|^tel|^telefon|^www\.|^moms|^total|^summa|^att betala|^butik\s*nr|^[^\s]*örhandsvisning|tillbaka/i;
+const ignoredMerchantWords = /^(kassa)?kvitto$|^g[äa]stnota$|^välkommen|^tack för|^org\.?\s*nr|^datum|^tid|^tel|^telefon|^www\.|^moms|^total|^summa|^att betala|^butik\s*nr|^[^\s]*örhandsvisning|tillbaka|^bord\b|^kassa\b|^kassör|^beställning|^order\b|^referens|^transaktions?[-\s]?id|^antal\s+g[äa]ster|^g[äa]ster\b|^swish\b/i;
 const totalWords = /att\s+betala|betalt|kortbelopp|belopp\s+sek|totalt?|f[öo]tatt|summa/i;
 const excludedTotalWords = /moms|vat|växel|change|rabatt|subtotal|delsumma/i;
+// Receipt structure/metadata that must never become a purchased row, even when a nearby unrelated
+// price gets merged onto it by the multi-line "name, then price on the next line" OCR heuristic.
+// Word-boundaried so real product names are never caught (e.g. a wine called "Bordeaux" must not
+// match \bbord\b).
+const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b/i;
+// Discounts/coupons reduce the total rather than describing something purchased; letting them
+// become an "item" both mislabels them and throws off the exact-total reconciliation.
+const nonItemAdjustmentWords = /\brabatt\b|\bkupong\b|\bcoupon\b/i;
 
 type ReceiptPass = { text: string; confidence: number; suggestion: ReceiptSuggestion };
 
@@ -178,14 +186,14 @@ function receiptItems(lines: string[]) {
     const hasProductText = (line.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2;
     const endsWithAmount = /\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line);
     const nextIsAmount = /^\s*\d{1,6}[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(next);
-    if (hasProductText && !endsWithAmount && nextIsAmount) {
+    if (hasProductText && !endsWithAmount && nextIsAmount && !metadataLineWords.test(line)) {
       itemLines.push(`${line} ${next}`);
       index += 1;
     } else itemLines.push(line);
   }
   const seen = new Set<string>();
   for (const line of itemLines) {
-    if (totalWords.test(line) || excludedTotalWords.test(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
+    if (totalWords.test(line) || excludedTotalWords.test(line) || metadataLineWords.test(line) || nonItemAdjustmentWords.test(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
     const amounts = amountCandidates(line);
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
     const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s+|\s*\*\s+)/;
@@ -671,8 +679,12 @@ async function rectifiedPaperImage(data: Buffer, width: number, height: number, 
     .normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 1 }).png().toBuffer();
 }
 
+// Matches the dimension cap enforced in src/server.ts safeReceiptImageDimensions — large enough for
+// an unresized high-end phone photo (~50 MP), small enough to keep decompression-bomb protection real.
+export const maxReceiptInputPixels = 50_000_000;
+
 export async function prepareReceiptImages(content: Buffer) {
-  const analyzed = await sharp(content, { limitInputPixels: 20_000_000, failOn: "error" })
+  const analyzed = await sharp(content, { limitInputPixels: maxReceiptInputPixels, failOn: "error" })
     .rotate().flatten({ background: "#ffffff" })
     .resize({ width: 1200, height: 2000, fit: "inside", withoutEnlargement: true })
     .png().toBuffer();
@@ -761,6 +773,25 @@ export async function recognizeReceipt(content: Buffer) {
   };
   logOcr({ scanId, stage: "complete", source: result.source, aiStatus: aiAttempt.status, aiRetried: Boolean(verificationAttempt), aiVerificationStatus: verificationAttempt?.status, durationMs: Date.now() - startedAt, items: result.suggestion.items.length, balanced: !result.needsReview, rectified: images.rectified });
   return result;
+}
+
+/**
+ * Re-normalizes an already-validated image before it is stored, regardless of what client-side
+ * compression already did (never trust the client): strips metadata (Sharp drops EXIF/GPS/etc.
+ * unless withMetadata() is called), auto-orients, caps the long edge at a size that stays clearly
+ * inspectable, and re-encodes as JPEG so stored receipts have a consistent, bounded footprint.
+ */
+export async function normalizeReceiptImage(content: Buffer): Promise<{ content: Buffer; mimeType: string }> {
+  try {
+    const image = sharp(content, { limitInputPixels: maxReceiptInputPixels, failOn: "error" }).rotate();
+    const metadata = await image.metadata();
+    const longEdge = Math.max(metadata.width || 0, metadata.height || 0);
+    const resized = longEdge > 3000 ? image.resize({ width: 3000, height: 3000, fit: "inside", withoutEnlargement: true }) : image;
+    const normalized = await resized.jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer();
+    return { content: normalized, mimeType: "image/jpeg" };
+  } catch {
+    throw new Error("Bilden kunde inte bearbetas. Prova ett annat foto.");
+  }
 }
 
 export async function closeReceiptOcr() {

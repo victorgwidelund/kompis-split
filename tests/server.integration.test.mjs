@@ -259,10 +259,66 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       Victor: 5001, "Erik Gäst": 5000, Anna: 5000,
     });
     assert.equal(guestClaims.payload.quickTab.personTotals.find((item) => item.name === "Erik Gäst").swishPhone, "+46701112233");
+
+    // Re-opening the same invitation link must reconnect the existing guest, not spawn a duplicate.
+    const guestRejoin = await request("/api/quick-tabs/guest-join", {
+      method: "POST", cookie: guestCookie, body: { token: quickTab.payload.invitation.token, name: "Erik Gäst", swishPhone: "0701112233" },
+    });
+    assert.equal(guestRejoin.response.status, 200, JSON.stringify(guestRejoin.payload));
+    assert.equal(guestRejoin.payload.guest.id, guestJoin.payload.guest.id, "reopening the invitation link must reconnect the same guest, not create a new one");
+    const afterRejoin = await request(`/api/quick-tabs/${quickTabId}`, { cookie: guestCookie });
+    assert.equal(afterRejoin.payload.quickTab.members.filter((member) => member.name === "Erik Gäst").length, 1);
+    assert.equal(afterRejoin.payload.quickTab.claimedCents, 15001, "the guest's existing claim must survive reopening the link");
+
+    // Re-opening the same invitation link while already an authenticated member must also be idempotent.
+    const memberRejoin = await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token: quickTab.payload.invitation.token } });
+    assert.equal(memberRejoin.response.status, 200, JSON.stringify(memberRejoin.payload));
+    const afterMemberRejoin = await request(`/api/quick-tabs/${quickTabId}`, { cookie: ownerCookie });
+    assert.equal(afterMemberRejoin.payload.quickTab.members.filter((member) => member.name === "Anna").length, 1);
+
     const memberCannotCloseQuickTab = await request(`/api/quick-tabs/${quickTabId}/close`, { method: "POST", cookie: memberCookie, body: { closed: true } });
     assert.equal(memberCannotCloseQuickTab.response.status, 403);
     const closedQuickTab = await request(`/api/quick-tabs/${quickTabId}/close`, { method: "POST", cookie: ownerCookie, body: { closed: true } });
     assert.ok(closedQuickTab.payload.quickTab.closedAt);
+    // The creator must always be able to generate a fresh invitation, even while the tab is closed
+    // (e.g. to have it ready before reopening it later); only actually joining a closed tab is blocked.
+    const reinviteAfterClose = await request(`/api/quick-tabs/${quickTabId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
+    assert.equal(reinviteAfterClose.response.status, 201, JSON.stringify(reinviteAfterClose.payload));
+    assert.notEqual(reinviteAfterClose.payload.invitation.token, quickTab.payload.invitation.token);
+    const joinClosedTabBlocked = await request("/api/quick-tabs/guest-join", {
+      method: "POST", body: { token: reinviteAfterClose.payload.invitation.token, name: "Sen Gäst", swishPhone: "0701119999" },
+    });
+    assert.equal(joinClosedTabBlocked.response.status, 409);
+
+    // Swedish characters must survive unmangled through validation, storage, and every API response —
+    // participant names, expense titles, and quick-tab merchant/item names alike.
+    const swedishParticipant = await request(`/api/trips/${tripId}/participants`, { method: "POST", cookie: ownerCookie, body: { name: "Åsa Öhman-Ångström", swishPhone: "0709998877" } });
+    assert.equal(swedishParticipant.response.status, 201, JSON.stringify(swedishParticipant.payload));
+    const addedSwedishParticipant = swedishParticipant.payload.trip.participants.find((item) => item.name === "Åsa Öhman-Ångström");
+    assert.ok(addedSwedishParticipant, "participant name with å/ä/ö must round-trip exactly");
+    const swedishExpense = await request(`/api/trips/${tripId}/expenses`, {
+      method: "POST", cookie: ownerCookie,
+      body: { title: "Räksmörgås, Öl och Blåbärspaj", amount: "3.00", payerId: ownerParticipant.id, category: "food", splitMode: "equal", entries: [{ participantId: ownerParticipant.id, value: 1 }] },
+    });
+    assert.equal(swedishExpense.response.status, 201, JSON.stringify(swedishExpense.payload));
+    const swedishExpenseRecord = swedishExpense.payload.trip.expenses.find((item) => item.title === "Räksmörgås, Öl och Blåbärspaj");
+    assert.ok(swedishExpenseRecord, "expense title with å/ä/ö must round-trip exactly");
+    // Void it again immediately — this block only proves the round-trip, later totalCents assertions
+    // assume the trip's earlier expense state.
+    await request(`/api/expenses/${swedishExpenseRecord.id}`, { method: "DELETE", cookie: ownerCookie, body: {} });
+    const swedishQuickTab = await request("/api/quick-tabs", {
+      method: "POST", cookie: ownerCookie,
+      body: { name: "Ångbåtsbryggan", merchant: "Ångbåtsbryggans Café", total: "189.00", items: [{ name: "Köttbullar med lingon", quantity: 2, amount: "189.00" }] },
+    });
+    assert.equal(swedishQuickTab.response.status, 201, JSON.stringify(swedishQuickTab.payload));
+    assert.equal(swedishQuickTab.payload.quickTab.name, "Ångbåtsbryggan");
+    assert.equal(swedishQuickTab.payload.quickTab.merchant, "Ångbåtsbryggans Café");
+    assert.equal(swedishQuickTab.payload.quickTab.items[0].name, "Köttbullar med lingon");
+    const rereadSwedishQuickTab = await request(`/api/quick-tabs/${swedishQuickTab.payload.quickTab.id}`, { cookie: ownerCookie });
+    assert.equal(rereadSwedishQuickTab.payload.quickTab.items[0].name, "Köttbullar med lingon", "Swedish text must survive a fresh read from the database, not just an in-memory echo");
+    const swedishSearch = await request(`/api/users/search?q=${encodeURIComponent("Öhman")}`, { cookie: ownerCookie });
+    assert.deepEqual(swedishSearch.payload.users, [], "Åsa is a guest participant, not a registered user, so the Swedish-character search itself must still work without erroring");
+
     const quickTabList = await request("/api/quick-tabs", { cookie: memberCookie });
     assert.equal(quickTabList.payload.quickTabs[0].myClaimCount, 1);
 
@@ -275,7 +331,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     });
     assert.equal(rejectedArchivedCategory.response.status, 400);
 
-    const receiptBytes = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("kompis-split-test")]);
+    // A real (tiny) PNG — the server re-normalizes every stored image with Sharp, so it must be
+    // genuinely decodable, not just a valid magic-byte signature.
+    const receiptBytes = Buffer.from("89504e470d0a1a0a0000000d4948445200000020000000200802000000fc18eda30000000970485973000003e8000003e801b57b526b00000031494441544889edd0310d000008c030fc9b0609bbf85a034b36fb6c048a45c9a26451b22859942c4a16258b9245e97dd1018b55f4a62fd707540000000049454e44ae426082", "hex");
     const receiptUploadResponse = await fetch(`${baseUrl}/api/expenses/${expense.payload.trip.expenses[0].id}/receipts`, {
       method: "POST",
       headers: { Cookie: ownerCookie, Origin: baseUrl, "Content-Type": "image/png", "X-File-Name": encodeURIComponent("middagskvitto.png") },
@@ -285,9 +343,23 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(receiptUploadResponse.status, 201, JSON.stringify(receiptUpload));
     assert.equal(receiptUpload.trip.expenses[0].receipts.length, 1);
     const receiptId = receiptUpload.trip.expenses[0].receipts[0].id;
+    // The server always re-encodes stored receipt images as normalized JPEG (strips metadata, caps
+    // dimensions) regardless of the uploaded format, so the download is a JPEG, not a byte-identical PNG.
+    assert.equal(receiptUpload.trip.expenses[0].receipts[0].fileName, "middagskvitto.jpg");
+    assert.equal(receiptUpload.trip.expenses[0].receipts[0].mimeType, "image/jpeg");
+    // Backend protection must never trust the client: correct magic bytes with an otherwise
+    // malformed/undecodable body must be rejected, not silently stored as-is.
+    const corruptImageBytes = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("this-is-not-a-real-png-body")]);
+    const corruptUploadResponse = await fetch(`${baseUrl}/api/expenses/${expense.payload.trip.expenses[0].id}/receipts`, {
+      method: "POST",
+      headers: { Cookie: ownerCookie, Origin: baseUrl, "Content-Type": "image/png", "X-File-Name": "trasig.png" },
+      body: corruptImageBytes,
+    });
+    assert.ok([413, 415].includes(corruptUploadResponse.status), `a correctly-signed but undecodable image must be rejected (413 or 415), not stored — got ${corruptUploadResponse.status}`);
     const downloadedReceipt = await fetch(`${baseUrl}/api/receipts/${receiptId}`, { headers: { Cookie: ownerCookie } });
-    assert.equal(downloadedReceipt.headers.get("content-type"), "image/png");
-    assert.deepEqual(Buffer.from(await downloadedReceipt.arrayBuffer()), receiptBytes);
+    assert.equal(downloadedReceipt.headers.get("content-type"), "image/jpeg");
+    const downloadedBytes = Buffer.from(await downloadedReceipt.arrayBuffer());
+    assert.equal(downloadedBytes.subarray(0, 3).toString("hex"), "ffd8ff", "stored receipt must be a real, re-encoded JPEG");
     const outsiderReceiptRead = await request(`/api/receipts/${receiptId}`, { cookie: erikCookie });
     assert.equal(outsiderReceiptRead.response.status, 403);
     const memberCannotDeleteReceipt = await request(`/api/receipts/${receiptId}`, { method: "DELETE", cookie: memberCookie, body: {} });
@@ -371,6 +443,69 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(promoted.payload.user.isAdmin, true);
     const demoted = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isAdmin: false } });
     assert.equal(demoted.payload.user.isAdmin, false);
+
+    // Demo mode: only an admin may enter, server-enforced regardless of what the client claims.
+    const memberCannotEnterDemo = await request("/api/admin/demo/enter", { method: "POST", cookie: memberCookie, body: {} });
+    assert.equal(memberCannotEnterDemo.response.status, 403);
+    const realTripId = tripId;
+    const enteredDemo = await request("/api/admin/demo/enter", { method: "POST", cookie: ownerCookie, body: {} });
+    assert.equal(enteredDemo.response.status, 200, JSON.stringify(enteredDemo.payload));
+    assert.equal(enteredDemo.payload.demoMode, true);
+    const demoSession = await request("/api/session", { cookie: ownerCookie });
+    assert.equal(demoSession.payload.demoMode, true);
+
+    // Demo dashboard shows only fictional seeded trips, never the admin's real ones.
+    const demoDashboard = await request("/api/dashboard", { cookie: ownerCookie });
+    assert.deepEqual(demoDashboard.payload.trips.map((item) => item.name).sort(), ["Weekend i Göteborg", "Åre 2026"]);
+    assert.deepEqual(demoDashboard.payload.contacts, [], "real contacts must never surface while in demo mode");
+    const demoTripId = demoDashboard.payload.trips.find((item) => item.name === "Weekend i Göteborg").id;
+    const demoTrip = await request(`/api/trips/${demoTripId}`, { cookie: ownerCookie });
+    assert.equal(demoTrip.response.status, 200);
+    assert.equal(demoTrip.payload.trip.participants.length, 5);
+    assert.equal(demoTrip.payload.trip.expenses.length, 5);
+
+    // A demo session must never reach a real trip, even one the admin genuinely owns — loadTrip
+    // treats the context mismatch exactly like the trip not existing (404), not a bare 403, so it
+    // doesn't even confirm the real trip's existence to a demo-context caller.
+    const demoCannotReadRealTrip = await request(`/api/trips/${realTripId}`, { cookie: ownerCookie });
+    assert.equal(demoCannotReadRealTrip.response.status, 404);
+    // Writes that go straight through requireAccess (not loadTrip) still surface as 403.
+    const demoCannotArchiveRealTrip = await request(`/api/trips/${realTripId}/archive`, { method: "POST", cookie: ownerCookie, body: { archived: true } });
+    assert.equal(demoCannotArchiveRealTrip.response.status, 403);
+
+    // Demo mode must never expose real contacts, send real invitations, or touch global admin data.
+    for (const blocked of [
+      () => request("/api/users/search?q=an", { cookie: ownerCookie }),
+      () => request("/api/contacts", { cookie: ownerCookie }),
+      () => request("/api/contacts", { method: "POST", cookie: ownerCookie, body: { userId: memberId } }),
+      () => request("/api/admin", { cookie: ownerCookie }),
+      () => request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isAdmin: true } }),
+      () => request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} }),
+      () => request(`/api/trips/${demoTripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} }),
+    ]) {
+      const result = await blocked();
+      assert.equal(result.response.status, 403, JSON.stringify(result.payload));
+    }
+
+    // A trip created while demonstrating the app is isolated the same way as the seeded data.
+    const demoCreatedTrip = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Admin-skapad demoresa" } });
+    assert.equal(demoCreatedTrip.response.status, 201);
+    assert.equal(demoCreatedTrip.payload.trip.participants.length, 1);
+    const realDashboardBeforeExit = await request("/api/dashboard", { cookie: memberCookie });
+    assert.equal(realDashboardBeforeExit.payload.trips.some((item) => item.name === "Admin-skapad demoresa"), false, "another user's real dashboard must never see demo trips");
+
+    // Exiting demo mode discards every demo row and immediately restores the real context.
+    const exitedDemo = await request("/api/admin/demo/exit", { method: "POST", cookie: ownerCookie, body: {} });
+    assert.equal(exitedDemo.response.status, 200, JSON.stringify(exitedDemo.payload));
+    assert.equal(exitedDemo.payload.demoMode, false);
+    const afterExitSession = await request("/api/session", { cookie: ownerCookie });
+    assert.equal(afterExitSession.payload.demoMode, false);
+    const afterExitDashboard = await request("/api/dashboard", { cookie: ownerCookie });
+    assert.equal(afterExitDashboard.payload.trips.some((item) => item.name === "Weekend i Göteborg"), false);
+    assert.equal(afterExitDashboard.payload.trips.some((item) => item.id === realTripId), true, "the admin's real trips must be back after exiting demo mode");
+    const demoTripGoneAfterExit = await request(`/api/trips/${demoTripId}`, { cookie: ownerCookie });
+    assert.equal(demoTripGoneAfterExit.response.status, 404, "the demo trip's data must actually be deleted, not just hidden");
+
     const disabled = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isDisabled: true } });
     assert.equal(disabled.response.status, 200);
     const disabledSession = await request("/api/dashboard", { cookie: memberCookie });
@@ -391,7 +526,8 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   const revision = (await verification.query("SELECT payload_json FROM audit_log WHERE action = 'expense.updated'")).rows[0].payload_json;
   assert.equal(Number(revision.previous.amountCents), 10001);
   assert.deepEqual(revision.previous.shares.map((share) => Number(share.amountCents)), [5001, 5000]);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
+  // 1 from the original "Middag uppdaterad" void + 1 from voiding the Swedish-characters test expense.
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 2);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'payment.voided'")).rows[0].count), 1);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('trip.deleted', 'trip.undeleted')")).rows[0].count), 2);
   // 1 from the original upload + 5 from the concurrent-upload race-condition test (the cap rejects the 6th).
@@ -401,8 +537,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 6);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 7);
+  // 1 from "Middag på Kajen" + 1 from the Swedish-characters test quick tab ("Ångbåtsbryggan").
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 2);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tab_guests")).rows[0].count), 1);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tab_claims")).rows[0].count), 3);
   assert.equal(Number((await verification.query("SELECT quantity FROM quick_tab_items WHERE name = 'Lager'")).rows[0].quantity), 2);

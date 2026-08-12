@@ -11,6 +11,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Sökbara användare, kontakter och gästdeltagare
 - Vänner direkt på startsidan
 - Globalt adminläge för alla användare, resor, kontostatusar och senaste aktivitet
+- Admin-only demoläge: visa appen med fiktiva exempeldata utan att röra riktiga konton, resor eller kontakter
 - Aktiva och arkiverade resor samt återställningsbar papperskorg utan att ekonomiska poster försvinner
 - Lika, procentuell, exakt och viktad deterministisk fördelning
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
@@ -96,9 +97,9 @@ Se [DEPLOYMENT.md](DEPLOYMENT.md) för den fullständiga produktionstopologin (C
 
 `postgres-backup` gör omedelbart och därefter dagligen en PostgreSQL custom-format-backup. Retention styrs av `BACKUP_RETENTION_DAYS`. Kopiera även `/mnt/user/kompis_split/backups` till en annan disk eller maskin via ditt vanliga Unraid-backupflöde.
 
-Kvitton lagras i PostgreSQL och följer därför med i samma backup. JPG, PNG, WebP och PDF stöds, högst 8 MB per fil och fem filer per utgift. När en arkiverad resa flyttas till papperskorgen raderas dess kvittofiler permanent; utgifter, betalningar och audit-logg behålls så att den ekonomiska historiken fortfarande kan granskas och resan återställas.
+Kvitton lagras i PostgreSQL och följer därför med i samma backup. JPG, PNG, WebP och PDF stöds, högst 20 MB per fil (efter eventuell komprimering i webbläsaren) och fem filer per utgift. När en arkiverad resa flyttas till papperskorgen raderas dess kvittofiler permanent; utgifter, betalningar och audit-logg behålls så att den ekonomiska historiken fortfarande kan granskas och resan återställas.
 
-När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Appen skickar bilden över det interna Compose-nätverket till den lokala PaddleOCR-VL 1.6-modellen och jämför resultatet med Tesseract och exakt öresmatematik. Ett inkonsekvent AI-resultat kontrolleras automatiskt en andra gång. Bilden lämnar aldrig Unraid-servern. Om PaddleOCR-tjänsten eller GPU:n inte är tillgänglig används Tesseract automatiskt. Kontrollera alltid belopp, datum, namn och artikelrader innan du sparar. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt.
+När en ny utgift skapas kan ett JPG-, PNG- eller WebP-kvitto fotograferas eller väljas. Stora foton (upp till 50 MB original) komprimeras automatiskt i webbläsaren till ungefär 3200 px långsida och JPEG-kvalitet 0,85 innan uppladdning — du behöver aldrig ändra storlek manuellt. HEIC/HEIF-bilder stöds inte direkt; appen visar då ett tydligt felmeddelande. Servern litar aldrig på webbläsarens komprimering och normaliserar varje bildkvitto igen (rätar upp, begränsar till 3000 px långsida, komprimerar) innan det sparas. Appen skickar den förberedda bilden över det interna Compose-nätverket till den lokala PaddleOCR-VL 1.6-modellen och jämför resultatet med Tesseract och exakt öresmatematik, inklusive filtrering av kvittometadata (t.ex. bordsnummer, kassörsnummer) så att sådant inte blir en felaktig artikelrad. Ett inkonsekvent AI-resultat kontrolleras automatiskt en andra gång. Bilden lämnar aldrig Unraid-servern. Om PaddleOCR-tjänsten eller GPU:n inte är tillgänglig används Tesseract automatiskt. Kontrollera alltid belopp, datum, namn och artikelrader innan du sparar. PDF-kvitton kan fortfarande bifogas efter att utgiften skapats, men avläses inte automatiskt och komprimeras inte.
 
 Testa återställning på en separat databas:
 

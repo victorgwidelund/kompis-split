@@ -1,12 +1,10 @@
 import type { OcrAiStatus } from "../../types/models";
+import { validateOriginalReceiptFile } from "./imagePrep";
 
 export const acceptedReceiptImages = ["image/jpeg", "image/png", "image/webp"];
-export const maxReceiptBytes = 8 * 1024 * 1024;
 
 export function validateReceiptImage(file: File): string {
-  if (file.size > maxReceiptBytes) return "Välj en bild på högst 8 MB.";
-  if (!acceptedReceiptImages.includes(file.type)) return "Välj en JPG-, PNG- eller WebP-bild.";
-  return "";
+  return validateOriginalReceiptFile(file);
 }
 
 export function receiptAiStatus(ai?: OcrAiStatus): string {

@@ -91,6 +91,100 @@ test("receipt rows and quantities are extracted for quick tab claiming", () => {
   ]);
 });
 
+test("Bord 17 is table metadata, not a purchased article, even when a nearby price gets merged onto it", () => {
+  const suggestion = parseReceiptText(`
+    RESTAURANG SOLGLÄNTAN
+    Storgatan 12
+    Bord 17
+    189,00
+    1 x Stor stark 79,00
+    1 x Coca-Cola 39,00
+    Moms 12% 30,44
+    ATT BETALA 307,00
+    Kort Godkänt
+  `);
+  assert.equal(suggestion.title, "RESTAURANG SOLGLÄNTAN");
+  assert.equal(suggestion.amount, "307.00");
+  assert.equal(suggestion.items.some((item) => /bord/i.test(item.name)), false, "Bord 17 must never become an item");
+  assert.deepEqual(suggestion.items, [
+    { name: "Stor stark", quantity: 1, amount: "79.00" },
+    { name: "Coca-Cola", quantity: 1, amount: "39.00" },
+  ]);
+});
+
+test("Swedish receipt metadata (kassör, beställning, referens, swish) never becomes an item", () => {
+  const suggestion = parseReceiptText(`
+    KAFÉ LINNÉA
+    Kassör 4
+    Beställning 145
+    Referens 88213
+    2 x Kanelbulle 79,00
+    1 x Kaffe 35,00
+    Swish
+    SUMMA 114,00
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Kanelbulle", quantity: 2, amount: "79.00" },
+    { name: "Kaffe", quantity: 1, amount: "35.00" },
+  ]);
+});
+
+test("grocery receipt: discounts and coupons are excluded from items, deposits are kept", () => {
+  const suggestion = parseReceiptText(`
+    ICA SUPERMARKET
+    Kundvagn 3
+    Mjölk 15,90
+    Bröd 32,50
+    2 x Räksmörgås 89,00 178,00
+    Rabatt -10,00
+    Pant burk 2,00
+    Moms 12% 25,15
+    SUMMA 216,90
+  `);
+  assert.equal(suggestion.items.some((item) => /rabatt/i.test(item.name)), false, "a discount line must never become a purchased item");
+  assert.deepEqual(suggestion.items, [
+    { name: "Mjölk", quantity: 1, amount: "15.90" },
+    { name: "Bröd", quantity: 1, amount: "32.50" },
+    { name: "Räksmörgås", quantity: 2, amount: "178.00" },
+    { name: "Pant burk", quantity: 1, amount: "2.00" },
+  ]);
+});
+
+test("bar receipt: drinks and an order/table number are told apart", () => {
+  const suggestion = parseReceiptText(`
+    ÅNGBÅTSBRYGGANS PUB
+    Bord 4
+    3 x Öl 79,00 237,00
+    2 x Cider 69,00 138,00
+    1 x Blåbärspaj 65,00
+    Kort
+    ATT BETALA 440,00
+  `);
+  assert.equal(suggestion.items.some((item) => /bord/i.test(item.name)), false, "Bord 4 must never become an item");
+  assert.deepEqual(suggestion.items, [
+    { name: "Öl", quantity: 3, amount: "237.00" },
+    { name: "Cider", quantity: 2, amount: "138.00" },
+    { name: "Blåbärspaj", quantity: 1, amount: "65.00" },
+  ]);
+});
+
+test("difficult OCR: Swedish characters, split name/price lines and mixed-in metadata still parse correctly", () => {
+  const suggestion = parseReceiptText(`
+    ÅNGBÅTSBRYGGANS KAFÉ
+    Bord 9
+    2 x Köttbullar
+    1 x Räksmörgås
+    139,00
+    89,00
+    Moms 25% 45,80
+    TOTALT 228,00
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Köttbullar", quantity: 2, amount: "139.00" },
+    { name: "Räksmörgås", quantity: 1, amount: "89.00" },
+  ]);
+});
+
 test("compact quantity prefixes are kept and payment rows are excluded", () => {
   const suggestion = parseReceiptText(`
     KVÄLLSKROGEN

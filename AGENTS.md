@@ -17,6 +17,8 @@
 - If a separate native mobile frontend is approved later, use React Native, Expo, and TypeScript. Never place secrets or privileged operations in any client.
 - The backend is TypeScript and must pass strict typechecking before release.
 - The current database is PostgreSQL. Every schema change uses ordered, forward-only migrations recorded in `schema_migrations`.
+- Any foreign key into `participants(id)` (or another row type that can eventually be hard-deleted, e.g. a demo batch) must use `ON DELETE CASCADE`. This was a real, latent bug: several such keys lacked it because nothing had ever hard-deleted a trip before admin demo mode did.
+- Demo mode (and anything similar in the future) is isolated with an `is_demo`/`demo_batch_id` flag reused across existing tables and request-scoped `AsyncLocalStorage` context (see `demoContext` in `src/server.ts`), not a parallel data model or a client-supplied flag. Keep authorization checks (`requireAccess`, `quickTabAccess`) as the single place that enforces the boundary rather than adding per-endpoint checks.
 - Preserve existing infrastructure instead of replacing it for novelty. Explain the need, data impact, migration stages, and rollback before major architecture changes.
 
 ## Financial correctness
