@@ -169,14 +169,30 @@ function merchantName(lines: string[]) {
     const candidate = line.replace(/^[^A-Za-zÅÄÖåäö]+|[^A-Za-zÅÄÖåäö0-9)&'. -]+$/g, "").slice(0, 60);
     if (candidate) candidates.push(candidate);
   }
-  return candidates.sort((first, second) => merchantNameScore(second) - merchantNameScore(first))[0] || null;
+  // A merchant's name is often printed twice near the top of a Swedish receipt (once in the header,
+  // again just above the order/table details), while a street address only appears once — a candidate
+  // repeated verbatim is a much stronger signal of being the actual business name than whichever line
+  // happens to have marginally more letters (confirmed against a real receipt: "Strandbryggan" printed
+  // twice lost to the single-occurrence "Stranvägskajen 27" on letter count alone before this).
+  const repeatCounts = new Map<string, number>();
+  for (const candidate of candidates) {
+    const key = candidate.toLocaleLowerCase("sv-SE");
+    repeatCounts.set(key, (repeatCounts.get(key) || 0) + 1);
+  }
+  return candidates.sort((first, second) => {
+    const repeats = (repeatCounts.get(second.toLocaleLowerCase("sv-SE")) || 1) - (repeatCounts.get(first.toLocaleLowerCase("sv-SE")) || 1);
+    return repeats || merchantNameScore(second) - merchantNameScore(first);
+  })[0] || null;
 }
 
 function merchantNameScore(value: string) {
   const letters = (value.match(/[A-Za-zÅÄÖåäö]/g) || []).length;
+  const digits = (value.match(/\d/g) || []).length;
   const businessWord = /restaurang|restaurant|ste[a-z]{1,3}house|hotell|hotel|café|cafe|bistro|bar\b|grill|krog|butik/i.test(value);
   const isolatedLetters = (value.match(/(?:^|\s)[A-Za-zÅÄÖåäö](?=\s|$)/g) || []).length;
-  return letters + (businessWord ? 100 : 0) - isolatedLetters * 4;
+  // A street address almost always has a number in it (house number, postcode); a business name
+  // almost never does, so a small per-digit penalty helps tell them apart when letter counts are close.
+  return letters + (businessWord ? 100 : 0) - isolatedLetters * 4 - digits * 3;
 }
 
 function receiptTotal(lines: string[]) {
