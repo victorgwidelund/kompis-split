@@ -80,6 +80,34 @@ Nginx och appcontainern (vanligt internt), spelar det ingen roll — det är
 protokollet mellan *klient och Cloudflare/Nginx* som avgör om webbläsaren
 respekterar `Secure`, inte det interna hoppet.
 
+## Kvittouppladdning och request-storlek genom proxyn
+
+Kvittobilder komprimeras i webbläsaren innan uppladdning (mål: max ~3200 px
+långsida, JPEG-kvalitet ~0,85), så de flesta uppladdningar blir en bit under
+appens egen hårda gräns på 20 MB per fil (`receiptMaximumBytes` i
+`src/server.ts`, delad mellan bildkvitton och PDF-kvitton). Klientkomprimeringen
+är bara en optimering — appen litar aldrig på den och normaliserar varje
+bildkvitto igen med Sharp innan det lagras, oavsett vad webbläsaren redan
+gjort. Om komprimeringen misslyckas (gammal webbläsare, trasig bild) tillåts
+originalfilen upp till 50 MB genom validering innan uppladdning; appens
+20 MB-gräns gäller ändå för själva request-kroppen.
+
+**Kontrollera att din reverse proxy inte stoppar detta innan det når appen:**
+
+- **Nginx Proxy Manager**: standardgränsen för `client_max_body_size` i det
+  underliggande Nginx är ofta bara 1 MB om inget annat är satt. Lägg till i
+  proxy host-inställningens "Custom Nginx Configuration"-fält:
+
+  ```nginx
+  client_max_body_size 20m;
+  ```
+
+- **Cloudflare**: gratis/pro-planer tillåter normalt betydligt mer än 20 MB
+  per request (ofta 100 MB), så det är sällan en begränsande faktor här —
+  men kontrollera din plans gräns om stora kvitton börjar avvisas utan att
+  appens egna felmeddelande visas (det tyder på att Cloudflare eller Nginx
+  stoppade requesten innan den nådde appen).
+
 ## Server-Sent Events (Snabbnota)
 
 Snabbnotans realtidsuppdateringar går via SSE (`/api/quick-tabs/:id/events`).

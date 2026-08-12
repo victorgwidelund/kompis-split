@@ -18,6 +18,7 @@ export interface SessionResponse {
   needsSetup: boolean;
   version: string;
   user?: User;
+  demoMode: boolean;
 }
 
 export interface Category {

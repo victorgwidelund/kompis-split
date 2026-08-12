@@ -4,6 +4,7 @@ import { DialogHeader, Modal } from "../../components/Modal";
 import type { InvitationResult, OcrResponse, QuickTab, OcrSuggestionItem } from "../../types/models";
 import { kronorToOre, formatMoney } from "../../utils/format";
 import { receiptAiStatus, validateReceiptImage } from "../receipts/ocr";
+import { prepareReceiptFile } from "../receipts/imagePrep";
 
 type EditableItem = { key: string; name: string; quantity: number; amount: string };
 const emptyItem = (): EditableItem => ({ key: crypto.randomUUID(), name: "", quantity: 1, amount: "" });
@@ -22,9 +23,11 @@ export function QuickTabDialog({ open, onClose, onCreated, notify }: { open: boo
   const analyze = async (file?: File) => {
     if (!file) return; const validation = validateReceiptImage(file);
     if (validation) { setStatus(validation); setStatusClass("warning"); return; }
-    setReceipt(file); setStatusClass("reading"); setStatus("AI:n läser och kontrollerar kvittoraderna … Det tar normalt några sekunder.");
+    setStatusClass("reading"); setStatus("Förbereder bild…");
+    const prepared = await prepareReceiptFile(file, (message) => setStatus(message));
+    setReceipt(prepared); setStatusClass("reading"); setStatus("AI:n läser och kontrollerar kvittoraderna … Det tar normalt några sekunder.");
     try {
-      const payload = await upload<OcrResponse>("/api/quick-tabs/analyze", file); const suggestion = payload.suggestion || {}; const suggested = suggestion.items || [];
+      const payload = await upload<OcrResponse>("/api/quick-tabs/analyze", prepared); const suggestion = payload.suggestion || {}; const suggested = suggestion.items || [];
       const rows = suggested.map((item: OcrSuggestionItem) => ({ key: crypto.randomUUID(), name: item.name || "", quantity: Number(item.quantity || 1), amount: String(item.amount || "") }));
       if (rows.length) setItems(rows);
       const itemTotal = suggested.reduce((sum, item) => sum + kronorToOre(item.amount || 0), 0); const total = suggestion.amount || (itemTotal ? (itemTotal / 100).toFixed(2) : "");

@@ -298,6 +298,34 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [6, "quick-tab-item-and-claim-quantities"],
     );
+    await client.query(`
+      ALTER TABLE trips ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE trips ADD COLUMN IF NOT EXISTS demo_batch_id TEXT;
+      ALTER TABLE quick_tabs ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE quick_tabs ADD COLUMN IF NOT EXISTS demo_batch_id TEXT;
+      ALTER TABLE sessions ADD COLUMN IF NOT EXISTS demo_mode BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE sessions ADD COLUMN IF NOT EXISTS demo_batch_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_trips_demo_batch ON trips(demo_batch_id) WHERE demo_batch_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_quick_tabs_demo_batch ON quick_tabs(demo_batch_id) WHERE demo_batch_id IS NOT NULL;
+    `);
+    // No code ever hard-deleted a trip before demo mode's cleanup step, so these three foreign keys
+    // into participants(id) were never given ON DELETE CASCADE — deleting a demo trip could then fail
+    // with a foreign-key violation depending on Postgres's cascade ordering. Behavior-only change,
+    // no existing data is touched.
+    await client.query(`
+      ALTER TABLE expense_shares DROP CONSTRAINT IF EXISTS expense_shares_participant_id_fkey;
+      ALTER TABLE expense_shares ADD CONSTRAINT expense_shares_participant_id_fkey FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE;
+      ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_payer_id_fkey;
+      ALTER TABLE expenses ADD CONSTRAINT expenses_payer_id_fkey FOREIGN KEY (payer_id) REFERENCES participants(id) ON DELETE CASCADE;
+      ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_from_id_fkey;
+      ALTER TABLE payments ADD CONSTRAINT payments_from_id_fkey FOREIGN KEY (from_id) REFERENCES participants(id) ON DELETE CASCADE;
+      ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_to_id_fkey;
+      ALTER TABLE payments ADD CONSTRAINT payments_to_id_fkey FOREIGN KEY (to_id) REFERENCES participants(id) ON DELETE CASCADE;
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [7, "admin-only-demo-mode"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

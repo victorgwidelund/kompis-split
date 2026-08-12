@@ -5,6 +5,7 @@ import { DialogHeader, Modal } from "../../components/Modal";
 import type { Category, Expense, OcrResponse, Trip } from "../../types/models";
 import { formatMoney, kronorToOre } from "../../utils/format";
 import { receiptAiStatus, validateReceiptImage } from "../receipts/ocr";
+import { prepareReceiptFile } from "../receipts/imagePrep";
 
 type SplitMode = "equal" | "percentage" | "exact" | "shares";
 interface Values { title: string; amount: string; payerId: string; expenseDate: string; category: string; splitMode: SplitMode }
@@ -24,8 +25,10 @@ export function ExpenseDialog({ open, trip, categories, expense, onClose, onSave
   };
   const analyze = async (file?: File) => {
     if (!file) return; const validation = validateReceiptImage(file); if (validation) { setStatus(validation); setStatusClass("warning"); return; }
-    if (preview) URL.revokeObjectURL(preview); setReceipt(file); setPreview(URL.createObjectURL(file)); setStatusClass("reading"); setStatus("AI:n läser och kontrollerar kvittot på din server…");
-    try { const payload = await upload<OcrResponse>(`/api/trips/${trip.id}/receipts/analyze`, file); const suggestion = payload.suggestion || {}; setValues((current) => ({ ...current, title: suggestion.title || current.title, amount: suggestion.amount || current.amount, expenseDate: suggestion.expenseDate || current.expenseDate, category: suggestion.category && categories.some((category) => category.slug === suggestion.category) ? suggestion.category : current.category })); const found = [suggestion.title, suggestion.amount, suggestion.expenseDate].filter(Boolean).length; setStatusClass(found ? "success" : "warning"); setStatus(found ? `Förslag ifyllda med ${payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR"} (${payload.confidence || 0}% läskvalitet).${receiptAiStatus(payload.ai)}${payload.needsReview ? " Kontrollera extra noga." : " Kontrollera namn, belopp och datum innan du sparar."}` : "Kvittot bifogas, men texten kunde inte läsas tydligt. Fyll i uppgifterna manuellt."); }
+    setStatusClass("reading"); setStatus("Förbereder bild…");
+    const prepared = await prepareReceiptFile(file, (message) => setStatus(message));
+    if (preview) URL.revokeObjectURL(preview); setReceipt(prepared); setPreview(URL.createObjectURL(prepared)); setStatusClass("reading"); setStatus("AI:n läser och kontrollerar kvittot på din server…");
+    try { const payload = await upload<OcrResponse>(`/api/trips/${trip.id}/receipts/analyze`, prepared); const suggestion = payload.suggestion || {}; setValues((current) => ({ ...current, title: suggestion.title || current.title, amount: suggestion.amount || current.amount, expenseDate: suggestion.expenseDate || current.expenseDate, category: suggestion.category && categories.some((category) => category.slug === suggestion.category) ? suggestion.category : current.category })); const found = [suggestion.title, suggestion.amount, suggestion.expenseDate].filter(Boolean).length; setStatusClass(found ? "success" : "warning"); setStatus(found ? `Förslag ifyllda med ${payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR"} (${payload.confidence || 0}% läskvalitet).${receiptAiStatus(payload.ai)}${payload.needsReview ? " Kontrollera extra noga." : " Kontrollera namn, belopp och datum innan du sparar."}` : "Kvittot bifogas, men texten kunde inte läsas tydligt. Fyll i uppgifterna manuellt."); }
     catch (caught) { setStatusClass("warning"); setStatus(`${caught instanceof Error ? caught.message : "Kunde inte läsa kvittot"} Kvittot kan fortfarande bifogas.`); }
   };
   const close = () => { if (preview) URL.revokeObjectURL(preview); onClose(); };

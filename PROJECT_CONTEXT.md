@@ -1,8 +1,8 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-12  
-Appversion: 1.14.0
-Databasschema: migration 6
+Appversion: 1.15.0
+Databasschema: migration 7
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
 
@@ -77,6 +77,18 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 - `/api/users/search` returnerar aldrig telefonnummer — bara namn/e-post för att hitta rätt person att bjuda in. Telefonnummer blir synliga för andra användare först när man faktiskt delar en resa eller snabbnota (deltagarlistan), aldrig via fritextsök.
 - Att spara någon som kontakt (`POST /api/contacts`) kräver att man redan delar en resa eller snabbnota med personen. Ett gissat eller uppräknat användar-ID räcker inte för att läsa ut någons e-post/Swish-nummer den vägen.
 
+## Admin-only demoläge
+
+- Endast en global admin kan gå in i demoläge (`POST /api/admin/demo/enter`), verifierat server-side. Ett vanligt konto får 403 även vid direkt API-anrop.
+- Demoläget är bundet till sessionsraden i databasen (`sessions.demo_mode`, `sessions.demo_batch_id`), inte till något klientskickat fält och inte till `localStorage`. Klienten läser bara `demoMode` från `/api/session`.
+- Vid första `enter` skapas en engångsuppsättning fiktiv data (två resor, en snabbnota) taggad med `is_demo = TRUE` och sessionens `demo_batch_id`, via samma tabeller, frågor och React-komponenter som vanliga resor — ingen parallell demo-frontend.
+- Isoleringen upprätthålls på ett enda ställe per resurstyp: `requireAccess`, `quickTabAccess` och `loadTrip` jämför resans/snabbnotans `is_demo`-flagga mot sessionens aktuella läge (via request-scoped `AsyncLocalStorage`, samma mönster som transaktionshanteringen i `src/database.ts`) och nekar annars — en demo-session kan alltså aldrig läsa en riktig resa och en vanlig session kan aldrig läsa en demo-resa, oavsett `trip_access`. `dashboard`, `statistics` och listan över snabbnotor filtrerar på samma flagga. Riktiga kontakter returneras aldrig i dashboarden i demoläge.
+- En liten uttrycklig nekningslista (samma ställe i `handleApi`) blockerar `/api/users/search`, `/api/contacts`, `/api/admin`, `/api/admin/users/:id` samt alla inbjudningsskapande endpoints medan `demo_mode` är sant — dessa data/åtgärder är antingen globala (inte resescopade) eller skulle exponera riktiga kontaktuppgifter.
+- Resor/snabbnotor som skapas *under* pågående demoläge (t.ex. admin klickar "Skapa resa" för att visa flödet) taggas automatiskt med samma `is_demo`/`demo_batch_id` och städas bort tillsammans med resten.
+- `POST /api/admin/demo/exit` raderar hela batchen (`DELETE FROM trips/quick_tabs WHERE demo_batch_id = ?`, kaskad tar hand om deltagare/utgifter/kvitton/claims) och återställer sessionen — riktig kontext är tillbaka omedelbart, ingen ny inloggning krävs. En bakgrundsstädning (var 60:e minut, plus vid start) tar bort demodata vars session gått ut, om en admin stänger fliken utan att klicka "Avsluta demoläge".
+- Kategorier är globala, inte resescopade, så `POST/PATCH /api/categories` blockeras explicit i demoläge (den centrala nekningslistan räcker inte där eftersom `GET /api/categories` måste fungera för att demoresorna ska kunna visa kategorier).
+- Frontend: en banderoll ("DEMOLÄGE – …") visas när `session.demoMode` är sant, och en "Demoläge"-knapp finns i adminvyn. Att gå in/ur laddar om sidan (`location.reload()`) i stället för att tråda `demoMode` genom varje komponent.
+
 ## Ekonomi och data
 
 - Alla belopp lagras och beräknas som heltalsöre. Historiska kolumnnamn med `_cents` betyder fortfarande öre.
@@ -88,7 +100,7 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 
 ## Databasmigreringar
 
-Aktuell högsta version är 6:
+Aktuell högsta version är 7:
 
 1. Grundschema för användare, resor, utgifter, betalningar, åtkomst och audit-logg.
 2. Global adminroll, möjlighet att inaktivera konton och frivilligt utgiftsdatum.
@@ -96,6 +108,7 @@ Aktuell högsta version är 6:
 4. Fristående snabbnota med kvittorader, inbjudningar och registrerade deltagare.
 5. Kontolösa snabbnotegäster och claims som kan tillhöra antingen användare eller gäster.
 6. Antal per snabbnoterad och per deltagares val, utan att samma produkt behöver delas upp i flera rader.
+7. Admin-only demoläge (`is_demo`/`demo_batch_id` på `trips` och `quick_tabs`, `demo_mode`/`demo_batch_id` på `sessions`) samt en korrigering av tre främmande nycklar mot `participants(id)` (`expense_shares.participant_id`, `expenses.payer_id`, `payments.from_id`/`to_id`) som saknade `ON DELETE CASCADE` — upptäcktes eftersom demolägets städning är första koden som någonsin hårdraderar en resa.
 
 Nya schemaändringar ska få nästa migrationsnummer. Ändra inte en redan distribuerad migration och gör inga destruktiva volymoperationer.
 
@@ -110,6 +123,8 @@ Nya schemaändringar ska få nästa migrationsnummer. Ändra inte en redan distr
 - Svensk OCR för belopp, datum, handlare och kvittorader.
 - Snabbnota med registrerade användare eller kontolösa gäster, individuella claims och realtidsuppdatering.
 - Snabbnoter behåller produktmängder på en gemensam rad, låter varje deltagare välja antal och erbjuder förifylld Swish-betalning till skaparen.
+- Kvittobilder komprimeras i webbläsaren (mål ~3200 px långsida, JPEG ~0,85) innan uppladdning och normaliseras igen med Sharp på servern innan lagring, oavsett vad klienten skickade.
+- Admin-only demoläge: en admin kan gå in i en isolerad, fiktiv datauppsättning (två resor, en snabbnota) utan att någonsin kunna läsa eller ändra riktiga användares data, och lämna läget igen utan att logga ut.
 - Synligt förenklat versionsnummer från `package.json`/`APP_VERSION`.
 
 ## Test- och releaseflöde
@@ -126,6 +141,12 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.15.0 rättar Snabbnota-återinbjudan, verifierar svensk teckenhantering, bygger klient- och serversidig kvittokomprimering, förbättrar OCR-tolkningen och lägger till ett admin-only demoläge. Ingen arkitektur byttes ut.
+  - **Snabbnota igen:** ägaren kunde inte se "Bjud in"-knappen efter att ha avslutat en snabbnota (`!tab.closedAt`-villkoret dolde den helt trots att backend redan tillät en ny inbjudan när som helst) — fixat genom att ta bort villkoret. Gäster som öppnade samma inbjudningslänk igen (t.ex. efter att ha stängt fliken) skapade tidigare en helt ny `quick_tab_guests`-rad varje gång; `/api/quick-tabs/guest-join` känner nu igen en befintlig giltig gästsession för samma snabbnota och återansluter i stället för att duplicera.
+  - **Svenska tecken:** verifierad end-to-end (deltagarnamn, utgiftstitlar, snabbnotenamn/produkter, `/api/users/search`) med nya regressionstester som använder Köttbullar/Räksmörgås/Öl/Blåbärspaj/Ångbåtsbryggan. Inget ASCII-filter hittades — databas, API och OCR-parsern hanterade redan å/ä/ö korrekt, men saknade testtäckning.
+  - **Kvittobilder:** klienten läser bilden med `createImageBitmap` (EXIF-medveten), skalar ner till max ~3200 px långsida och komprimerar till JPEG ~0,85 innan uppladdning, med tydliga statusar ("Förbereder bild…", "Komprimerar kvitto…"). Originalbilder tillåts upp till 50 MB innan komprimering; appens hårda gräns för själva uppladdningen höjdes från 8 till 20 MB (`receiptMaximumBytes`). HEIC/HEIF upptäcks och avvisas med tydligt felmeddelande i stället för att tystnadigt misslyckas. Servern litar aldrig på klientens komprimering: varje bildkvitto normaliseras igen med Sharp (autorotation, cap vid 3000 px långsida, JPEG-kvalitet 90, metadata bortstruken) innan det lagras — detta upptäckte och stängde även en tidigare lucka där `/api/expenses/:id/receipts` inte validerade bildmått alls. Se `DEPLOYMENT.md` för Nginx/Cloudflare-gränser.
+  - **OCR-tolkning:** kvittometadata som `Bord 17`, `Kassör`, `Beställning`, `Referens`, `Gäster`/`Antal gäster` och `Swish` blir inte längre kvittorader, inklusive fallet där en orelaterad summa OCR-mässigt hussamnar direkt efter en sådan rad. Rabatt-/kupongrader räknas inte längre som köpta artiklar. Nya syntetiska testkvitton (restaurang, mataffär, bar, "svår OCR") i `tests/receipt-ocr.test.mjs`.
+  - **Admin-only demoläge:** ny arkitektur, se separat avsnitt nedan.
 - Version 1.14.0 är en produktionshärdningsgenomgång efter React-migreringen, inriktad på säkerhet, finansiell korrekthet och drift bakom Cloudflare + Nginx Proxy Manager. Ingen arkitektur byttes ut. Ändringar: klient-IP för rate limiting läses från `CF-Connecting-IP` i stället för `X-Forwarded-For`s förstaled (det gamla sättet gick att kringgå och gjorde inloggningsspärren verkningslös bakom en proxykedja som lägger till i headern); `/api/users/search` läcker inte längre telefonnummer och `POST /api/contacts` kräver en delad resa/snabbnota; det generiska felsvaret läcker inte längre interna undantagsmeddelanden för oväntade fel; CSP:s `img-src` tillåter `blob:` (kvittoförhandsvisningen i "Ny utgift" använder `URL.createObjectURL` och blockerades annars av den strikta policyn); kvittoräkningen per utgift är nu låst i en transaktion så samtidiga uppladdningar inte kan tränga förbi femgränsen; `loadTrip` hämtar delningar/kvitton för hela resan i två frågor i stället för två frågor per utgift. Nya IDOR- och autentiseringstester lades till i `tests/server.integration.test.mjs` (utomstående användare nekas trip/kvitto/snabbnota-åtkomst, inloggningsspärren testas end-to-end, betalningsflödet har nu testtäckning) samt namngivna finansiella gränsfall i `tests/split.test.mjs`. Frontend: redigering av en procent-/andelsdelad utgift tappade tidigare tyst delningstypen (belopp förblev korrekta men metoden byttes till "exakt") — fixat; formulär för utgift/resa/betalning/snabbnota/person visar nu ett spärrat "sparar…"-läge under insändning för att undvika dubbletter vid dåligt mobilnät; snabbnotagäster vars session gått ut fastnade tidigare utan väg tillbaka efter ett 401-svar — fixat; sökracet i deltagarsök (stale response kunde skriva över ett nyare sökresultat) fixat med en request-räknare. Ny `DEPLOYMENT.md` (topologi, proxy-tillitsmodell, uppdatering/backup/återställning/rollback) och `PUBLIC_LAUNCH_CHECKLIST.md` (vad som saknas före en bredare lansering).
 - Version 1.13.0 ersätter den tidigare globala vanilla-JavaScript-klienten med React 19, Vite och strikt TypeScript. Alla befintliga arbetsflöden använder samma server-API: konton och inbjudningar, dashboard och vänner, resor, deltagare, utgifter och fyra delningssätt, kategorier, kvitton/OCR, saldon och betalningar, snabbnota med gästläge/SSE/Swish-länk, statistik, administration och versionsvisning. Docker bygger frontend och backend i samma build stage och slutcontainern är fortfarande en enda read-only Node-app. Databasschema, OCR-tjänster, Compose-portar, volymer och miljövariabler ändrades inte.
 - Version 1.12.0 byter den lokala dokumentmodellen till PaddleOCR-VL 1.6 via dess officiella GGUF-distribution och en intern, versionspinnad llama.cpp CUDA-server. Modellen använder det dokumenterade `OCR:`-kommandot utan framtvingat JSON-schema. Parsern hanterar både traditionella artikelrader och PaddleOCR-resultat där flera produktnamn följs av ett separat prisblock, samt totalrubrik och totalbelopp på skilda rader. Modellfilerna hämtas atomiskt till en beständig Unraid-katalog. Tesseract och alla säkra reservvägar behålls.

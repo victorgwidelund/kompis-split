@@ -5,6 +5,7 @@ import { EmptyState } from "../../components/EmptyState";
 import type { Category, Expense, Settlement, Trip, User } from "../../types/models";
 import { copyText, swishPaymentUrl } from "../../utils/browser";
 import { formatBytes, formatDate, formatMoney } from "../../utils/format";
+import { isHeicFile, maxOriginalReceiptBytes, prepareReceiptFile } from "../receipts/imagePrep";
 
 export type TripDialog = "invite" | "person" | "expense" | "categories" | "payment" | null;
 export interface PaymentPreset { fromId: number; toId: number; amountCents: number }
@@ -40,8 +41,17 @@ export function TripPage({ trip, user, categories, onBack, onRefresh, onOpenDial
   };
   const uploadReceipt = async (file?: File) => {
     const expenseId = receiptExpense.current; if (!file || !expenseId) return;
-    if (file.size > 8 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type)) return notify("Välj en JPG-, PNG-, WebP- eller PDF-fil på högst 8 MB");
-    await mutate(() => upload(`/api/expenses/${expenseId}/receipts`, file, { "X-File-Name": encodeURIComponent(file.name) }), "Kvittot laddades upp");
+    if (isHeicFile(file)) return notify("HEIC-bilder stöds inte direkt. Byt kamerans bildformat till \"Mest kompatibelt\" eller spara bilden som JPEG först.");
+    if (file.type === "application/pdf") {
+      if (file.size > 8 * 1024 * 1024) return notify("PDF-kvitton får vara högst 8 MB");
+      await mutate(() => upload(`/api/expenses/${expenseId}/receipts`, file, { "X-File-Name": encodeURIComponent(file.name) }), "Kvittot laddades upp");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return notify("Välj en JPG-, PNG-, WebP- eller PDF-fil");
+    if (file.size > maxOriginalReceiptBytes) return notify(`Bilden är för stor (max ${Math.round(maxOriginalReceiptBytes / 1024 / 1024)} MB)`);
+    notify("Förbereder bild…");
+    const prepared = await prepareReceiptFile(file);
+    await mutate(() => upload(`/api/expenses/${expenseId}/receipts`, prepared, { "X-File-Name": encodeURIComponent(prepared.name) }), "Kvittot laddades upp");
   };
   const expenseRow = (expense: Expense, allowAction = true) => {
     const receipts = expense.receipts || [];
