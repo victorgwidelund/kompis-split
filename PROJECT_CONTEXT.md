@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-12  
-Appversion: 1.15.0
+Appversion: 1.15.1
 Databasschema: migration 7
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -141,6 +141,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.15.1 rättar en kvarvarande Snabbnota-inbjudningsbugg som 1.15.0:s fix missade: varje `POST /api/quick-tabs/:id/invitations` (klick på "Bjud in") återkallade **alla** tidigare inbjudningar för notan, oavsett om de fortfarande var giltiga och oanvända. Eftersom en snabbnoteinbjudan tillåter upp till 30 användningar (`max_uses`) fanns ingen anledning att göra det — konsekvensen var att den allra första QR-koden/länken (skapad automatiskt när notan skapas, den som oftast delas direkt i en gruppchatt) slutade fungera så fort ägaren öppnade notan igen och klickade "Bjud in", även om ingen hunnit använda den än. Nu skapar varje klick bara en *ytterligare* giltig inbjudan; gamla länkar fortsätter fungera tills de går ut (14 dagar), precis som reseinbjudningar redan gjorde. Hittades genom att felsöka en verklig felrapport, inte genom kodgranskning.
 - Version 1.15.0 rättar Snabbnota-återinbjudan, verifierar svensk teckenhantering, bygger klient- och serversidig kvittokomprimering, förbättrar OCR-tolkningen och lägger till ett admin-only demoläge. Ingen arkitektur byttes ut.
   - **Snabbnota igen:** ägaren kunde inte se "Bjud in"-knappen efter att ha avslutat en snabbnota (`!tab.closedAt`-villkoret dolde den helt trots att backend redan tillät en ny inbjudan när som helst) — fixat genom att ta bort villkoret. Gäster som öppnade samma inbjudningslänk igen (t.ex. efter att ha stängt fliken) skapade tidigare en helt ny `quick_tab_guests`-rad varje gång; `/api/quick-tabs/guest-join` känner nu igen en befintlig giltig gästsession för samma snabbnota och återansluter i stället för att duplicera.
   - **Svenska tecken:** verifierad end-to-end (deltagarnamn, utgiftstitlar, snabbnotenamn/produkter, `/api/users/search`) med nya regressionstester som använder Köttbullar/Räksmörgås/Öl/Blåbärspaj/Ångbåtsbryggan. Inget ASCII-filter hittades — databas, API och OCR-parsern hanterade redan å/ä/ö korrekt, men saknade testtäckning.
