@@ -294,20 +294,20 @@ async function requireAccess(tripId: number, userId: number, roles: string[] | n
   // A demo session must never reach a real trip, and a normal session must never reach a demo trip —
   // checked before the global-admin bypass below, which would otherwise ignore the boundary entirely.
   const trip = await db.prepare("SELECT is_demo FROM trips WHERE id = ?").get<any>(tripId);
-  if (!trip || Boolean(trip.is_demo) !== inDemoMode()) throw new HttpError(403, "Du har inte tillgång till den här resan");
+  if (!trip || Boolean(trip.is_demo) !== inDemoMode()) throw new HttpError(403, "Du har inte tillgång till den här gruppen");
   const globalAdmin = await db.prepare("SELECT is_admin FROM users WHERE id = ? AND is_disabled = FALSE").get<any>(userId);
   if (globalAdmin?.is_admin) return "admin";
   const access = await db.prepare("SELECT role FROM trip_access WHERE trip_id = ? AND user_id = ?").get<any>(tripId, userId);
-  if (!access) throw new HttpError(403, "Du har inte tillgång till den här resan");
+  if (!access) throw new HttpError(403, "Du har inte tillgång till den här gruppen");
   if (roles && !roles.includes(access.role)) throw new HttpError(403, "Du saknar behörighet för detta");
   return access.role;
 }
 
 async function requireActiveTrip(tripId: number) {
   const trip = await db.prepare("SELECT * FROM trips WHERE id = ?").get<any>(tripId);
-  if (!trip) throw new HttpError(404, "Resan finns inte");
-  if (trip.deleted_at) throw new HttpError(404, "Resan finns inte");
-  if (trip.archived_at) throw new HttpError(409, "Återställ resan innan du gör ändringar");
+  if (!trip) throw new HttpError(404, "Gruppen finns inte");
+  if (trip.deleted_at) throw new HttpError(404, "Gruppen finns inte");
+  if (trip.archived_at) throw new HttpError(409, "Återställ gruppen innan du gör ändringar");
 }
 
 async function requireRecordWriteAccess(tripId: number, userId: number, createdBy: number) {
@@ -319,7 +319,7 @@ async function requireRecordWriteAccess(tripId: number, userId: number, createdB
 
 async function assertTripParticipant(tripId: number, participantId: number) {
   const person = await db.prepare("SELECT id FROM participants WHERE id = ? AND trip_id = ?").get(participantId, tripId);
-  if (!person) throw new Error("En vald deltagare tillhör inte resan");
+  if (!person) throw new Error("En vald deltagare tillhör inte gruppen");
 }
 
 async function loadTrip(id: number, userId: number) {
@@ -378,7 +378,7 @@ async function dashboard(userId: number) {
   `).all<any>(userId, demoMode);
   const trips = await Promise.all(rows.map(async (row) => {
     const full = await loadTrip(row.id, userId);
-    if (!full) throw new Error("Resan försvann under laddningen");
+    if (!full) throw new Error("Gruppen försvann under laddningen");
     const linked = full.participants.find((person) => person.userId === userId);
     return {
       id: row.id, name: row.name, startDate: row.start_date, endDate: row.end_date, archivedAt: row.archived_at,
@@ -1261,7 +1261,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
         WHERE a.user_id = ? AND b.user_id = ?
       )
     `).get(user.id, contactId, user.id, contactId);
-    if (!related) throw new HttpError(403, "Du kan bara spara någon som kontakt om ni redan delar en resa eller snabbnota");
+    if (!related) throw new HttpError(403, "Du kan bara spara någon som kontakt om ni redan delar en grupp eller snabbnota");
     await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(user.id, contactId);
     return json(response, 201, { ok: true });
   }
@@ -1269,7 +1269,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const body = await readJson(request);
     return db.transaction(async () => {
       const result = await db.prepare("INSERT INTO trips (name, start_date, end_date, created_by, is_demo, demo_batch_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
-        .run(cleanText(body.name, "Resans namn", 80), validDate(body.startDate), validDate(body.endDate), user.id, Boolean(user.demo_mode), user.demo_mode ? user.demo_batch_id : null);
+        .run(cleanText(body.name, "Gruppens namn", 80), validDate(body.startDate), validDate(body.endDate), user.id, Boolean(user.demo_mode), user.demo_mode ? user.demo_batch_id : null);
       const tripId = Number(result.lastInsertRowid);
       await db.prepare("INSERT INTO trip_access (trip_id, user_id, role) VALUES (?, ?, 'owner')").run(tripId, user.id);
       await db.prepare("INSERT INTO participants (trip_id, name, swish_phone, user_id) VALUES (?, ?, ?, ?)").run(tripId, user.display_name, user.swish_phone, user.id);
@@ -1280,13 +1280,13 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   match = url.pathname.match(/^\/api\/trips\/(\d+)$/);
   if (request.method === "GET" && match) {
     const trip = await loadTrip(Number(match[1]), user.id);
-    return trip ? json(response, 200, { trip }) : json(response, 404, { error: "Resan finns inte" });
+    return trip ? json(response, 200, { trip }) : json(response, 404, { error: "Gruppen finns inte" });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/archive$/);
   if (request.method === "POST" && match) {
     const tripId = Number(match[1]); await requireAccess(tripId, user.id, ["owner", "admin"]);
     const existing = await db.prepare("SELECT deleted_at FROM trips WHERE id = ?").get<any>(tripId);
-    if (!existing || existing.deleted_at) return json(response, 404, { error: "Resan finns inte" });
+    if (!existing || existing.deleted_at) return json(response, 404, { error: "Gruppen finns inte" });
     const body = await readJson(request);
     await db.prepare("UPDATE trips SET archived_at = ? WHERE id = ?").run(body.archived === false ? null : new Date().toISOString(), tripId);
     await audit(user.id, tripId, body.archived === false ? "trip.restored" : "trip.archived", "trip", tripId);
@@ -1296,10 +1296,10 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "POST" && match) {
     const tripId = Number(match[1]); await requireAccess(tripId, user.id, ["owner", "admin"]);
     const trip = await db.prepare("SELECT id, archived_at, deleted_at FROM trips WHERE id = ?").get<any>(tripId);
-    if (!trip) return json(response, 404, { error: "Resan finns inte" });
+    if (!trip) return json(response, 404, { error: "Gruppen finns inte" });
     const body = await readJson(request);
     const restoring = body.deleted === false;
-    if (!restoring && !trip.archived_at) throw new HttpError(409, "Arkivera resan innan du tar bort den");
+    if (!restoring && !trip.archived_at) throw new HttpError(409, "Arkivera gruppen innan du tar bort den");
     await db.transaction(async () => {
       const receiptCount = restoring ? 0 : Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE trip_id = ?").get<any>(tripId))?.count || 0);
       if (!restoring) await db.prepare("DELETE FROM expense_receipts WHERE trip_id = ?").run(tripId);
