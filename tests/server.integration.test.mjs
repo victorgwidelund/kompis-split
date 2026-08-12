@@ -217,6 +217,19 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const quickPreview = await request("/api/invitations/preview", { method: "POST", body: { token: quickTab.payload.invitation.token } });
     assert.equal(quickPreview.payload.invitation.kind, "quick_tab");
     assert.equal(quickPreview.payload.invitation.quickTabName, "Middag på Kajen");
+
+    // Regression: generating a second invitation must not revoke the first one. It used to — every
+    // "Bjud in" click revoked whatever invitation was currently active, so the very first QR code
+    // (the one auto-created at tab creation and likely already shared with the group) stopped working
+    // the moment the owner reopened the tab and clicked "Bjud in" again for anyone who hadn't joined yet.
+    const secondQuickTabInvite = await request(`/api/quick-tabs/${quickTabId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
+    assert.equal(secondQuickTabInvite.response.status, 201, JSON.stringify(secondQuickTabInvite.payload));
+    assert.notEqual(secondQuickTabInvite.payload.invitation.token, quickTab.payload.invitation.token);
+    const joinViaOriginalFirstInvite = await request("/api/quick-tabs/guest-join", {
+      method: "POST", body: { token: quickTab.payload.invitation.token, name: "Först Ansluten", swishPhone: "0701110000" },
+    });
+    assert.equal(joinViaOriginalFirstInvite.response.status, 201, JSON.stringify(joinViaOriginalFirstInvite.payload));
+
     const anonymousQuickTab = await request(`/api/quick-tabs/${quickTabId}`);
     assert.equal(anonymousQuickTab.response.status, 401);
     const anonymousQuickTabEvents = await request(`/api/quick-tabs/${quickTabId}/events`);
@@ -248,7 +261,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.deepEqual(memberClaims.payload.quickTab.items[0].claims.map((claim) => claim.quantity), [1, 1]);
     assert.equal(memberClaims.payload.quickTab.members.find((item) => item.role === "owner").swishPhone, "+46701234567");
     assert.deepEqual(Object.fromEntries(memberClaims.payload.quickTab.personTotals.map((item) => [item.name, item.amountCents])), {
-      Victor: 5001, "Erik Gäst": 0, Anna: 5000,
+      Victor: 5001, "Erik Gäst": 0, Anna: 5000, "Först Ansluten": 0,
     });
     const guestClaims = await request(`/api/quick-tabs/${quickTabId}/claims`, { method: "POST", cookie: guestCookie, body: { itemId: pommesItem, quantity: 1 } });
     assert.equal(guestClaims.response.status, 200, JSON.stringify(guestClaims.payload));
@@ -256,7 +269,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(guestClaims.payload.quickTab.claimedCents, 15001);
     assert.equal(guestClaims.payload.quickTab.unclaimedCents, 0);
     assert.deepEqual(Object.fromEntries(guestClaims.payload.quickTab.personTotals.map((item) => [item.name, item.amountCents])), {
-      Victor: 5001, "Erik Gäst": 5000, Anna: 5000,
+      Victor: 5001, "Erik Gäst": 5000, Anna: 5000, "Först Ansluten": 0,
     });
     assert.equal(guestClaims.payload.quickTab.personTotals.find((item) => item.name === "Erik Gäst").swishPhone, "+46701112233");
 
@@ -540,7 +553,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 7);
   // 1 from "Middag på Kajen" + 1 from the Swedish-characters test quick tab ("Ångbåtsbryggan").
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 2);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tab_guests")).rows[0].count), 1);
+  // "Erik Gäst" (claims below) + "Först Ansluten" (joined via the original first invite to prove it
+  // still works after a second invitation was generated).
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tab_guests")).rows[0].count), 2);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tab_claims")).rows[0].count), 3);
   assert.equal(Number((await verification.query("SELECT quantity FROM quick_tab_items WHERE name = 'Lager'")).rows[0].quantity), 2);
   await verification.end();

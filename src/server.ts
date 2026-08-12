@@ -1107,10 +1107,12 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const quickTabId = Number(match[1]); const role = await quickTabAccess(quickTabId, user.id);
     if (role !== "owner") throw new HttpError(403, "Bara skaparen kan bjuda in till snabbnotan");
     const token = randomBytes(24).toString("base64url"); const expiresAt = new Date(Date.now() + 14 * 86400000).toISOString();
-    await db.transaction(async () => {
-      await db.prepare("UPDATE quick_tab_invitations SET revoked_at = CURRENT_TIMESTAMP WHERE quick_tab_id = ? AND revoked_at IS NULL").run(quickTabId);
-      await db.prepare("INSERT INTO quick_tab_invitations (quick_tab_id, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?)").run(quickTabId, sha256(token), user.id, expiresAt);
-    });
+    // Do not revoke earlier invitations here: a quick tab's invitation link is meant to be shared with
+    // and reused by an entire group (max_uses is 30, not 1). Revoking the previous one on every click
+    // broke the very first QR code the moment the owner reopened the tab and clicked "Bjud in" again —
+    // anyone who hadn't joined yet with that link suddenly got "Inbjudan är ogiltig eller har gått ut".
+    // Each click now just adds another valid invitation; old ones keep working until they expire.
+    await db.prepare("INSERT INTO quick_tab_invitations (quick_tab_id, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?)").run(quickTabId, sha256(token), user.id, expiresAt);
     return json(response, 201, { invitation: await invitationPayload(request, token, expiresAt) });
   }
   match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/events$/);
