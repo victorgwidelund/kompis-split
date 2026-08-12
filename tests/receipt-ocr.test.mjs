@@ -185,6 +185,44 @@ test("difficult OCR: Swedish characters, split name/price lines and mixed-in met
   ]);
 });
 
+test("a long dish name wrapped onto its own line is reunited, whether the price stays with the wrapped letters or not", () => {
+  const priceOnItsOwnLine = parseReceiptText(`
+    1.00 Caesarsalla
+    d
+    285.00
+    1.00 Tryffelpast
+    a
+    295.00
+  `);
+  assert.deepEqual(priceOnItsOwnLine.items, [
+    { name: "Caesarsallad", quantity: 1, amount: "285.00" },
+    { name: "Tryffelpasta", quantity: 1, amount: "295.00" },
+  ]);
+
+  const priceMergedWithFragment = parseReceiptText(`
+    1.00 Caesarsalla
+    d 285.00
+    1.00 Tryffelpast
+    a 295.00
+  `);
+  assert.deepEqual(priceMergedWithFragment.items, [
+    { name: "Caesarsallad", quantity: 1, amount: "285.00" },
+    { name: "Tryffelpasta", quantity: 1, amount: "295.00" },
+  ]);
+});
+
+test("a terminal/register ID code is never treated as a purchased item", () => {
+  const suggestion = parseReceiptText(`
+    STRANDBRYGGAN
+    XCL AT-150-E-18E #1
+    3564
+    1.00 Läsk 48.00
+    Total 48.00
+  `);
+  assert.equal(suggestion.items.length, 1);
+  assert.equal(suggestion.items[0].name, "Läsk");
+});
+
 test("compact quantity prefixes are kept and payment rows are excluded", () => {
   const suggestion = parseReceiptText(`
     KVÄLLSKROGEN

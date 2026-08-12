@@ -45,6 +45,13 @@ const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställn
 // become an "item" both mislabels them and throws off the exact-total reconciliation.
 const nonItemAdjustmentWords = /\brabatt\b|\bkupong\b|\bcoupon\b/i;
 
+// Terminal/register/POS identifiers (e.g. "XCL AT-150-E-18E #1") are all-caps codes with a dash and
+// no lowercase letters at all — a shape no real Swedish dish name has — so they must never become an
+// item even when a nearby unrelated number gets misread as their price.
+function looksLikeSystemCode(line: string) {
+  return /-/.test(line) && /[A-ZÅÄÖ]/.test(line) && !/[a-zåäö]/.test(line);
+}
+
 type ReceiptPass = { text: string; confidence: number; suggestion: ReceiptSuggestion };
 
 function normalizeNumericGlyphs(line: string) {
@@ -61,11 +68,28 @@ function normalizeNumericGlyphs(line: string) {
     .replace(/(?<![A-Za-zÅÄÖåäö])[\dOo]{1,8}[.,][\dOo]{2}(?![A-Za-zÅÄÖåäö])/g, (value) => value.replace(/[Oo]/g, "0"));
 }
 
+// A long dish name can wrap onto its own line on a narrow receipt, leaving just its last 1-3 letters
+// stranded alone on the next line (e.g. "Caesarsalla" / "d", "Tryffelpast" / "a"). A bare short
+// lowercase-only line with nothing else on it is essentially never a meaningful standalone entry on a
+// Swedish receipt, so it's reattached to the previous line instead of being dropped or misread.
+function reuniteWrappedWords(lines: string[]) {
+  const result: string[] = [];
+  for (const line of lines) {
+    const bareFragment = /^[a-zåäö]{1,3}$/.exec(line);
+    const fragmentBeforePrice = /^([a-zåäö]{1,3})\s+(\d{1,6}[,.]\d{2}.*)$/.exec(line);
+    if (result.length && bareFragment) result[result.length - 1] += line;
+    else if (result.length && fragmentBeforePrice) { result[result.length - 1] += fragmentBeforePrice[1]!; result.push(fragmentBeforePrice[2]!); }
+    else result.push(line);
+  }
+  return result;
+}
+
 function normalizedLines(text: string) {
-  return text.split(/\r?\n/).map((line) => line
+  const lines = text.split(/\r?\n/).map((line) => line
     .replace(/\s*[|¦]\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim()).map(normalizeNumericGlyphs).filter(Boolean);
+  return reuniteWrappedWords(lines);
 }
 
 function parseMoney(value: string) {
@@ -186,14 +210,14 @@ function receiptItems(lines: string[]) {
     const hasProductText = (line.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2;
     const endsWithAmount = /\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line);
     const nextIsAmount = /^\s*\d{1,6}[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(next);
-    if (hasProductText && !endsWithAmount && nextIsAmount && !metadataLineWords.test(line)) {
+    if (hasProductText && !endsWithAmount && nextIsAmount && !metadataLineWords.test(line) && !looksLikeSystemCode(line)) {
       itemLines.push(`${line} ${next}`);
       index += 1;
     } else itemLines.push(line);
   }
   const seen = new Set<string>();
   for (const line of itemLines) {
-    if (totalWords.test(line) || excludedTotalWords.test(line) || metadataLineWords.test(line) || nonItemAdjustmentWords.test(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
+    if (totalWords.test(line) || excludedTotalWords.test(line) || metadataLineWords.test(line) || nonItemAdjustmentWords.test(line) || looksLikeSystemCode(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
     const amounts = amountCandidates(line);
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
     const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s+|\s*\*\s+)/;
