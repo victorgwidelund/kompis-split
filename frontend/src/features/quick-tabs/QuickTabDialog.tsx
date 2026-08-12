@@ -32,7 +32,7 @@ export function QuickTabDialog({ open, onClose, onCreated, notify }: { open: boo
       if (rows.length) setItems(rows);
       const itemTotal = suggested.reduce((sum, item) => sum + kronorToOre(item.amount || 0), 0); const total = suggestion.amount || (itemTotal ? (itemTotal / 100).toFixed(2) : "");
       setValues((current) => ({ ...current, name: suggestion.title ? `Nota på ${suggestion.title}` : current.name, merchant: suggestion.title || current.merchant, receiptDate: suggestion.expenseDate || current.receiptDate, total: total || current.total }));
-      const engine = payload.source === "ollama+tesseract" ? "lokal AI + OCR" : "lokal OCR";
+      const engine = payload.source !== "tesseract" ? "lokal AI + OCR" : "lokal OCR";
       setStatusClass(payload.needsReview ? "warning" : "success");
       setStatus(rows.length ? `${rows.length} kvittorader hittades med ${engine}.${receiptAiStatus(payload.ai)}${payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}` : "Inga säkra rader hittades. Lägg till rätterna manuellt.");
     } catch (caught) { setStatusClass("warning"); setStatus(`${caught instanceof Error ? caught.message : "Kunde inte läsa kvittot"} Du kan fortfarande fylla i raderna manuellt.`); }

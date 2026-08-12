@@ -40,7 +40,7 @@ const excludedTotalWords = /moms|vat|växel|change|rabatt|subtotal|delsumma/i;
 // price gets merged onto it by the multi-line "name, then price on the next line" OCR heuristic.
 // Word-boundaried so real product names are never caught (e.g. a wine called "Bordeaux" must not
 // match \bbord\b).
-const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b/i;
+const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b|\btip\b|\bdricks\b|\bnetto(?:belopp)?\b|\bnet\s+amount\b/i;
 // Discounts/coupons reduce the total rather than describing something purchased; letting them
 // become an "item" both mislabels them and throws off the exact-total reconciliation.
 const nonItemAdjustmentWords = /\brabatt\b|\bkupong\b|\bcoupon\b/i;
@@ -84,12 +84,21 @@ function normalizeNumericGlyphs(line: string, previousLine?: string) {
 // stranded alone on the next line (e.g. "Caesarsalla" / "d", "Tryffelpast" / "a"). A bare short
 // lowercase-only line with nothing else on it is essentially never a meaningful standalone entry on a
 // Swedish receipt, so it's reattached to the previous line instead of being dropped or misread.
+// If that previous line already has its price on it (name and price wrapped down together as a pair,
+// confirmed against a real receipt: "1.00 Caesarsalla 285.00" then bare "d"), the fragment has to be
+// spliced in *before* the price rather than appended at the very end — appending after "285.00" would
+// leave the row not ending in a price and it would be dropped entirely, not just misnamed.
+const trailingPricePattern = /^(.*\S)(\s+)((?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}\s*(?:kr|sek)?)$/i;
 function reuniteWrappedWords(lines: string[]) {
   const result: string[] = [];
   for (const line of lines) {
     const bareFragment = /^[a-zåäö]{1,3}$/.exec(line);
     const fragmentBeforePrice = /^([a-zåäö]{1,3})\s+(\d{1,6}[,.]\d{2}.*)$/.exec(line);
-    if (result.length && bareFragment) result[result.length - 1] += line;
+    if (result.length && bareFragment) {
+      const previous = result[result.length - 1]!;
+      const trailingPrice = trailingPricePattern.exec(previous);
+      result[result.length - 1] = trailingPrice ? `${trailingPrice[1]}${line}${trailingPrice[2]}${trailingPrice[3]}` : previous + line;
+    }
     else if (result.length && fragmentBeforePrice) { result[result.length - 1] += fragmentBeforePrice[1]!; result.push(fragmentBeforePrice[2]!); }
     else result.push(line);
   }
@@ -838,7 +847,7 @@ export async function recognizeReceipt(content: Buffer) {
   const itemTotal = combined.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
   const total = amountCents(combined.suggestion.amount);
   const result = {
-    ...combined, passes: local.passes + aiPasses.length, source: "ollama+tesseract" as const, cropped: images.crop.screenshotPreview,
+    ...combined, passes: local.passes + aiPasses.length, source: paddleOcrUrl ? "paddleocr+tesseract" as const : "ollama+tesseract" as const, cropped: images.crop.screenshotPreview,
     rectified: images.rectified,
     ai: { model: aiModel, status: aiAttempt.status, durationMs: aiAttempt.durationMs + (verificationAttempt?.durationMs || 0), used: true, retried: Boolean(verificationAttempt), verificationStatus: verificationAttempt?.status },
     needsReview: new Set(totals).size > 1 || total === null || !combined.suggestion.items.length || itemTotal !== total,

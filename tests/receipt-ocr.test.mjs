@@ -223,33 +223,58 @@ test("a terminal/register ID code is never treated as a purchased item", () => {
   assert.equal(suggestion.items[0].name, "Läsk");
 });
 
-test("a terminal/register ID code is still excluded when OCR drops the # and misreads one letter as lowercase", () => {
-  // Real production bug (Strandbryggan receipt): PaddleOCR-VL read "XCL AT-150-E-18E #1" as
-  // "XCl AT-150-E-18E 41" (the "#" vanished, one letter's case flipped), and its register-number
-  // continuation line "3564" was then misread as a price "35,64" for that garbled code. Both the
-  // system-code detector and the standalone-digit-to-price heuristic must tolerate this shape.
+test("real Strandbryggan PaddleOCR-VL output: terminal code, wrapped names and the tip line are all handled correctly", () => {
+  // This is the verbatim raw OCR text captured from production via RECEIPT_OCR_DEBUG_LOG (not a
+  // reconstruction). It exposed three separate bugs at once: (1) the terminal code and its register
+  // number are printed on ONE line joined by " : " ("xCL_AT-150-E-18E #1 : 3564"), with the "x"
+  // misread as lowercase — looksLikeSystemCode() must still exclude it and the trailing "3564" must
+  // not become a fake "35,64" price; (2) "Caesarsalla"/"Tryffelpast" wrap their last letter onto the
+  // *next* line alone, but the name+price were already together on the line above — appending the
+  // fragment at the very end used to leave the row not ending in a price, silently dropping both
+  // items (580 kr) instead of just losing a letter; (3) the card slip's "Tip: 182,50 SEK" line was
+  // not recognized as payment metadata and became a fake purchased item.
   const suggestion = parseReceiptText(`
     Strandbryggan
-    XCl AT-150-E-18E 41
-    3564
+    Stranvägskajen 27
+    114 5G Stockholm
+
+    xCL_AT-150-E-18E #1 : 3564
+
+    Strandbryggan
+    tis 14 apr 26 12:52
+    Servis
+    Bord 204
+
     1.00 1/1 Räbiff 335.00
-    1.00 Räksallad 295.00
-    1.00 Caesarsalla
-    d 285.00
-    1.00 Tryffelpast
-    a 295.00
-    1.00 Läsk 48.00
+    1.00 Raksallad 295.00
+    1.00 Caesarsalla 285.00
+    d
+    1.00 Tryffelpast 295.00
+    a
+    1.00 Lässk 48.00
     4.00 1664 Blanc 392.00
     1.00 GL Minuty 175.00
+
     Total 1825.00
+
+    MasterCard 2007.50
+    14042026 12:52
+    Status: GODKANT
+    ONLINE
+    Transaktionstyp:
+    KÖP
+    Ref. nr:
+    200478100751
+
+    Net amount:
+    1825,00 SEK
+    Tip: 182,50 SEK
   `);
-  assert.equal(suggestion.items.length, 7, JSON.stringify(suggestion.items));
-  assert.equal(suggestion.items.some((item) => /^cl\b|18e|41|3564|35[.,]64/i.test(item.name) || item.amount === "35.64"), false);
   assert.deepEqual(suggestion.items.map((item) => item.name), [
-    "Räbiff", "Räksallad", "Caesarsallad", "Tryffelpasta", "Läsk", "Blanc", "GL Minuty",
+    "Räbiff", "Raksallad", "Caesarsallad", "Tryffelpasta", "Lässk", "Blanc", "GL Minuty",
   ]);
   const total = suggestion.items.reduce((sum, item) => sum + Math.round(Number(item.amount) * 100), 0);
-  assert.equal(total, 182500);
+  assert.equal(total, 182500, "the 7 real items must sum to the receipt's exact total, 1825.00 SEK");
 });
 
 test("a brand-new, never-seen-before header field is excluded structurally, not by keyword", () => {
