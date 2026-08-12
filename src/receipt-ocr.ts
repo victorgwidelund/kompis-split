@@ -45,17 +45,24 @@ const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställn
 // become an "item" both mislabels them and throws off the exact-total reconciliation.
 const nonItemAdjustmentWords = /\brabatt\b|\bkupong\b|\bcoupon\b/i;
 
-// Terminal/register/POS identifiers (e.g. "XCL AT-150-E-18E #1") are all-caps codes with a dash and
-// no lowercase letters at all — a shape no real Swedish dish name has — so they must never become an
-// item even when a nearby unrelated number gets misread as their price.
+// Terminal/register/POS identifiers (e.g. "XCL AT-150-E-18E #1") are all-caps codes with a dash — a
+// shape no real Swedish dish name has — so they must never become an item even when a nearby
+// unrelated number gets misread as their price. OCR on the small stylized font these are printed in
+// regularly drops one letter to lowercase (confirmed against a real misread: "XCL...E-18E #1" came
+// back as "Cl AT-150-E-18E 41" — the "#" vanished and one letter's case flipped), so requiring *zero*
+// lowercase letters is too strict; tolerate a small minority of them instead of demanding perfection.
 function looksLikeSystemCode(line: string) {
-  return /-/.test(line) && /[A-ZÅÄÖ]/.test(line) && !/[a-zåäö]/.test(line);
+  if (!/-/.test(line)) return false;
+  const letters = line.match(/[A-Za-zÅÄÖåäö]/g) || [];
+  if (letters.length < 3) return false;
+  const lowercase = letters.filter((letter) => /[a-zåäö]/.test(letter)).length;
+  return lowercase / letters.length <= 0.25;
 }
 
 type ReceiptPass = { text: string; confidence: number; suggestion: ReceiptSuggestion };
 
-function normalizeNumericGlyphs(line: string) {
-  return line
+function normalizeNumericGlyphs(line: string, previousLine?: string) {
+  let result = line
     .replace(/^\s*[Il|]\s+[xX]{1,2}\s+/, "1 x ")
     .replace(/^\s*[oO]{0,2}[1Il|]\s+[oO]?[xX][oO]?\s*/, "1 x ")
     .replace(/^\s*[oO]{1,2}(\d{1,2})\s+[oO]?[xX][oO]?\s*/, "$1 x ")
@@ -63,9 +70,14 @@ function normalizeNumericGlyphs(line: string) {
     .replace(/(\d)([.,])\s+(\d{2})(?!\d)/g, "$1$2$3")
     .replace(/(\d+[.,]\d{2})0(?=\s*(?:kr|sek)?$)/i, "$1")
     .replace(/(?<![\d.,])(\d{1,6})(?=\s*(?:kr|sek)\s*$)/i, "$1.00")
-    .replace(/(\d{1,5})\s+(\d{2})(?=\s*(?:kr|sek)?$)/i, "$1.$2")
-    .replace(/(?<!\d)(\d{3,5})(?=\s*(?:kr|sek)?$)/i, (value) => `${value.slice(0, -2)}.${value.slice(-2)}`)
-    .replace(/(?<![A-Za-zÅÄÖåäö])[\dOo]{1,8}[.,][\dOo]{2}(?![A-Za-zÅÄÖåäö])/g, (value) => value.replace(/[Oo]/g, "0"));
+    .replace(/(\d{1,5})\s+(\d{2})(?=\s*(?:kr|sek)?$)/i, "$1.$2");
+  // A bare 3-5 digit line is only treated as a price with an implied decimal point when it isn't the
+  // continuation of a terminal/register code printed on the line above it (e.g. "XCL AT-150-E-18E #1"
+  // followed by "3564") — that's an id fragment, not a SEK amount, even though it has the same shape.
+  if (!(previousLine !== undefined && looksLikeSystemCode(previousLine))) {
+    result = result.replace(/(?<!\d)(\d{3,5})(?=\s*(?:kr|sek)?$)/i, (value) => `${value.slice(0, -2)}.${value.slice(-2)}`);
+  }
+  return result.replace(/(?<![A-Za-zÅÄÖåäö])[\dOo]{1,8}[.,][\dOo]{2}(?![A-Za-zÅÄÖåäö])/g, (value) => value.replace(/[Oo]/g, "0"));
 }
 
 // A long dish name can wrap onto its own line on a narrow receipt, leaving just its last 1-3 letters
@@ -85,10 +97,11 @@ function reuniteWrappedWords(lines: string[]) {
 }
 
 function normalizedLines(text: string) {
-  const lines = text.split(/\r?\n/).map((line) => line
+  const cleaned = text.split(/\r?\n/).map((line) => line
     .replace(/\s*[|¦]\s*/g, " ")
     .replace(/\s+/g, " ")
-    .trim()).map(normalizeNumericGlyphs).filter(Boolean);
+    .trim()).filter(Boolean);
+  const lines = cleaned.map((line, index) => normalizeNumericGlyphs(line, index > 0 ? cleaned[index - 1] : undefined));
   return reuniteWrappedWords(lines);
 }
 
@@ -466,6 +479,15 @@ function logOcr(event: Record<string, string | number | boolean | null | undefin
   console.info(`[receipt-ocr] ${JSON.stringify(event)}`);
 }
 
+// Off by default: every prior version of this file has kept receipt content out of the logs on
+// purpose. Set RECEIPT_OCR_DEBUG_LOG=true (server-side only, never sent to the client) to include a
+// truncated raw-text snippet in the "ai"/"ai_verify" log lines when actively diagnosing a bad scan.
+const receiptOcrDebugLog = String(process.env.RECEIPT_OCR_DEBUG_LOG || "").toLowerCase() === "true";
+function logSnippet(text: string) {
+  if (!receiptOcrDebugLog) return undefined;
+  return text.length > 1500 ? `${text.slice(0, 1500)}…` : text;
+}
+
 export function ollamaReceiptRequest(content: Buffer, verification = false) {
   return {
     model: ollamaModel,
@@ -530,7 +552,7 @@ async function recognizeWithPaddleOcr(content: Buffer, verification = false, can
     }
     const tokenLimited = finishReason === "length";
     const attempt = { pass: tokenLimited ? null : { text, confidence: verification ? 94 : 92, suggestion: parseReceiptText(text) }, status: tokenLimited ? "token_limit" : "ok", durationMs: Date.now() - startedAt } satisfies AiAttempt;
-    logOcr({ stage: verification ? "ai_verify" : "ai", model: paddleOcrModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass?.suggestion.items.length, ...metrics });
+    logOcr({ stage: verification ? "ai_verify" : "ai", model: paddleOcrModel, status: attempt.status, durationMs: attempt.durationMs, items: attempt.pass?.suggestion.items.length, rawText: logSnippet(text), ...metrics });
     return attempt;
   } catch (error) {
     const status = cancelled?.aborted ? "cancelled_local_complete" : error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError") ? "timeout" : "connection_error";
