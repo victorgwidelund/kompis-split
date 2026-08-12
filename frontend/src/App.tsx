@@ -63,10 +63,10 @@ export default function App() {
     finally { setLoading(false); }
   })(); }, [enterAuthenticated, loadQuickTab, notify]);
   useEffect(() => {
-    const handleUnauthorized = () => { if (user) window.location.reload(); };
+    const handleUnauthorized = () => { if (user || guestMode) window.location.reload(); };
     window.addEventListener("kompis:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("kompis:unauthorized", handleUnauthorized);
-  }, [user]);
+  }, [user, guestMode]);
   const navigate = useCallback(async (next: View) => {
     try {
       if (next.page === "trip") await loadTrip(next.id);

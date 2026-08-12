@@ -1,7 +1,5 @@
 import { pool } from "./database.js";
 
-export const migrationVersions = [1, 2, 3, 4, 5] as const;
-
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,

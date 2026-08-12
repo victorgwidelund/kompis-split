@@ -45,6 +45,17 @@ test("equal balances use stable participant IDs", () => {
   ]);
 });
 
+test("named financial edge cases conserve the total exactly and assign remainders deterministically", () => {
+  assert.deepEqual(allocateByWeights(1, [1, 1, 1]), [1, 0, 0]);
+  assert.deepEqual(allocateByWeights(2, [1, 1, 1]), [1, 1, 0]);
+  assert.deepEqual(allocateByWeights(10000, [1, 1, 1]), [3334, 3333, 3333]);
+  assert.deepEqual(allocateByWeights(0, [1, 1]), [0, 0]);
+  assert.deepEqual(allocateByWeights(999999999, [1]), [999999999]);
+  assert.deepEqual(allocateByWeights(100, Array.from({ length: 37 }, () => 1)).reduce((sum, value) => sum + value, 0), 100);
+  // Splitting the same amount the same way twice must produce the same remainder assignment every time.
+  assert.deepEqual(allocateByWeights(10, [1, 1, 1]), allocateByWeights(10, [1, 1, 1]));
+});
+
 test("invalid weights are rejected", () => {
   assert.throws(() => allocateByWeights(100, []), /participant/);
   assert.throws(() => allocateByWeights(100, [0, 0]), /positive/);

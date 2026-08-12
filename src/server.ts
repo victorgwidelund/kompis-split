@@ -101,7 +101,7 @@ async function invitationPayload(request: IncomingMessage, token: string, expire
 
 function securityHeaders() {
   return {
-    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": "camera=(self), geolocation=(), microphone=()",
@@ -315,16 +315,27 @@ async function loadTrip(id: number, userId: number) {
     id: person.id, name: person.name, swishPhone: person.swish_phone, userId: person.user_id,
   }));
   const expenseRows = await db.prepare("SELECT * FROM expenses WHERE trip_id = ? AND voided_at IS NULL ORDER BY expense_date DESC NULLS LAST, id DESC").all<any>(id);
-  const expenses = await Promise.all(expenseRows.map(async (expense) => ({
+  // Fetch shares and receipts for the whole trip in two queries instead of two-per-expense (N+1).
+  const shareRows = expenseRows.length
+    ? await db.prepare(`SELECT expense_id, participant_id, amount_cents FROM expense_shares WHERE expense_id = ANY(?) ORDER BY expense_id, participant_id`).all<any>(expenseRows.map((expense) => expense.id))
+    : [];
+  const receiptRows = expenseRows.length
+    ? await db.prepare(`SELECT id, expense_id, file_name, mime_type, byte_size, created_by, created_at FROM expense_receipts WHERE expense_id = ANY(?) ORDER BY expense_id, id`).all<any>(expenseRows.map((expense) => expense.id))
+    : [];
+  const sharesByExpense = new Map<number, any[]>();
+  for (const share of shareRows) { const list = sharesByExpense.get(share.expense_id) || []; list.push(share); sharesByExpense.set(share.expense_id, list); }
+  const receiptsByExpense = new Map<number, any[]>();
+  for (const receipt of receiptRows) { const list = receiptsByExpense.get(receipt.expense_id) || []; list.push(receipt); receiptsByExpense.set(receipt.expense_id, list); }
+  const expenses = expenseRows.map((expense) => ({
     id: expense.id, payerId: expense.payer_id, title: expense.title, amountCents: expense.amount_cents,
     expenseDate: expense.expense_date, category: expense.category, splitMode: expense.split_mode,
     createdBy: expense.created_by,
-    shares: (await db.prepare("SELECT participant_id, amount_cents FROM expense_shares WHERE expense_id = ? ORDER BY participant_id").all<any>(expense.id)).map((share) => ({ participantId: share.participant_id, amountCents: share.amount_cents })),
-    receipts: (await db.prepare("SELECT id, file_name, mime_type, byte_size, created_by, created_at FROM expense_receipts WHERE expense_id = ? ORDER BY id").all<any>(expense.id)).map((receipt) => ({
+    shares: (sharesByExpense.get(expense.id) || []).map((share) => ({ participantId: share.participant_id, amountCents: share.amount_cents })),
+    receipts: (receiptsByExpense.get(expense.id) || []).map((receipt) => ({
       id: receipt.id, fileName: receipt.file_name, mimeType: receipt.mime_type, byteSize: receipt.byte_size,
       createdBy: receipt.created_by, createdAt: receipt.created_at,
     })),
-  })));
+  }));
   const paymentRows = await db.prepare("SELECT * FROM payments WHERE trip_id = ? AND voided_at IS NULL ORDER BY paid_at DESC, id DESC").all<any>(id);
   const payments = paymentRows.map((payment) => ({
     id: payment.id, fromId: payment.from_id, toId: payment.to_id, amountCents: payment.amount_cents,
@@ -667,6 +678,12 @@ async function quickTabList(userId: number) {
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const receiptAnalysisAttempts = new Map<number, { count: number; resetAt: number }>();
 const guestJoinAttempts = new Map<string, { count: number; resetAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of attempts) if (value.resetAt < now) attempts.delete(key);
+  for (const [key, value] of receiptAnalysisAttempts) if (value.resetAt < now) receiptAnalysisAttempts.delete(key);
+  for (const [key, value] of guestJoinAttempts) if (value.resetAt < now) guestJoinAttempts.delete(key);
+}, 10 * 60000).unref();
 function guestJoinAllowed(ip: string) {
   const now = Date.now();
   const item = guestJoinAttempts.get(ip);
@@ -694,8 +711,12 @@ function receiptAnalysisAllowed(userId: number) {
 
 function clientIp(request: IncomingMessage) {
   if (trustProxy) {
-    const forwarded = String(request.headers["x-forwarded-for"] || "").split(",")[0]?.trim();
-    if (forwarded) return forwarded;
+    // Cloudflare sets CF-Connecting-IP from the real TCP connection and strips any client-supplied
+    // value with that name, so it cannot be spoofed. X-Forwarded-For is appended-to by every hop
+    // (Cloudflare, then Nginx Proxy Manager) but a client can still prepend arbitrary values of its
+    // own, so its first entry must never be trusted for rate limiting. See DEPLOYMENT.md.
+    const cloudflareIp = String(request.headers["cf-connecting-ip"] || "").trim();
+    if (cloudflareIp) return cloudflareIp;
   }
   return request.socket.remoteAddress || "unknown";
 }
@@ -1039,18 +1060,34 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "GET" && url.pathname === "/api/users/search") {
     const query = String(url.searchParams.get("q") || "").trim();
     if (query.length < 2) return json(response, 200, { users: [] });
+    // swish_phone is intentionally excluded: search is for finding someone by name/email to invite,
+    // not for looking up a stranger's payment number. Phone numbers only become visible once two
+    // users actually share a trip or quick tab (see loadTrip participants / loadQuickTab members).
     const users = (await db.prepare(`
-      SELECT u.id, u.email, u.display_name, u.swish_phone,
+      SELECT u.id, u.email, u.display_name,
         EXISTS(SELECT 1 FROM contacts c WHERE c.owner_user_id = ? AND c.contact_user_id = u.id) is_contact
       FROM users u WHERE u.id != ? AND (u.display_name ILIKE ? ESCAPE '\\' OR u.email ILIKE ? ESCAPE '\\')
       ORDER BY is_contact DESC, lower(u.display_name) LIMIT 12
-    `).all<any>(user.id, user.id, `%${query.replace(/[\\%_]/g, "\\$&")}%`, `%${query.replace(/[\\%_]/g, "\\$&")}%`)).map((item) => ({ ...publicUser(item), isContact: Boolean(item.is_contact) }));
+    `).all<any>(user.id, user.id, `%${query.replace(/[\\%_]/g, "\\$&")}%`, `%${query.replace(/[\\%_]/g, "\\$&")}%`)).map((item) => ({ ...publicUser(item), swishPhone: null, isContact: Boolean(item.is_contact) }));
     return json(response, 200, { users });
   }
   if (request.method === "POST" && url.pathname === "/api/contacts") {
     const body = await readJson(request);
     const contactId = Number(body.userId);
     if (!await db.prepare("SELECT id FROM users WHERE id = ?").get(contactId) || contactId === user.id) throw new Error("Ogiltig kontakt");
+    // Only allow saving someone you already share a trip or quick tab with as a contact. Without this,
+    // any authenticated user could add an arbitrary numeric user ID and then read that stranger's
+    // email/Swish number back via GET /api/contacts, with no relationship or consent involved.
+    const related = await db.prepare(`
+      SELECT 1 WHERE EXISTS (
+        SELECT 1 FROM trip_access a JOIN trip_access b ON a.trip_id = b.trip_id
+        WHERE a.user_id = ? AND b.user_id = ?
+      ) OR EXISTS (
+        SELECT 1 FROM quick_tab_access a JOIN quick_tab_access b ON a.quick_tab_id = b.quick_tab_id
+        WHERE a.user_id = ? AND b.user_id = ?
+      )
+    `).get(user.id, contactId, user.id, contactId);
+    if (!related) throw new HttpError(403, "Du kan bara spara någon som kontakt om ni redan delar en resa eller snabbnota");
     await db.prepare("INSERT INTO contacts (owner_user_id, contact_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(user.id, contactId);
     return json(response, 201, { ok: true });
   }
@@ -1179,14 +1216,20 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1);
     const mimeType = contentType.trim().toLowerCase();
     if (!receiptMimeTypes.has(mimeType)) throw new HttpError(415, "Kvitton måste vara JPG, PNG, WebP eller PDF");
-    const receiptCount = Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE expense_id = ?").get<any>(expense.id))?.count || 0);
-    if (receiptCount >= receiptMaximumCount) throw new HttpError(409, `Högst ${receiptMaximumCount} kvitton per utgift`);
     const content = await readBytes(request, receiptMaximumBytes);
     if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda filformatet");
     const fileName = safeReceiptName(request.headers["x-file-name"]);
-    const result = await db.prepare("INSERT INTO expense_receipts (expense_id, trip_id, file_name, mime_type, byte_size, content, created_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .run(expense.id, expense.trip_id, fileName, mimeType, content.length, content, user.id);
-    await audit(user.id, expense.trip_id, "receipt.created", "receipt", Number(result.lastInsertRowid), { expenseId: expense.id, fileName, byteSize: content.length });
+    const receiptId = await db.transaction(async () => {
+      // Lock the expense row so two concurrent uploads on the same expense can't both pass the count
+      // check before either insert commits and end up exceeding receiptMaximumCount.
+      await db.prepare("SELECT id FROM expenses WHERE id = ? FOR UPDATE").get(expense.id);
+      const receiptCount = Number((await db.prepare("SELECT COUNT(*) count FROM expense_receipts WHERE expense_id = ?").get<any>(expense.id))?.count || 0);
+      if (receiptCount >= receiptMaximumCount) throw new HttpError(409, `Högst ${receiptMaximumCount} kvitton per utgift`);
+      const result = await db.prepare("INSERT INTO expense_receipts (expense_id, trip_id, file_name, mime_type, byte_size, content, created_by) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id")
+        .run(expense.id, expense.trip_id, fileName, mimeType, content.length, content, user.id);
+      return Number(result.lastInsertRowid);
+    });
+    await audit(user.id, expense.trip_id, "receipt.created", "receipt", receiptId, { expenseId: expense.id, fileName, byteSize: content.length });
     return json(response, 201, { trip: await loadTrip(expense.trip_id, user.id) });
   }
   match = url.pathname.match(/^\/api\/receipts\/(\d+)$/);
@@ -1311,7 +1354,14 @@ const server = createServer(async (request, response) => {
     console.error(error);
     const databaseError = Boolean(error && typeof error === "object" && "code" in error && /^\d{5}$/.test(String((error as any).code)));
     const status = error instanceof HttpError ? error.status : databaseError ? 500 : 400;
-    const message = databaseError ? "Databasåtgärden misslyckades" : error instanceof Error ? error.message : "Något gick fel";
+    // Only plain `new Error("...")` throws are intentional, user-facing validation messages (that's
+    // the convention used throughout this file). Anything else — TypeError, RangeError, or any other
+    // unexpected exception — is a bug, and its message may contain internals, so never forward it.
+    const isValidationError = error instanceof Error && error.constructor === Error;
+    const message = error instanceof HttpError ? error.message
+      : databaseError ? "Databasåtgärden misslyckades"
+      : isValidationError ? error.message
+      : "Något gick fel. Försök igen.";
     return json(response, status, { error: message });
   }
 });

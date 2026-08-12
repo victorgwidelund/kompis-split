@@ -36,6 +36,7 @@
 - Real configuration belongs in Compose Manager or an ignored `.env`; `.env.example` contains names and safe placeholders only.
 - Use only documented Swish functionality. Swish Commerce certificates and credentials stay server-side. Opening Swish is never proof of payment.
 - Retain security headers, origin protection, rate limiting, secure cookies behind HTTPS, input validation, and generic internal-error responses.
+- Production sits behind Cloudflare then Nginx Proxy Manager. When `TRUST_PROXY` is enabled, derive client IP for rate limiting from `CF-Connecting-IP` (set authoritatively by Cloudflare's edge, not spoofable by the client) — never from the first entry of `X-Forwarded-For`, which every hop appends to and a client can still prepend arbitrary values onto. See `DEPLOYMENT.md` for the full trust model.
 
 ## Change discipline
 
