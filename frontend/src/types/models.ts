@@ -253,6 +253,16 @@ export interface AdminResponse {
     expenseCount: number;
     totalCents: number;
   }>;
+  quickTabs: Array<{
+    id: number;
+    name: string;
+    merchant: string | null;
+    totalCents: number;
+    closedAt: string | null;
+    createdAt: string;
+    ownerName: string | null;
+    memberCount: number;
+  }>;
   activity: Array<{
     id: number;
     action: string;

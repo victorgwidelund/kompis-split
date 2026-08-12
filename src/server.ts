@@ -515,6 +515,16 @@ async function adminOverview() {
     archivedAt: item.archived_at, deletedAt: item.deleted_at, createdAt: item.created_at, ownerName: item.owner_name,
     memberCount: Number(item.member_count), expenseCount: Number(item.expense_count), totalCents: Number(item.total_cents),
   }));
+  const quickTabs = (await db.prepare(`
+    SELECT q.id, q.name, q.merchant, q.total_cents, q.closed_at, q.created_at, u.display_name owner_name,
+      (SELECT COUNT(*) FROM quick_tab_access qa WHERE qa.quick_tab_id = q.id) member_count
+    FROM quick_tabs q LEFT JOIN users u ON u.id = q.created_by
+    WHERE q.is_demo = FALSE
+    ORDER BY q.created_at DESC, q.id DESC
+  `).all<any>()).map((item) => ({
+    id: item.id, name: item.name, merchant: item.merchant, totalCents: Number(item.total_cents),
+    closedAt: item.closed_at, createdAt: item.created_at, ownerName: item.owner_name, memberCount: Number(item.member_count),
+  }));
   const activity = (await db.prepare(`
     SELECT a.id, a.action, a.entity_type, a.entity_id, a.created_at,
       u.display_name actor_name, t.name trip_name
@@ -530,7 +540,7 @@ async function adminOverview() {
     stats: {
       userCount: Number(stats.user_count), activeUserCount: Number(stats.active_user_count),
       activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), deletedTripCount: Number(stats.deleted_trip_count), totalCents: Number(stats.total_cents),
-    }, users, trips, activity,
+    }, users, trips, quickTabs, activity,
   };
 }
 
@@ -838,6 +848,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   // demo enter/exit toggle itself is deliberately not in this list.
   if (user?.demo_mode && [
     /^\/api\/users\/search$/, /^\/api\/contacts$/, /^\/api\/admin$/, /^\/api\/admin\/users\/\d+$/,
+    /^\/api\/admin\/quick-tabs\/\d+$/,
     /^\/api\/friend-invitations$/, /^\/api\/trips\/\d+\/invitations$/, /^\/api\/quick-tabs\/\d+\/invitations$/,
   ].some((pattern) => pattern.test(url.pathname))) {
     throw new HttpError(403, "Den här funktionen är inte tillgänglig i demoläge");
@@ -1167,6 +1178,22 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     await db.prepare("UPDATE quick_tabs SET closed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.closed === false ? null : new Date().toISOString(), quickTabId);
     broadcastQuickTab(quickTabId);
     return json(response, 200, { quickTab: await loadQuickTab(quickTabId, await quickTabViewer(request, quickTabId, user)) });
+  }
+  match = url.pathname.match(/^\/api\/admin\/quick-tabs\/(\d+)$/);
+  if (request.method === "DELETE" && match) {
+    requireAdmin(user);
+    const quickTabId = Number(match[1]);
+    const existing = await db.prepare("SELECT id FROM quick_tabs WHERE id = ?").get<any>(quickTabId);
+    if (!existing) return json(response, 404, { error: "Snabbnotan finns inte" });
+    // Every quick_tab_* table cascades on quick_tabs deletion (access, invitations, items, guests,
+    // and claims transitively via items), so a single delete is enough to remove it completely —
+    // unlike trips there is no restore/trash concept for quick tabs, this is permanent.
+    broadcastQuickTab(quickTabId);
+    await db.transaction(async () => {
+      await db.prepare("DELETE FROM quick_tabs WHERE id = ?").run(quickTabId);
+      await audit(user.id, null, "quick_tab.deleted", "quick_tab", quickTabId);
+    });
+    return json(response, 200, { ok: true });
   }
   if (request.method === "GET" && url.pathname === "/api/categories") {
     return json(response, 200, { categories: await categoryList() });

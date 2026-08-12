@@ -495,6 +495,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       () => request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isAdmin: true } }),
       () => request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} }),
       () => request(`/api/trips/${demoTripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} }),
+      () => request("/api/admin/quick-tabs/999999", { method: "DELETE", cookie: ownerCookie }),
     ]) {
       const result = await blocked();
       assert.equal(result.response.status, 403, JSON.stringify(result.payload));
@@ -518,6 +519,27 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(afterExitDashboard.payload.trips.some((item) => item.id === realTripId), true, "the admin's real trips must be back after exiting demo mode");
     const demoTripGoneAfterExit = await request(`/api/trips/${demoTripId}`, { cookie: ownerCookie });
     assert.equal(demoTripGoneAfterExit.response.status, 404, "the demo trip's data must actually be deleted, not just hidden");
+
+    // Admins can remove a quick tab entirely (no owner self-service delete exists, unlike trips'
+    // archive/trash flow — a quick tab is meant to be short-lived, so this is a hard delete, not a
+    // soft one, and every quick_tab_* row cascades on the FK).
+    const disposableQuickTab = await request("/api/quick-tabs", {
+      method: "POST", cookie: memberCookie,
+      body: { name: "Ta bort mig", total: "42.00", items: [{ name: "Rad", quantity: 1, amount: "42.00" }] },
+    });
+    assert.equal(disposableQuickTab.response.status, 201, JSON.stringify(disposableQuickTab.payload));
+    const disposableQuickTabId = disposableQuickTab.payload.quickTab.id;
+    const memberCannotDeleteQuickTab = await request(`/api/admin/quick-tabs/${disposableQuickTabId}`, { method: "DELETE", cookie: memberCookie });
+    assert.equal(memberCannotDeleteQuickTab.response.status, 403, "only a global admin may delete a quick tab, not even its own owner");
+    const missingQuickTabDelete = await request("/api/admin/quick-tabs/999999", { method: "DELETE", cookie: ownerCookie });
+    assert.equal(missingQuickTabDelete.response.status, 404);
+    const adminDeletesQuickTab = await request(`/api/admin/quick-tabs/${disposableQuickTabId}`, { method: "DELETE", cookie: ownerCookie });
+    assert.equal(adminDeletesQuickTab.response.status, 200, JSON.stringify(adminDeletesQuickTab.payload));
+    const quickTabGoneAfterDelete = await request(`/api/quick-tabs/${disposableQuickTabId}`, { cookie: memberCookie });
+    assert.equal(quickTabGoneAfterDelete.response.status, 403, "the quick tab and its access rows must actually be gone, not just hidden");
+    const adminOverviewAfterDelete = await request("/api/admin", { cookie: ownerCookie });
+    assert.equal(adminOverviewAfterDelete.payload.quickTabs.some((item) => item.id === disposableQuickTabId), false);
+    assert.equal(adminOverviewAfterDelete.payload.activity[0].action, "quick_tab.deleted");
 
     const disabled = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isDisabled: true } });
     assert.equal(disabled.response.status, 200);
