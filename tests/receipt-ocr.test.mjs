@@ -431,6 +431,40 @@ test("local AI receipt output is validated and merged by exact öre", () => {
   assert.deepEqual(combined.suggestion.items.map((item) => item.name), ["Chipspåse FS", "Valenciamandlar burk", "Heineken Draft"]);
 });
 
+test("the winning pass's title is trusted instead of re-scoring every pass's name candidate by length", () => {
+  // Real production bug (same Strandbryggan receipt): PaddleOCR-VL correctly read every item and the
+  // total exactly (an "exact" pass, worth far more than any other signal in receiptPassScore), but the
+  // combined suggestion's title still came out as "SAN = Servis IRS TRA SN ARS RASER VN" — a garbled
+  // line from the much less reliable local Tesseract fallback pass. That happened because titles were
+  // picked by comparing merchantNameScore() across *all* passes' candidates independently of which pass
+  // actually won, and that score is mostly just letter count — a long garbled misread beats a short
+  // correct name. Title must follow the winning pass, exactly like amount and expenseDate already do.
+  const winningPass = {
+    text: "", confidence: 92,
+    suggestion: {
+      title: "Strandbryggan", amount: "1825.00", expenseDate: "2026-04-14", category: "food",
+      items: [
+        { name: "Räbiff", quantity: 1, amount: "335.00" },
+        { name: "Räksallad", quantity: 1, amount: "295.00" },
+        { name: "Caesarsallad", quantity: 1, amount: "285.00" },
+        { name: "Tryffelpasta", quantity: 1, amount: "295.00" },
+        { name: "Läsk", quantity: 1, amount: "48.00" },
+        { name: "1664 Blanc", quantity: 4, amount: "392.00" },
+        { name: "GL Minuty", quantity: 1, amount: "175.00" },
+      ],
+    },
+  };
+  const garbledFallbackPass = {
+    text: "", confidence: 50,
+    suggestion: {
+      title: "SAN = Servis IRS TRA SN ARS RASER VN", amount: "1825.00", expenseDate: null, category: "other",
+      items: [{ name: "Räbiff", quantity: 1, amount: "335.00" }],
+    },
+  };
+  const combined = combineReceiptPasses([winningPass, garbledFallbackPass]);
+  assert.equal(combined.suggestion.title, "Strandbryggan");
+});
+
 test("structured vision output keeps row totals, quantities and exact receipt total", () => {
   const ai = parseOllamaReceipt({
     merchant: "Restaurangen", date: "", total: 2400,

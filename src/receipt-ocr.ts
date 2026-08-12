@@ -394,12 +394,15 @@ export function combineReceiptPasses(passes: ReceiptPass[]) {
       if (itemTotal === total) break;
     }
   }
+  // Title used to be picked by re-scoring every pass's candidate line across the board, independent of
+  // which pass actually won on items/total — a long garbled misread from a weaker pass (e.g. the local
+  // Tesseract fallback) could out-score a short, correct name like "Strandbryggan" purely by letter
+  // count. Trusting the winning pass first, same as amount/expenseDate already do, fixes that.
   const firstValue = <Key extends "title" | "amount" | "expenseDate">(key: Key) => ordered.find((pass) => pass.suggestion[key])?.suggestion[key] || null;
-  const bestTitle = ordered.map((pass) => pass.suggestion.title).filter((title): title is string => Boolean(title)).sort((first, second) => merchantNameScore(second) - merchantNameScore(first))[0] || null;
   const combinedText = ordered.map((pass) => pass.text).join("\n");
   return {
     suggestion: {
-      title: bestTitle, amount: firstValue("amount"), expenseDate: firstValue("expenseDate"),
+      title: firstValue("title"), amount: firstValue("amount"), expenseDate: firstValue("expenseDate"),
       category: suggestedCategory(combinedText), items,
     },
     confidence: Math.max(...passes.map((pass) => pass.confidence)),
