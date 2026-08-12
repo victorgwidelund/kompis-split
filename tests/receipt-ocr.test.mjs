@@ -223,6 +223,22 @@ test("a terminal/register ID code is never treated as a purchased item", () => {
   assert.equal(suggestion.items[0].name, "Läsk");
 });
 
+test("a brand-new, never-seen-before header field is excluded structurally, not by keyword", () => {
+  // No word in this header line appears in any exclusion list — this only works if the items section
+  // is genuinely found by position (header before items, footer after), the way a person would read
+  // the receipt, rather than by matching an ever-growing list of known metadata terms.
+  const suggestion = parseReceiptText(`
+    KROGEN VID ÅN
+    Löpnummer 88213-A
+    2026-05-01 19:00
+    1 x Fisksoppa 145,00
+    1 x Vitt vin 95,00
+    Totalt 240,00
+  `);
+  assert.equal(suggestion.items.length, 2);
+  assert.equal(suggestion.items.some((item) => /löpnummer|88213/i.test(item.name)), false, "an unrecognized header field must still be excluded by section position alone");
+});
+
 test("compact quantity prefixes are kept and payment rows are excluded", () => {
   const suggestion = parseReceiptText(`
     KVÄLLSKROGEN

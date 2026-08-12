@@ -181,14 +181,40 @@ function receiptTotal(lines: string[]) {
   return candidates.length ? Math.max(...candidates) : null;
 }
 
+// A receipt always has the same shape: header (merchant, address, table/terminal info) → items →
+// tax/subtotal → total → payment details. Rather than growing an ever-longer list of header/footer
+// keywords one real receipt at a time, find the items section structurally and only let the riskier
+// cross-line merge heuristics (which glue a name on one line to a price from another) fire inside it.
+// Same-line name+price pairs are unaffected — that path never "guesses" a pairing, so it's not
+// section-gated. A misread header/footer line that already contains its own price would still need
+// its own exclusion rule (see metadataLineWords etc.); this specifically targets the actual bug shape
+// seen twice now: an unrelated price merging onto a nearby header/footer line.
+const quantityNamePattern = /^\s*\d{1,2}\s*[xX]\s*\S.*[A-Za-zÅÄÖåäö]/;
+
+function itemsSectionBounds(lines: string[]): { start: number; end: number } {
+  // PaddleOCR sometimes emits every item name first, then a separate block of prices further down
+  // (see the "name and price blocks are paired" fixture) — the section can start at a quantity-
+  // prefixed name well before the first price shows up, not just near the first price itself.
+  const firstCandidateIndex = lines.findIndex((line) => amountCandidates(line).length > 0 || quantityNamePattern.test(line));
+  if (firstCandidateIndex === -1) return { start: 0, end: lines.length };
+  const start = Math.max(0, firstCandidateIndex - 2);
+  let end = lines.length;
+  for (let index = start; index < lines.length; index += 1) {
+    if (totalWords.test(lines[index]!)) { end = index; break; }
+  }
+  return { start, end };
+}
+
 function receiptItems(lines: string[]) {
+  const { start: sectionStart, end: sectionEnd } = itemsSectionBounds(lines);
   const items: Array<{ name: string; quantity: number; amount: string }> = [];
   const itemLines: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
+    const inItemsSection = index >= sectionStart && index < sectionEnd;
     const separatedNames: string[] = [];
     let cursor = index;
-    while (cursor < lines.length && /^\s*\d{1,2}\s*[xX]\s*\S.*[A-Za-zÅÄÖåäö]/.test(lines[cursor]!) && !amountCandidates(lines[cursor]!).length) {
+    while (inItemsSection && cursor < lines.length && /^\s*\d{1,2}\s*[xX]\s*\S.*[A-Za-zÅÄÖåäö]/.test(lines[cursor]!) && !amountCandidates(lines[cursor]!).length) {
       separatedNames.push(lines[cursor]!);
       cursor += 1;
     }
@@ -210,7 +236,7 @@ function receiptItems(lines: string[]) {
     const hasProductText = (line.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2;
     const endsWithAmount = /\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line);
     const nextIsAmount = /^\s*\d{1,6}[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(next);
-    if (hasProductText && !endsWithAmount && nextIsAmount && !metadataLineWords.test(line) && !looksLikeSystemCode(line)) {
+    if (inItemsSection && hasProductText && !endsWithAmount && nextIsAmount && !metadataLineWords.test(line) && !looksLikeSystemCode(line)) {
       itemLines.push(`${line} ${next}`);
       index += 1;
     } else itemLines.push(line);
