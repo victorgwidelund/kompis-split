@@ -90,6 +90,8 @@ TRUST_PROXY=true
 
 Proxyn ska vidarebefordra `Host` eller `X-Forwarded-Host`. `TRUST_PROXY=true` får bara användas när all trafik kommer genom din betrodda proxy.
 
+Se [DEPLOYMENT.md](DEPLOYMENT.md) för den fullständiga produktionstopologin (Cloudflare → Nginx Proxy Manager → appen), proxy-tillitsmodellen för klient-IP och Origin-kontroll, samt uppdaterings-, backup-, återställnings- och rollback-flöden. Se [PUBLIC_LAUNCH_CHECKLIST.md](PUBLIC_LAUNCH_CHECKLIST.md) för vad som krävs innan appen öppnas för fler än den egna vänkretsen.
+
 ## Backup och återställning
 
 `postgres-backup` gör omedelbart och därefter dagligen en PostgreSQL custom-format-backup. Retention styrs av `BACKUP_RETENTION_DAYS`. Kopiera även `/mnt/user/kompis_split/backups` till en annan disk eller maskin via ditt vanliga Unraid-backupflöde.

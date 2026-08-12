@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
-Senast uppdaterad: 2026-08-11  
-Appversion: 1.13.0
+Senast uppdaterad: 2026-08-12  
+Appversion: 1.14.0
 Databasschema: migration 6
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -33,6 +33,24 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 
 Bevara denna arkitektur om inte en större förändring uttryckligen har godkänts och motiverats.
 
+## Produktionstopologi och betrott proxy-läge
+
+Produktionstrafik går Cloudflare → Nginx Proxy Manager → appcontainern. Se
+`DEPLOYMENT.md` för den fullständiga topologin och de operativa flödena
+(uppdatering, backup, återställning, rollback).
+
+- Klient-IP för rate limiting (inloggning, gäst-anslutning till Snabbnota,
+  kvittoanalys) hämtas från `CF-Connecting-IP` när `TRUST_PROXY=true` —
+  aldrig från `X-Forwarded-For`s första värde, eftersom både Cloudflare och
+  Nginx lägger till i den headern och en klient fritt kan sätta ett eget
+  förstaled. `CF-Connecting-IP` sätts av Cloudflares edge utifrån den
+  faktiska anslutningen och går inte att förfalska av klienten.
+- `X-Forwarded-Host`/`X-Forwarded-Proto` används fortfarande för
+  absoluta inbjudningslänkar och Origin-verifiering; det förutsätter att
+  Nginx Proxy Manager skriver över (inte bara vidarebefordrar) dessa
+  headrar. `SameSite=Strict` på sessionscookien är det huvudsakliga
+  CSRF-skyddet oavsett proxykonfiguration.
+
 ## Drift på Unraid
 
 - Compose-stacken ligger i `compose.yaml`.
@@ -56,6 +74,8 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 - En snabbnotegäst får en separat HttpOnly-session som endast gäller en bestämd snabbnota och inte ger åtkomst till dashboard, resor, statistik eller administration.
 - Inbjudnings- och sessionstokens lagras hashade, inte i klartext.
 - Snabbnotans ägare kan se gästens nummer; övriga deltagare ser endast namnet.
+- `/api/users/search` returnerar aldrig telefonnummer — bara namn/e-post för att hitta rätt person att bjuda in. Telefonnummer blir synliga för andra användare först när man faktiskt delar en resa eller snabbnota (deltagarlistan), aldrig via fritextsök.
+- Att spara någon som kontakt (`POST /api/contacts`) kräver att man redan delar en resa eller snabbnota med personen. Ett gissat eller uppräknat användar-ID räcker inte för att läsa ut någons e-post/Swish-nummer den vägen.
 
 ## Ekonomi och data
 
@@ -106,6 +126,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.14.0 är en produktionshärdningsgenomgång efter React-migreringen, inriktad på säkerhet, finansiell korrekthet och drift bakom Cloudflare + Nginx Proxy Manager. Ingen arkitektur byttes ut. Ändringar: klient-IP för rate limiting läses från `CF-Connecting-IP` i stället för `X-Forwarded-For`s förstaled (det gamla sättet gick att kringgå och gjorde inloggningsspärren verkningslös bakom en proxykedja som lägger till i headern); `/api/users/search` läcker inte längre telefonnummer och `POST /api/contacts` kräver en delad resa/snabbnota; det generiska felsvaret läcker inte längre interna undantagsmeddelanden för oväntade fel; CSP:s `img-src` tillåter `blob:` (kvittoförhandsvisningen i "Ny utgift" använder `URL.createObjectURL` och blockerades annars av den strikta policyn); kvittoräkningen per utgift är nu låst i en transaktion så samtidiga uppladdningar inte kan tränga förbi femgränsen; `loadTrip` hämtar delningar/kvitton för hela resan i två frågor i stället för två frågor per utgift. Nya IDOR- och autentiseringstester lades till i `tests/server.integration.test.mjs` (utomstående användare nekas trip/kvitto/snabbnota-åtkomst, inloggningsspärren testas end-to-end, betalningsflödet har nu testtäckning) samt namngivna finansiella gränsfall i `tests/split.test.mjs`. Frontend: redigering av en procent-/andelsdelad utgift tappade tidigare tyst delningstypen (belopp förblev korrekta men metoden byttes till "exakt") — fixat; formulär för utgift/resa/betalning/snabbnota/person visar nu ett spärrat "sparar…"-läge under insändning för att undvika dubbletter vid dåligt mobilnät; snabbnotagäster vars session gått ut fastnade tidigare utan väg tillbaka efter ett 401-svar — fixat; sökracet i deltagarsök (stale response kunde skriva över ett nyare sökresultat) fixat med en request-räknare. Ny `DEPLOYMENT.md` (topologi, proxy-tillitsmodell, uppdatering/backup/återställning/rollback) och `PUBLIC_LAUNCH_CHECKLIST.md` (vad som saknas före en bredare lansering).
 - Version 1.13.0 ersätter den tidigare globala vanilla-JavaScript-klienten med React 19, Vite och strikt TypeScript. Alla befintliga arbetsflöden använder samma server-API: konton och inbjudningar, dashboard och vänner, resor, deltagare, utgifter och fyra delningssätt, kategorier, kvitton/OCR, saldon och betalningar, snabbnota med gästläge/SSE/Swish-länk, statistik, administration och versionsvisning. Docker bygger frontend och backend i samma build stage och slutcontainern är fortfarande en enda read-only Node-app. Databasschema, OCR-tjänster, Compose-portar, volymer och miljövariabler ändrades inte.
 - Version 1.12.0 byter den lokala dokumentmodellen till PaddleOCR-VL 1.6 via dess officiella GGUF-distribution och en intern, versionspinnad llama.cpp CUDA-server. Modellen använder det dokumenterade `OCR:`-kommandot utan framtvingat JSON-schema. Parsern hanterar både traditionella artikelrader och PaddleOCR-resultat där flera produktnamn följs av ett separat prisblock, samt totalrubrik och totalbelopp på skilda rader. Modellfilerna hämtas atomiskt till en beständig Unraid-katalog. Tesseract och alla säkra reservvägar behålls.
 - Version 1.11.0 byter till den officiella `qwen3-vl:4b-instruct-q4_K_M`, eftersom thinking-varianten kan returnera hundratals tokens i `message.thinking` men lämna `message.content` tomt för bilder. Reserv-OCR använder en naturligare gråskalebild och behandlar inte längre största artikelpriset som totalsumma när en oläslig totalrad faktiskt finns. `thinking_only` loggas separat utan att modellens resonemang eller kvittodata sparas.

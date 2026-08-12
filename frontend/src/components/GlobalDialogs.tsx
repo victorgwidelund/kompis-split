@@ -6,9 +6,9 @@ import { copyText } from "../utils/browser";
 import { formatDate } from "../utils/format";
 
 export function NewTripDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (trip: Trip) => Promise<void> }) {
-  const [error, setError] = useState("");
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); setError(""); try { const payload = await api<{ trip: Trip }>("/api/trips", { method: "POST", body: Object.fromEntries(new FormData(event.currentTarget)) }); await onCreated(payload.trip); event.currentTarget.reset(); onClose(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Kunde inte skapa resan"); } };
-  return <Modal open={open} onClose={onClose}><form onSubmit={submit}><DialogHeader eyebrow="Ett nytt äventyr" title="Skapa resa" onClose={onClose} /><label>Resans namn<input name="name" placeholder="t.ex. Helg i Sälen" maxLength={80} required /></label><div className="form-row"><label>Startar<input name="startDate" type="date" /></label><label>Slutar<input name="endDate" type="date" /></label></div><p className="form-error" role="alert">{error}</p><button className="button primary wide" type="submit">Skapa resa <span>→</span></button></form></Modal>;
+  const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); if (busy) return; setError(""); setBusy(true); try { const payload = await api<{ trip: Trip }>("/api/trips", { method: "POST", body: Object.fromEntries(new FormData(event.currentTarget)) }); await onCreated(payload.trip); event.currentTarget.reset(); onClose(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Kunde inte skapa resan"); } finally { setBusy(false); } };
+  return <Modal open={open} onClose={onClose}><form onSubmit={submit}><DialogHeader eyebrow="Ett nytt äventyr" title="Skapa resa" onClose={onClose} /><label>Resans namn<input name="name" placeholder="t.ex. Helg i Sälen" maxLength={80} required /></label><div className="form-row"><label>Startar<input name="startDate" type="date" /></label><label>Slutar<input name="endDate" type="date" /></label></div><p className="form-error" role="alert">{error}</p><button className="button primary wide" type="submit" disabled={busy}>{busy ? "Skapar…" : "Skapa resa"} <span>→</span></button></form></Modal>;
 }
 
 export function FriendInviteDialog({ open, onClose, notify }: { open: boolean; onClose: () => void; notify: (message: string) => void }) {

@@ -86,6 +86,23 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const ownerSession = await request("/api/session", { cookie: ownerCookie });
     assert.equal(ownerSession.payload.authenticated, true, JSON.stringify(ownerSession.payload));
 
+    const goodLogin = await request("/api/login", { method: "POST", body: { email: "victor@example.test", password: "my-secure-password" } });
+    assert.equal(goodLogin.response.status, 200, JSON.stringify(goodLogin.payload));
+    assert.match(cookieFrom(goodLogin.response), /^kompis_session=/);
+    const wrongPassword = await request("/api/login", { method: "POST", body: { email: "victor@example.test", password: "nope-not-it" } });
+    assert.equal(wrongPassword.response.status, 401);
+    const unknownEmail = await request("/api/login", { method: "POST", body: { email: "nobody@example.test", password: "nope-not-it" } });
+    assert.equal(unknownEmail.response.status, 401);
+    assert.equal(unknownEmail.payload.error, wrongPassword.payload.error, "wrong password and unknown email must return the same generic message to avoid user enumeration");
+    // Brute-force limiter is per-IP: drive it to the threshold, then confirm even a correct login is blocked.
+    for (let attempt = 0; attempt < 7; attempt += 1) {
+      await request("/api/login", { method: "POST", body: { email: "nobody@example.test", password: "nope-not-it" } });
+    }
+    const lockedOut = await request("/api/login", { method: "POST", body: { email: "nobody@example.test", password: "nope-not-it" } });
+    assert.equal(lockedOut.response.status, 429, JSON.stringify(lockedOut.payload));
+    const lockedOutForEveryone = await request("/api/login", { method: "POST", body: { email: "victor@example.test", password: "my-secure-password" } });
+    assert.equal(lockedOutForEveryone.response.status, 429);
+
     const friendInvite = await request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} });
     assert.equal(friendInvite.response.status, 201, JSON.stringify(friendInvite.payload));
     assert.match(friendInvite.payload.invitation.qrDataUrl, /^data:image\/png;base64,/);
@@ -111,6 +128,20 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const joinedTrip = await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token } });
     assert.equal(joinedTrip.payload.tripId, tripId);
 
+    // IDOR: an ordinary authenticated user with no relationship to this trip must be rejected server-side,
+    // never merely hidden client-side. Erik stays fully unrelated to tripId until later in this test.
+    const erikFriendInvite = await request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} });
+    const erikRegistration = await request("/api/register", { method: "POST", body: { inviteToken: erikFriendInvite.payload.invitation.token, name: "Erik Utanför", email: "erik@example.test", password: "yet-another-secure-pw", swishPhone: "0705554433" } });
+    assert.equal(erikRegistration.response.status, 201, JSON.stringify(erikRegistration.payload));
+    const erikCookie = cookieFrom(erikRegistration.response);
+    const erikId = erikRegistration.payload.user.id;
+    const outsiderTripRead = await request(`/api/trips/${tripId}`, { cookie: erikCookie });
+    assert.equal(outsiderTripRead.response.status, 403);
+    const outsiderExpenseWrite = await request(`/api/trips/${tripId}/expenses`, { method: "POST", cookie: erikCookie, body: { title: "Smygutgift", amount: "10", payerId: 1, entries: [] } });
+    assert.equal(outsiderExpenseWrite.response.status, 403);
+    const outsiderParticipantWrite = await request(`/api/trips/${tripId}/participants`, { method: "POST", cookie: erikCookie, body: { name: "Inkräktare" } });
+    assert.equal(outsiderParticipantWrite.response.status, 403);
+
     const memberDashboard = await request("/api/dashboard", { cookie: memberCookie });
     assert.equal(memberDashboard.payload.trips.length, 1);
     assert.equal(memberDashboard.payload.contacts[0].email, "victor@example.test");
@@ -121,6 +152,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const search = await request("/api/users/search?q=Vic", { cookie: memberCookie });
     assert.equal(search.payload.users[0].email, "victor@example.test");
     assert.equal(search.payload.users[0].isContact, true);
+    assert.equal(search.payload.users[0].swishPhone, null, "users/search must never expose phone numbers of unrelated people");
 
     const forbiddenArchive = await request(`/api/trips/${tripId}/archive`, { method: "POST", cookie: memberCookie, body: { archived: true } });
     assert.equal(forbiddenArchive.response.status, 403);
@@ -187,6 +219,12 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(quickPreview.payload.invitation.quickTabName, "Middag på Kajen");
     const anonymousQuickTab = await request(`/api/quick-tabs/${quickTabId}`);
     assert.equal(anonymousQuickTab.response.status, 401);
+    const anonymousQuickTabEvents = await request(`/api/quick-tabs/${quickTabId}/events`);
+    assert.equal(anonymousQuickTabEvents.response.status, 401);
+    const outsiderQuickTabRead = await request(`/api/quick-tabs/${quickTabId}`, { cookie: erikCookie });
+    assert.equal(outsiderQuickTabRead.response.status, 403);
+    const outsiderQuickTabEvents = await request(`/api/quick-tabs/${quickTabId}/events`, { cookie: erikCookie });
+    assert.equal(outsiderQuickTabEvents.response.status, 403);
     const guestJoin = await request("/api/quick-tabs/guest-join", {
       method: "POST", body: { token: quickTab.payload.invitation.token, name: "Erik Gäst", swishPhone: "0701112233" },
     });
@@ -250,6 +288,8 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const downloadedReceipt = await fetch(`${baseUrl}/api/receipts/${receiptId}`, { headers: { Cookie: ownerCookie } });
     assert.equal(downloadedReceipt.headers.get("content-type"), "image/png");
     assert.deepEqual(Buffer.from(await downloadedReceipt.arrayBuffer()), receiptBytes);
+    const outsiderReceiptRead = await request(`/api/receipts/${receiptId}`, { cookie: erikCookie });
+    assert.equal(outsiderReceiptRead.response.status, 403);
     const memberCannotDeleteReceipt = await request(`/api/receipts/${receiptId}`, { method: "DELETE", cookie: memberCookie, body: {} });
     assert.equal(memberCannotDeleteReceipt.response.status, 403);
 
@@ -260,6 +300,39 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(voided.response.status, 200);
     const afterVoid = await request(`/api/trips/${tripId}`, { cookie: ownerCookie });
     assert.equal(afterVoid.payload.trip.totalCents, 0);
+
+    // contacts: saving a stranger is blocked until you actually share a trip or quick tab with them.
+    const blockedContact = await request("/api/contacts", { method: "POST", cookie: memberCookie, body: { userId: erikId } });
+    assert.equal(blockedContact.response.status, 403, JSON.stringify(blockedContact.payload));
+    const erikJoinsTrip = await request(`/api/trips/${tripId}/participants`, { method: "POST", cookie: ownerCookie, body: { userId: erikId } });
+    assert.equal(erikJoinsTrip.response.status, 201, JSON.stringify(erikJoinsTrip.payload));
+    const allowedContact = await request("/api/contacts", { method: "POST", cookie: memberCookie, body: { userId: erikId } });
+    assert.equal(allowedContact.response.status, 201, JSON.stringify(allowedContact.payload));
+
+    // payments: any trip member can record one; only its creator or a manager can void it.
+    const payment = await request(`/api/trips/${tripId}/payments`, { method: "POST", cookie: memberCookie, body: { fromId: memberParticipant.id, toId: ownerParticipant.id, amount: "25.00", note: "Swish" } });
+    assert.equal(payment.response.status, 201, JSON.stringify(payment.payload));
+    assert.equal(payment.payload.trip.payments[0].amountCents, 2500);
+    const paymentId = payment.payload.trip.payments[0].id;
+    const erikCannotVoidPayment = await request(`/api/payments/${paymentId}`, { method: "DELETE", cookie: erikCookie, body: {} });
+    assert.equal(erikCannotVoidPayment.response.status, 403);
+    const paymentVoided = await request(`/api/payments/${paymentId}`, { method: "DELETE", cookie: memberCookie, body: {} });
+    assert.equal(paymentVoided.response.status, 200, JSON.stringify(paymentVoided.payload));
+
+    // percentage split mode end-to-end through the HTTP API (the allocation math itself is covered in split.test.mjs).
+    const percentageExpense = await request(`/api/trips/${tripId}/expenses`, { method: "POST", cookie: ownerCookie, body: { title: "Bensin", amount: "100", payerId: ownerParticipant.id, category: "travel", splitMode: "percentage", entries: [{ participantId: ownerParticipant.id, value: 60 }, { participantId: memberParticipant.id, value: 40 }] } });
+    assert.equal(percentageExpense.response.status, 201, JSON.stringify(percentageExpense.payload));
+    assert.deepEqual(percentageExpense.payload.trip.expenses[0].shares.map((share) => share.amountCents), [6000, 4000]);
+
+    // concurrent receipt uploads on the same expense must never be able to exceed the per-expense cap.
+    const concurrentReceipts = await Promise.all(Array.from({ length: 6 }, (_, index) => fetch(`${baseUrl}/api/expenses/${percentageExpense.payload.expenseId}/receipts`, {
+      method: "POST",
+      headers: { Cookie: ownerCookie, Origin: baseUrl, "Content-Type": "image/png", "X-File-Name": `race-${index}.png` },
+      body: receiptBytes,
+    })));
+    const concurrentStatuses = concurrentReceipts.map((response) => response.status).sort((a, b) => a - b);
+    assert.equal(concurrentStatuses.filter((status) => status === 201).length, 5, JSON.stringify(concurrentStatuses));
+    assert.equal(concurrentStatuses.filter((status) => status === 409).length, 1, JSON.stringify(concurrentStatuses));
 
     const archived = await request(`/api/trips/${tripId}/archive`, { method: "POST", cookie: ownerCookie, body: { archived: true } });
     assert.ok(archived.payload.trip.archivedAt);
@@ -286,7 +359,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(privateTrip.payload.trip.startDate, null);
     const adminOverview = await request("/api/admin", { cookie: ownerCookie });
     assert.equal(adminOverview.response.status, 200, JSON.stringify(adminOverview.payload));
-    assert.equal(adminOverview.payload.users.length, 2);
+    assert.equal(adminOverview.payload.users.length, 3);
     assert.equal(adminOverview.payload.trips.length, 2);
     const adminCanOpenEveryTrip = await request(`/api/trips/${privateTrip.payload.trip.id}`, { cookie: ownerCookie });
     assert.equal(adminCanOpenEveryTrip.response.status, 200);
@@ -319,9 +392,12 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number(revision.previous.amountCents), 10001);
   assert.deepEqual(revision.previous.shares.map((share) => Number(share.amountCents)), [5001, 5000]);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 1);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'payment.voided'")).rows[0].count), 1);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('trip.deleted', 'trip.undeleted')")).rows[0].count), 2);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'receipt.created'")).rows[0].count), 1);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('friend_invitation.created', 'friend_invitation.joined')")).rows[0].count), 2);
+  // 1 from the original upload + 5 from the concurrent-upload race-condition test (the cap rejects the 6th).
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'receipt.created'")).rows[0].count), 6);
+  // 2 from Anna's friend invitation + 2 from Erik's.
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('friend_invitation.created', 'friend_invitation.joined')")).rows[0].count), 4);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
