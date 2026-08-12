@@ -223,6 +223,35 @@ test("a terminal/register ID code is never treated as a purchased item", () => {
   assert.equal(suggestion.items[0].name, "Läsk");
 });
 
+test("a terminal/register ID code is still excluded when OCR drops the # and misreads one letter as lowercase", () => {
+  // Real production bug (Strandbryggan receipt): PaddleOCR-VL read "XCL AT-150-E-18E #1" as
+  // "XCl AT-150-E-18E 41" (the "#" vanished, one letter's case flipped), and its register-number
+  // continuation line "3564" was then misread as a price "35,64" for that garbled code. Both the
+  // system-code detector and the standalone-digit-to-price heuristic must tolerate this shape.
+  const suggestion = parseReceiptText(`
+    Strandbryggan
+    XCl AT-150-E-18E 41
+    3564
+    1.00 1/1 Räbiff 335.00
+    1.00 Räksallad 295.00
+    1.00 Caesarsalla
+    d 285.00
+    1.00 Tryffelpast
+    a 295.00
+    1.00 Läsk 48.00
+    4.00 1664 Blanc 392.00
+    1.00 GL Minuty 175.00
+    Total 1825.00
+  `);
+  assert.equal(suggestion.items.length, 7, JSON.stringify(suggestion.items));
+  assert.equal(suggestion.items.some((item) => /^cl\b|18e|41|3564|35[.,]64/i.test(item.name) || item.amount === "35.64"), false);
+  assert.deepEqual(suggestion.items.map((item) => item.name), [
+    "Räbiff", "Räksallad", "Caesarsallad", "Tryffelpasta", "Läsk", "Blanc", "GL Minuty",
+  ]);
+  const total = suggestion.items.reduce((sum, item) => sum + Math.round(Number(item.amount) * 100), 0);
+  assert.equal(total, 182500);
+});
+
 test("a brand-new, never-seen-before header field is excluded structurally, not by keyword", () => {
   // No word in this header line appears in any exclusion list — this only works if the items section
   // is genuinely found by position (header before items, footer after), the way a person would read
