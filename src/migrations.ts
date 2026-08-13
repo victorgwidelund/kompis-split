@@ -326,6 +326,27 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [7, "admin-only-demo-mode"],
     );
+    // Quick tabs never got trips' payment-tracking concept: there was no way to record that a member
+    // had actually Swished the owner, or to see who still owed money. Swish itself exposes no way for
+    // a non-merchant app to verify a payment happened, so this is trust-based self/owner reporting,
+    // same as trips' existing "Markera betald" flow.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quick_tab_payments (
+        id BIGSERIAL PRIMARY KEY,
+        quick_tab_id BIGINT NOT NULL REFERENCES quick_tabs(id) ON DELETE CASCADE,
+        user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+        guest_id BIGINT REFERENCES quick_tab_guests(id) ON DELETE CASCADE,
+        paid_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        marked_by BIGINT REFERENCES users(id),
+        CHECK ((user_id IS NOT NULL)::integer + (guest_id IS NOT NULL)::integer = 1)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_tab_payments_user_unique ON quick_tab_payments(quick_tab_id, user_id) WHERE user_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_tab_payments_guest_unique ON quick_tab_payments(quick_tab_id, guest_id) WHERE guest_id IS NOT NULL;
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [8, "quick-tab-payment-tracking"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
