@@ -471,6 +471,44 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(adminCanOpenEveryTrip.response.status, 200);
     assert.equal(adminCanOpenEveryTrip.payload.trip.role, "admin");
 
+    // Bug reports: in-app reporting with automatic browser/context breadcrumbs and an optional
+    // screenshot, so a future debugging session has real evidence instead of just "it didn't work".
+    const bugReport = await request("/api/bug-reports", {
+      method: "POST", cookie: memberCookie,
+      body: { description: "Kunde inte markera betald på snabbnotan.", pageUrl: "http://example.test/#quick-tab-1", userAgent: "TestAgent/1.0", breadcrumbs: ["GET /api/quick-tabs/1 → 200", "POST /api/quick-tabs/1/payments → 403"] },
+    });
+    assert.equal(bugReport.response.status, 201, JSON.stringify(bugReport.payload));
+    const bugReportId = bugReport.payload.id;
+    const screenshotBytes = Buffer.from("89504e470d0a1a0a0000000d4948445200000020000000200802000000fc18eda30000000970485973000003e8000003e801b57b526b00000031494441544889edd0310d000008c030fc9b0609bbf85a034b36fb6c048a45c9a26451b22859942c4a16258b9245e97dd1018b55f4a62fd707540000000049454e44ae426082", "hex");
+    const outsiderScreenshotUpload = await fetch(`${baseUrl}/api/bug-reports/${bugReportId}/screenshot`, {
+      method: "POST", headers: { Cookie: ownerCookie, Origin: baseUrl, "Content-Type": "image/png" }, body: screenshotBytes,
+    });
+    assert.equal(outsiderScreenshotUpload.status, 403, "only the reporter may attach a screenshot to their own report");
+    const ownScreenshotUpload = await fetch(`${baseUrl}/api/bug-reports/${bugReportId}/screenshot`, {
+      method: "POST", headers: { Cookie: memberCookie, Origin: baseUrl, "Content-Type": "image/png" }, body: screenshotBytes,
+    });
+    assert.equal(ownScreenshotUpload.status, 201, JSON.stringify(await ownScreenshotUpload.json()));
+    const adminOverviewWithBugReport = await request("/api/admin", { cookie: ownerCookie });
+    const listedReport = adminOverviewWithBugReport.payload.bugReports.find((item) => item.id === bugReportId);
+    assert.ok(listedReport, "the report must show up in the admin overview");
+    assert.equal(listedReport.reporterName, "Anna");
+    assert.equal(listedReport.hasScreenshot, true);
+    assert.equal(listedReport.resolvedAt, null);
+    assert.ok(listedReport.breadcrumbs.some((entry) => entry.includes("/api/quick-tabs/1/payments")), "breadcrumbs must be stored");
+    const memberCannotResolveBugReport = await request(`/api/admin/bug-reports/${bugReportId}/resolve`, { method: "POST", cookie: memberCookie, body: { resolved: true } });
+    assert.equal(memberCannotResolveBugReport.response.status, 403);
+    const resolvedBugReport = await request(`/api/admin/bug-reports/${bugReportId}/resolve`, { method: "POST", cookie: ownerCookie, body: { resolved: true } });
+    assert.equal(resolvedBugReport.response.status, 200, JSON.stringify(resolvedBugReport.payload));
+    const bugReportScreenshotDownload = await fetch(`${baseUrl}/api/admin/bug-reports/${bugReportId}/screenshot`, { headers: { Cookie: ownerCookie } });
+    assert.equal(bugReportScreenshotDownload.status, 200);
+    assert.equal(bugReportScreenshotDownload.headers.get("content-type"), "image/jpeg");
+    const memberCannotDeleteBugReport = await request(`/api/admin/bug-reports/${bugReportId}`, { method: "DELETE", cookie: memberCookie });
+    assert.equal(memberCannotDeleteBugReport.response.status, 403);
+    const deletedBugReport = await request(`/api/admin/bug-reports/${bugReportId}`, { method: "DELETE", cookie: ownerCookie });
+    assert.equal(deletedBugReport.response.status, 200, JSON.stringify(deletedBugReport.payload));
+    const missingBugReportDelete = await request(`/api/admin/bug-reports/${bugReportId}`, { method: "DELETE", cookie: ownerCookie });
+    assert.equal(missingBugReportDelete.response.status, 404);
+
     const memberId = registration.payload.user.id;
     const promoted = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isAdmin: true } });
     assert.equal(promoted.response.status, 200);
@@ -517,6 +555,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       () => request("/api/friend-invitations", { method: "POST", cookie: ownerCookie, body: {} }),
       () => request(`/api/trips/${demoTripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} }),
       () => request("/api/admin/quick-tabs/999999", { method: "DELETE", cookie: ownerCookie }),
+      () => request("/api/admin/bug-reports/999999/resolve", { method: "POST", cookie: ownerCookie, body: { resolved: true } }),
     ]) {
       const result = await blocked();
       assert.equal(result.response.status, 403, JSON.stringify(result.payload));
@@ -593,7 +632,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 8);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 9);
   // 1 from "Middag på Kajen" + 1 from the Swedish-characters test quick tab ("Ångbåtsbryggan").
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 2);
   // "Erik Gäst" (claims below) + "Först Ansluten" (joined via the original first invite to prove it

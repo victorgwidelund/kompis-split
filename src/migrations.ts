@@ -347,6 +347,31 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [8, "quick-tab-payment-tracking"],
     );
+    // In-app bug reporting: a short description plus the page URL, browser info, app version and a
+    // small trail of the user's most recent API calls (captured client-side, never request/response
+    // bodies) so a future debugging session has real context instead of just "it didn't work". The
+    // screenshot is a genuine photo/screenshot the reporter chooses to attach, not a live capture.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS bug_reports (
+        id BIGSERIAL PRIMARY KEY,
+        reported_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        description TEXT NOT NULL CHECK(char_length(description) BETWEEN 1 AND 2000),
+        page_url TEXT,
+        user_agent TEXT,
+        app_version TEXT,
+        breadcrumbs JSONB,
+        screenshot_mime_type TEXT,
+        screenshot_content BYTEA,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        resolved_at TIMESTAMPTZ,
+        resolved_by BIGINT REFERENCES users(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_created ON bug_reports(created_at DESC);
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [9, "bug-reports"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
