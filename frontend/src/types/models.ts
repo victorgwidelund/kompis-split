@@ -291,4 +291,5 @@ export type View =
   | { page: "trip"; id: number }
   | { page: "quick-tab"; id: number }
   | { page: "statistics" }
-  | { page: "admin" };
+  | { page: "admin" }
+  | { page: "guide" };

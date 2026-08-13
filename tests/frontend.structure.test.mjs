@@ -19,6 +19,7 @@ test("React-ingången är svensk, mobilanpassad och Vite-baserad", async () => {
   assert.match(app, /QuickTabPage/);
   assert.match(app, /StatisticsPage/);
   assert.match(app, /AdminPage/);
+  assert.match(app, /GuidePage/);
 });
 
 test("alla bevarade arbetsflöden har React-komponenter och centrala API-anrop", async () => {

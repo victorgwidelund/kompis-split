@@ -32,6 +32,7 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
         <button className="button dark wide" onClick={onNewTrip}><span>＋</span> Ny grupp</button>
         <button className="button coral-button wide" onClick={onNewQuickTab}><span>✓</span> Snabbnota</button>
         <button className="button ghost wide statistics-nav" onClick={() => onNavigate({ page: "statistics" })}><span>⌁</span> Statistik</button>
+        <button className="button ghost wide guide-nav" onClick={() => onNavigate({ page: "guide" })}><span>？</span> Användarguide</button>
         {user.isAdmin && <button className="button ghost wide admin-nav" onClick={() => onNavigate({ page: "admin" })}><span>⚙</span> Administration</button>}
         <div className="side-heading"><span>Aktiva grupper</span><span className="count">{active.length}</span></div>
         <nav className="trip-list" aria-label="Aktiva grupper">{active.length ? active.map(tripLink) : <small className="side-empty">Inga aktiva grupper</small>}</nav>
@@ -43,7 +44,7 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
       <main className="main">
         <header className="mobile-header">
           <button className="brand brand-button" onClick={() => onNavigate({ page: "dashboard" })}><span className="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></button>
-          <div className="mobile-actions"><small className="app-version mobile-version">{shortVersion(version)}</small><button className="icon-button" aria-label="Rapportera en bugg" title="Rapportera en bugg" onClick={onReportBug}>⚠</button><button className="icon-button coral-button" aria-label="Ny snabbnota" onClick={onNewQuickTab}>✓</button><button className="icon-button" aria-label="Statistik" onClick={() => onNavigate({ page: "statistics" })}>⌁</button>{user.isAdmin && <button className="icon-button" aria-label="Administration" onClick={() => onNavigate({ page: "admin" })}>⚙</button>}<button className="icon-button dark" aria-label="Ny grupp" onClick={onNewTrip}>＋</button></div>
+          <div className="mobile-actions"><small className="app-version mobile-version">{shortVersion(version)}</small><button className="icon-button" aria-label="Rapportera en bugg" title="Rapportera en bugg" onClick={onReportBug}>⚠</button><button className="icon-button coral-button" aria-label="Ny snabbnota" onClick={onNewQuickTab}>✓</button><button className="icon-button" aria-label="Statistik" onClick={() => onNavigate({ page: "statistics" })}>⌁</button><button className="icon-button" aria-label="Användarguide" onClick={() => onNavigate({ page: "guide" })}>？</button>{user.isAdmin && <button className="icon-button" aria-label="Administration" onClick={() => onNavigate({ page: "admin" })}>⚙</button>}<button className="icon-button dark" aria-label="Ny grupp" onClick={onNewTrip}>＋</button></div>
         </header>
         {children}
       </main>
