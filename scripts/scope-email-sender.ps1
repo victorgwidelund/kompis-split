@@ -8,12 +8,18 @@
   Application Access Policy so it can only ever send as the one mailbox you choose — if the
   client secret ever leaks, the blast radius is one mailbox, not the whole tenant.
 
+  The policy is scoped through a mail-enabled security group containing just that one mailbox,
+  rather than pointing directly at the mailbox. Microsoft's own guidance recommends this even
+  for a single mailbox — pointing New-ApplicationAccessPolicy straight at a mailbox is known to
+  sometimes fail with "the identity of the policy scope is not a security principal" even when
+  the mailbox is fully set up and synced; going through a group avoids that.
+
   Run this AFTER setup-email-integration.ps1. You'll need the App (client) ID it printed and
   the same sender mailbox address. Requires an Exchange admin role in your tenant.
 
 .NOTES
-  Safe to re-run: Exchange Online will simply report the policy already exists if you run it
-  twice for the same app/mailbox pair.
+  Safe to re-run: reuses the security group and reports the policy already exists if you run
+  it twice for the same app/mailbox pair.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -30,12 +36,29 @@ Connect-ExchangeOnline -ShowBanner:$false
 
 $appId = Read-Host "App (client) ID (samma som setup-email-integration.ps1 skrev ut)"
 $mailbox = Read-Host "Avsändaradress som appen ska få skicka som (t.ex. no-reply@dittdomän.se)"
+$domain = $mailbox.Split("@")[1]
+$groupSmtp = "kompis-split-senders@$domain"
 
 Write-Host ""
-Write-Host "Skapar Application Access Policy: $appId får bara skicka som $mailbox..."
+Write-Host "Kontrollerar mailaktiverad säkerhetsgrupp ($groupSmtp)..."
+$group = Get-DistributionGroup -Identity $groupSmtp -ErrorAction SilentlyContinue
+if (-not $group) {
+  Write-Host "Skapar grupp och lägger till $mailbox som medlem..."
+  New-DistributionGroup -Name "Kompis Split Senders" -Type Security -PrimarySmtpAddress $groupSmtp -Members $mailbox | Out-Null
+} else {
+  Write-Host "Återanvänder befintlig grupp." -ForegroundColor Yellow
+  $isMember = Get-DistributionGroupMember -Identity $groupSmtp | Where-Object { $_.PrimarySmtpAddress -eq $mailbox }
+  if (-not $isMember) {
+    Write-Host "Lägger till $mailbox i gruppen..."
+    Add-DistributionGroupMember -Identity $groupSmtp -Member $mailbox
+  }
+}
+
+Write-Host ""
+Write-Host "Skapar Application Access Policy: $appId får bara skicka som medlemmar i $groupSmtp..."
 New-ApplicationAccessPolicy `
   -AppId $appId `
-  -PolicyScopeGroupId $mailbox `
+  -PolicyScopeGroupId $groupSmtp `
   -AccessRight RestrictAccess `
   -Description "Kompis Split Mail - endast $mailbox"
 
