@@ -7,6 +7,7 @@ import { Toast } from "./components/Toast";
 import { AdminPage } from "./features/admin/AdminPage";
 import { AuthScreen, type AuthMode } from "./features/auth/AuthScreen";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
+import { GuidePage } from "./features/guide/GuidePage";
 import { QuickTabDialog } from "./features/quick-tabs/QuickTabDialog";
 import { QuickTabPage } from "./features/quick-tabs/QuickTabPage";
 import { StatisticsPage } from "./features/statistics/StatisticsPage";
@@ -22,6 +23,7 @@ function hashView(): View {
   const quick = location.hash.match(/^#quick-tab-(\d+)$/); if (quick) return { page: "quick-tab", id: Number(quick[1]) };
   if (location.hash === "#statistics") return { page: "statistics" };
   if (location.hash === "#admin") return { page: "admin" };
+  if (location.hash === "#guide") return { page: "guide" };
   return { page: "dashboard" };
 }
 
@@ -102,6 +104,7 @@ export default function App() {
     {view.page === "trip" && user && trip && <TripPage trip={trip} user={user} categories={categories} onBack={() => void navigate({ page: "dashboard" })} onRefresh={refreshTrip} onOpenDialog={openTripDialog} notify={notify} />}
     {view.page === "quick-tab" && quickTab && <QuickTabPage tab={quickTab} initialInvitation={quickInvitation} guestMode={guestMode} onBack={() => void navigate({ page: "dashboard" })} onRefresh={refreshQuick} onChanged={setQuickTab} notify={notify} />}
     {view.page === "statistics" && statistics && <StatisticsPage data={statistics} onBack={() => void navigate({ page: "dashboard" })} onRefresh={() => void api<StatisticsResponse>("/api/statistics").then(setStatistics)} />}
+    {view.page === "guide" && user && <GuidePage isAdmin={user.isAdmin} onBack={() => void navigate({ page: "dashboard" })} />}
     {view.page === "admin" && admin && user && <AdminPage data={admin} currentUserId={user.id} demoMode={demoMode} onEnterDemo={() => void enterDemo()} onBack={() => void navigate({ page: "dashboard" })} onRefresh={() => void reloadAdmin()} onOpenTrip={(id) => void navigate({ page: "trip", id })} onUserUpdate={(id, update) => void api(`/api/admin/users/${id}`, { method: "PATCH", body: update }).then(reloadAdmin).then(() => notify("Kontot uppdaterades"))} onTripArchive={(id, archived) => void api(`/api/trips/${id}/archive`, { method: "POST", body: { archived } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen uppdaterades"))} onTripRestore={(id) => void api(`/api/trips/${id}/trash`, { method: "POST", body: { deleted: false } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen återställdes"))} onQuickTabDelete={(id) => void api(`/api/admin/quick-tabs/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Snabbnotan togs bort"))} onBugReportResolve={(id, resolved) => void api(`/api/admin/bug-reports/${id}/resolve`, { method: "POST", body: { resolved } }).then(reloadAdmin).then(() => notify(resolved ? "Markerad som löst" : "Markerad som olöst"))} onBugReportDelete={(id) => void api(`/api/admin/bug-reports/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Buggrapporten togs bort"))} />}
   </Shell>
   <NewTripDialog open={globalDialog === "trip"} onClose={() => setGlobalDialog(null)} onCreated={async (created) => { await refreshDashboard(); setTrip(created); setView({ page: "trip", id: created.id }); history.replaceState(null, "", `${location.pathname}#trip-${created.id}`); setTripDialog("invite"); notify("Gruppen skapades — bjud nu in gänget"); }} />
