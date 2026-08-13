@@ -683,12 +683,17 @@ async function loadQuickTab(quickTabId: number, viewer: QuickTabViewer) {
   const claimedCents = items.reduce((sum, item) => sum + item.claimedCents, 0);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const claimedQuantity = items.reduce((sum, item) => sum + item.claimedQuantity, 0);
+  const paidRows = await db.prepare(`
+    SELECT CASE WHEN user_id IS NOT NULL THEN CONCAT('u:', user_id) ELSE CONCAT('g:', guest_id) END viewer_key, paid_at
+    FROM quick_tab_payments WHERE quick_tab_id = ?
+  `).all<any>(quickTabId);
+  const paidAtByViewer = new Map(paidRows.map((row) => [row.viewer_key, row.paid_at]));
   return {
     id: Number(tab.id), name: tab.name, merchant: tab.merchant, receiptDate: tab.receipt_date,
     totalCents: Number(tab.total_cents), hasReceipt: Boolean(tab.has_receipt), createdBy: Number(tab.created_by),
     closedAt: tab.closed_at, createdAt: tab.created_at, role: viewer.role, currentViewerKey: viewer.key, members, items,
     claimedCents, unclaimedCents: Math.max(0, Number(tab.total_cents) - claimedCents), totalQuantity, claimedQuantity,
-    personTotals: members.map((member) => ({ ...member, amountCents: totals.get(member.viewerKey) || 0 })),
+    personTotals: members.map((member) => ({ ...member, amountCents: totals.get(member.viewerKey) || 0, paidAt: paidAtByViewer.get(member.viewerKey) || null })),
   };
 }
 
@@ -1176,6 +1181,30 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     if (role !== "owner") throw new HttpError(403, "Bara skaparen kan avsluta snabbnotan");
     const body = await readJson(request);
     await db.prepare("UPDATE quick_tabs SET closed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body.closed === false ? null : new Date().toISOString(), quickTabId);
+    broadcastQuickTab(quickTabId);
+    return json(response, 200, { quickTab: await loadQuickTab(quickTabId, await quickTabViewer(request, quickTabId, user)) });
+  }
+  match = url.pathname.match(/^\/api\/quick-tabs\/(\d+)\/payments$/);
+  if (request.method === "POST" && match) {
+    // Swish exposes no way for a non-merchant app to verify a payment was actually sent, so this is
+    // trust-based reporting by whoever receives the money -- the owner is the only one who genuinely
+    // knows whether a Swish arrived, so only the owner (not the payer, not other guests) can mark it.
+    const quickTabId = Number(match[1]);
+    const role = await quickTabAccess(quickTabId, user.id);
+    if (role !== "owner") throw new HttpError(403, "Bara skaparen kan markera betalningar");
+    const body = await readJson(request);
+    const [kind, rawId] = String(body.viewerKey || "").split(":");
+    const targetId = Number(rawId);
+    if (!Number.isInteger(targetId) || (kind !== "u" && kind !== "g")) throw new HttpError(400, "Ogiltig deltagare");
+    const identityColumn = kind === "u" ? "user_id" : "guest_id";
+    const memberTable = kind === "u" ? "quick_tab_access" : "quick_tab_guests";
+    const memberColumn = kind === "u" ? "user_id" : "id";
+    const member = await db.prepare(`SELECT 1 FROM ${memberTable} WHERE quick_tab_id = ? AND ${memberColumn} = ?`).get(quickTabId, targetId);
+    if (!member) throw new HttpError(404, "Deltagaren finns inte i snabbnotan");
+    await db.prepare(`DELETE FROM quick_tab_payments WHERE quick_tab_id = ? AND ${identityColumn} = ?`).run(quickTabId, targetId);
+    if (body.paid !== false) {
+      await db.prepare(`INSERT INTO quick_tab_payments (quick_tab_id, ${identityColumn}, marked_by) VALUES (?, ?, ?)`).run(quickTabId, targetId, user.id);
+    }
     broadcastQuickTab(quickTabId);
     return json(response, 200, { quickTab: await loadQuickTab(quickTabId, await quickTabViewer(request, quickTabId, user)) });
   }

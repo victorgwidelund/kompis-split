@@ -178,7 +178,7 @@ export interface QuickTab extends Omit<QuickTabSummary, "itemCount" | "myClaimCo
   unclaimedCents: number;
   totalQuantity: number;
   claimedQuantity: number;
-  personTotals: Array<QuickTabMember & { amountCents: number }>;
+  personTotals: Array<QuickTabMember & { amountCents: number; paidAt: string | null }>;
 }
 
 export interface InvitationResult {

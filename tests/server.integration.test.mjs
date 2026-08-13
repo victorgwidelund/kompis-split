@@ -289,6 +289,27 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const afterMemberRejoin = await request(`/api/quick-tabs/${quickTabId}`, { cookie: ownerCookie });
     assert.equal(afterMemberRejoin.payload.quickTab.members.filter((member) => member.name === "Anna").length, 1);
 
+    // Payment tracking: Swish can't be verified by a non-merchant app, so this is trust-based --
+    // only the owner (who actually receives the money) may mark someone as paid, not the payer
+    // themselves and not other guests.
+    const guestViewerKey = `g:${guestJoin.payload.guest.id}`;
+    const memberViewerKey = `u:${registration.payload.user.id}`;
+    const memberCannotMarkPaid = await request(`/api/quick-tabs/${quickTabId}/payments`, { method: "POST", cookie: memberCookie, body: { viewerKey: guestViewerKey, paid: true } });
+    assert.equal(memberCannotMarkPaid.response.status, 403);
+    const unknownViewerRejected = await request(`/api/quick-tabs/${quickTabId}/payments`, { method: "POST", cookie: ownerCookie, body: { viewerKey: "u:999999", paid: true } });
+    assert.equal(unknownViewerRejected.response.status, 404);
+    const guestMarkedPaid = await request(`/api/quick-tabs/${quickTabId}/payments`, { method: "POST", cookie: ownerCookie, body: { viewerKey: guestViewerKey, paid: true } });
+    assert.equal(guestMarkedPaid.response.status, 200, JSON.stringify(guestMarkedPaid.payload));
+    assert.ok(guestMarkedPaid.payload.quickTab.personTotals.find((item) => item.viewerKey === guestViewerKey).paidAt, "the guest must show as paid immediately");
+    assert.equal(guestMarkedPaid.payload.quickTab.personTotals.find((item) => item.viewerKey === memberViewerKey).paidAt, null, "marking one person paid must not affect anyone else");
+    const memberMarkedPaid = await request(`/api/quick-tabs/${quickTabId}/payments`, { method: "POST", cookie: ownerCookie, body: { viewerKey: memberViewerKey, paid: true } });
+    assert.ok(memberMarkedPaid.payload.quickTab.personTotals.find((item) => item.viewerKey === memberViewerKey).paidAt);
+    const guestReadsOwnPaidStatus = await request(`/api/quick-tabs/${quickTabId}`, { cookie: guestCookie });
+    assert.ok(guestReadsOwnPaidStatus.payload.quickTab.personTotals.find((item) => item.viewerKey === guestViewerKey).paidAt, "a guest must be able to see their own paid status");
+    const guestUnmarkedPaid = await request(`/api/quick-tabs/${quickTabId}/payments`, { method: "POST", cookie: ownerCookie, body: { viewerKey: guestViewerKey, paid: false } });
+    assert.equal(guestUnmarkedPaid.payload.quickTab.personTotals.find((item) => item.viewerKey === guestViewerKey).paidAt, null, "unmarking must clear the paid status again");
+    assert.ok(guestUnmarkedPaid.payload.quickTab.personTotals.find((item) => item.viewerKey === memberViewerKey).paidAt, "unmarking the guest must not affect the member's own paid status");
+
     const memberCannotCloseQuickTab = await request(`/api/quick-tabs/${quickTabId}/close`, { method: "POST", cookie: memberCookie, body: { closed: true } });
     assert.equal(memberCannotCloseQuickTab.response.status, 403);
     const closedQuickTab = await request(`/api/quick-tabs/${quickTabId}/close`, { method: "POST", cookie: ownerCookie, body: { closed: true } });
@@ -572,7 +593,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 7);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 8);
   // 1 from "Middag på Kajen" + 1 from the Swedish-characters test quick tab ("Ångbåtsbryggan").
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 2);
   // "Erik Gäst" (claims below) + "Först Ansluten" (joined via the original first invite to prove it
