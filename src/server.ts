@@ -536,11 +536,22 @@ async function adminOverview() {
     id: item.id, action: item.action, entityType: item.entity_type, entityId: item.entity_id,
     createdAt: item.created_at, actorName: item.actor_name, tripName: item.trip_name,
   }));
+  const bugReports = (await db.prepare(`
+    SELECT b.id, b.description, b.page_url, b.user_agent, b.app_version, b.breadcrumbs,
+      b.screenshot_mime_type IS NOT NULL has_screenshot, b.created_at, b.resolved_at,
+      u.display_name reporter_name
+    FROM bug_reports b JOIN users u ON u.id = b.reported_by
+    ORDER BY (b.resolved_at IS NOT NULL), b.created_at DESC
+  `).all<any>()).map((item) => ({
+    id: Number(item.id), description: item.description, pageUrl: item.page_url, userAgent: item.user_agent,
+    appVersion: item.app_version, breadcrumbs: item.breadcrumbs || [], hasScreenshot: Boolean(item.has_screenshot),
+    createdAt: item.created_at, resolvedAt: item.resolved_at, reporterName: item.reporter_name,
+  }));
   return {
     stats: {
       userCount: Number(stats.user_count), activeUserCount: Number(stats.active_user_count),
       activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), deletedTripCount: Number(stats.deleted_trip_count), totalCents: Number(stats.total_cents),
-    }, users, trips, quickTabs, activity,
+    }, users, trips, quickTabs, activity, bugReports,
   };
 }
 
@@ -784,6 +795,7 @@ async function sweepOrphanedDemoData() {
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const receiptAnalysisAttempts = new Map<number, { count: number; resetAt: number }>();
 const guestJoinAttempts = new Map<string, { count: number; resetAt: number }>();
+const bugReportAttempts = new Map<number, { count: number; resetAt: number }>();
 setInterval(() => {
   const now = Date.now();
   for (const [key, value] of attempts) if (value.resetAt < now) attempts.delete(key);
@@ -811,6 +823,15 @@ function receiptAnalysisAllowed(userId: number) {
   const item = receiptAnalysisAttempts.get(userId);
   if (!item || item.resetAt < now) { receiptAnalysisAttempts.set(userId, { count: 1, resetAt: now + 10 * 60000 }); return true; }
   if (item.count >= 10) return false;
+  item.count += 1;
+  return true;
+}
+
+function bugReportAllowed(userId: number) {
+  const now = Date.now();
+  const item = bugReportAttempts.get(userId);
+  if (!item || item.resetAt < now) { bugReportAttempts.set(userId, { count: 1, resetAt: now + 60 * 60000 }); return true; }
+  if (item.count >= 5) return false;
   item.count += 1;
   return true;
 }
@@ -853,7 +874,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   // demo enter/exit toggle itself is deliberately not in this list.
   if (user?.demo_mode && [
     /^\/api\/users\/search$/, /^\/api\/contacts$/, /^\/api\/admin$/, /^\/api\/admin\/users\/\d+$/,
-    /^\/api\/admin\/quick-tabs\/\d+$/,
+    /^\/api\/admin\/quick-tabs\/\d+$/, /^\/api\/admin\/bug-reports(\/.*)?$/,
     /^\/api\/friend-invitations$/, /^\/api\/trips\/\d+\/invitations$/, /^\/api\/quick-tabs\/\d+\/invitations$/,
   ].some((pattern) => pattern.test(url.pathname))) {
     throw new HttpError(403, "Den här funktionen är inte tillgänglig i demoläge");
@@ -1222,6 +1243,63 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       await db.prepare("DELETE FROM quick_tabs WHERE id = ?").run(quickTabId);
       await audit(user.id, null, "quick_tab.deleted", "quick_tab", quickTabId);
     });
+    return json(response, 200, { ok: true });
+  }
+  if (request.method === "POST" && url.pathname === "/api/bug-reports") {
+    if (!bugReportAllowed(Number(user.id))) throw new HttpError(429, "För många buggrapporter. Vänta en stund och försök igen.");
+    const body = await readJson(request);
+    const description = cleanText(body.description, "Beskrivning", 2000);
+    // Breadcrumbs are captured client-side from the same api()/upload() helper every request already
+    // goes through -- method, path and status only, never request/response bodies -- so this never
+    // becomes a second place that has to be told not to log sensitive data.
+    const breadcrumbs = (Array.isArray(body.breadcrumbs) ? body.breadcrumbs : []).slice(-30).map((item: unknown) => String(item).slice(0, 200));
+    const result = await db.prepare(`
+      INSERT INTO bug_reports (reported_by, description, page_url, user_agent, app_version, breadcrumbs)
+      VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+    `).run(user.id, description, String(body.pageUrl || "").slice(0, 300) || null, String(body.userAgent || "").slice(0, 300) || null, String(body.appVersion || "").slice(0, 40) || null, JSON.stringify(breadcrumbs));
+    const id = Number(result.lastInsertRowid);
+    await audit(user.id, null, "bug_report.created", "bug_report", id);
+    return json(response, 201, { id });
+  }
+  match = url.pathname.match(/^\/api\/bug-reports\/(\d+)\/screenshot$/);
+  if (request.method === "POST" && match) {
+    const reportId = Number(match[1]);
+    const report = await db.prepare("SELECT reported_by FROM bug_reports WHERE id = ?").get<any>(reportId);
+    if (!report) return json(response, 404, { error: "Buggrapporten finns inte" });
+    if (Number(report.reported_by) !== Number(user.id)) throw new HttpError(403, "Du kan bara bifoga en skärmbild till din egen rapport");
+    const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1); const mimeType = contentType.trim().toLowerCase();
+    if (!receiptImageMimeTypes.has(mimeType)) throw new HttpError(415, "Skärmbilden måste vara JPG, PNG eller WebP");
+    const content = await readBytes(request, receiptMaximumBytes);
+    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte bildformatet");
+    safeReceiptImageDimensions(mimeType, content);
+    const normalized = await normalizeReceiptImage(content);
+    await db.prepare("UPDATE bug_reports SET screenshot_mime_type = ?, screenshot_content = ? WHERE id = ?").run(normalized.mimeType, normalized.content, reportId);
+    return json(response, 201, { ok: true });
+  }
+  match = url.pathname.match(/^\/api\/admin\/bug-reports\/(\d+)\/screenshot$/);
+  if (request.method === "GET" && match) {
+    requireAdmin(user);
+    const report = await db.prepare("SELECT screenshot_mime_type, screenshot_content FROM bug_reports WHERE id = ?").get<any>(Number(match[1]));
+    if (!report?.screenshot_content) return json(response, 404, { error: "Ingen skärmbild finns" });
+    response.writeHead(200, { ...securityHeaders(), "Content-Type": report.screenshot_mime_type, "Cache-Control": "private, no-store", "Content-Disposition": "inline" });
+    response.end(report.screenshot_content); return;
+  }
+  match = url.pathname.match(/^\/api\/admin\/bug-reports\/(\d+)\/resolve$/);
+  if (request.method === "POST" && match) {
+    requireAdmin(user);
+    const reportId = Number(match[1]);
+    const body = await readJson(request);
+    const resolving = body.resolved !== false;
+    const changed = await db.prepare("UPDATE bug_reports SET resolved_at = ?, resolved_by = ? WHERE id = ?")
+      .run(resolving ? new Date().toISOString() : null, resolving ? user.id : null, reportId);
+    if (!changed.changes) return json(response, 404, { error: "Buggrapporten finns inte" });
+    return json(response, 200, { ok: true });
+  }
+  match = url.pathname.match(/^\/api\/admin\/bug-reports\/(\d+)$/);
+  if (request.method === "DELETE" && match) {
+    requireAdmin(user);
+    const changed = await db.prepare("DELETE FROM bug_reports WHERE id = ?").run(Number(match[1]));
+    if (!changed.changes) return json(response, 404, { error: "Buggrapporten finns inte" });
     return json(response, 200, { ok: true });
   }
   if (request.method === "GET" && url.pathname === "/api/categories") {
