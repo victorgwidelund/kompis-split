@@ -284,6 +284,22 @@ export interface AdminResponse {
     resolvedAt: string | null;
     reporterName: string | null;
   }>;
+  emailSettings: EmailSettings;
+}
+
+export interface EmailSettings {
+  tenantId: string;
+  clientId: string;
+  senderEmail: string;
+  hasSecret: boolean;
+  configured: boolean;
+  updatedAt: string | null;
+}
+
+export interface ReminderResult {
+  sent: number;
+  total: number;
+  errors: string[];
 }
 
 export type View =

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import pg from "pg";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +22,36 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   databaseUrl.pathname = `/${databaseName}`;
   const port = 20_000 + (process.pid % 20_000);
   const baseUrl = `http://127.0.0.1:${port}`;
+  // A second connection to the same test database, open in parallel with the server's own pool, so
+  // password-reset can be verified by checking the actual stored hash changed -- /api/login itself
+  // is unusable for that check here since the earlier brute-force test already locks out this IP.
+  const inspect = new pg.Client({ connectionString: databaseUrl.toString() });
+
+  // A minimal stand-in for Microsoft Graph so the email-sending flow (admin test-send, the
+  // forgot-password link, payment reminders) can be tested for real without touching the actual
+  // Microsoft endpoints -- src/email.ts's GRAPH_TOKEN_BASE/GRAPH_API_BASE env vars redirect it here.
+  const capturedEmails = [];
+  const graphMock = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = Buffer.concat(chunks).toString("utf8");
+      if (/\/oauth2\/v2\.0\/token$/.test(request.url)) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ access_token: "mock-graph-token", expires_in: 3600 }));
+        return;
+      }
+      if (/\/v1\.0\/users\/[^/]+\/sendMail$/.test(request.url)) {
+        capturedEmails.push({ url: request.url, authorization: request.headers.authorization, body: JSON.parse(body) });
+        response.writeHead(202); response.end();
+        return;
+      }
+      response.writeHead(404); response.end();
+    });
+  });
+  await new Promise((resolve) => graphMock.listen(0, "127.0.0.1", resolve));
+  const graphMockUrl = `http://127.0.0.1:${graphMock.address().port}`;
+
   let logs = "";
   const child = spawn(process.execPath, ["dist/server.js"], {
     cwd: projectDirectory,
@@ -34,6 +65,8 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       COOKIE_SECURE: "false",
       TRUST_PROXY: "false",
       APP_VERSION: "1.1",
+      GRAPH_TOKEN_BASE: graphMockUrl,
+      GRAPH_API_BASE: `${graphMockUrl}/v1.0`,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -51,6 +84,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   }
 
   try {
+    await inspect.connect();
     let ready = false;
     for (let attempt = 0; attempt < 60; attempt += 1) {
       try { const health = await request("/health"); if (health.response.ok) { ready = true; break; } } catch {}
@@ -509,6 +543,86 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const missingBugReportDelete = await request(`/api/admin/bug-reports/${bugReportId}`, { method: "DELETE", cookie: ownerCookie });
     assert.equal(missingBugReportDelete.response.status, 404);
 
+    // Admin email settings + Microsoft Graph test-send: only an admin may read or change them, the
+    // client secret is write-only (GET never returns it, and omitting it on a resave keeps the old
+    // one rather than clearing it), and a save/test round-trip actually talks to Graph (the mock).
+    const memberCannotReadEmailSettings = await request("/api/admin/email-settings", { cookie: memberCookie });
+    assert.equal(memberCannotReadEmailSettings.response.status, 403);
+    const emailSettingsBeforeSave = await request("/api/admin/email-settings", { cookie: ownerCookie });
+    assert.equal(emailSettingsBeforeSave.payload.configured, false);
+    assert.equal(emailSettingsBeforeSave.payload.hasSecret, false);
+    const memberCannotSaveEmailSettings = await request("/api/admin/email-settings", { method: "POST", cookie: memberCookie, body: { tenantId: "t", clientId: "c", clientSecret: "s", senderEmail: "no-reply@example.test" } });
+    assert.equal(memberCannotSaveEmailSettings.response.status, 403);
+    const emailSettingsSaved = await request("/api/admin/email-settings", { method: "POST", cookie: ownerCookie, body: { tenantId: "test-tenant", clientId: "test-client", clientSecret: "test-secret", senderEmail: "no-reply@example.test" } });
+    assert.equal(emailSettingsSaved.response.status, 200, JSON.stringify(emailSettingsSaved.payload));
+    assert.equal(emailSettingsSaved.payload.configured, true);
+    assert.equal(emailSettingsSaved.payload.hasSecret, true);
+    assert.equal(JSON.stringify(emailSettingsSaved.payload).includes("test-secret"), false, "the client secret must never be echoed back by the API");
+    const emailSettingsResavedWithoutSecret = await request("/api/admin/email-settings", { method: "POST", cookie: ownerCookie, body: { tenantId: "test-tenant", clientId: "test-client", clientSecret: "", senderEmail: "no-reply@example.test" } });
+    assert.equal(emailSettingsResavedWithoutSecret.payload.hasSecret, true, "omitting the secret on a resave must keep the existing one, not clear it");
+
+    const memberCannotTestEmail = await request("/api/admin/email-settings/test", { method: "POST", cookie: memberCookie, body: {} });
+    assert.equal(memberCannotTestEmail.response.status, 403);
+    const testEmail = await request("/api/admin/email-settings/test", { method: "POST", cookie: ownerCookie, body: { recipientEmail: "victor@example.test" } });
+    assert.equal(testEmail.response.status, 200, JSON.stringify(testEmail.payload));
+    assert.equal(capturedEmails.length, 1, "the test-send must reach the mock Graph server exactly once");
+    assert.equal(capturedEmails[0].authorization, "Bearer mock-graph-token");
+    assert.equal(capturedEmails[0].body.message.toRecipients[0].emailAddress.address, "victor@example.test");
+    assert.match(capturedEmails[0].body.message.subject, /testmail/i);
+
+    // Payment reminders: a dedicated small trip with one precisely known unpaid debt, so the
+    // aggregation and the reminder email content can be checked without depending on this test's
+    // accumulated, harder-to-predict balances elsewhere.
+    const reminderTrip = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Påminnelsetest" } });
+    const reminderTripId = reminderTrip.payload.trip.id;
+    const reminderInvite = await request(`/api/trips/${reminderTripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
+    await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token: reminderInvite.payload.invitation.token } });
+    const reminderTripLoaded = await request(`/api/trips/${reminderTripId}`, { cookie: ownerCookie });
+    const reminderOwnerParticipant = reminderTripLoaded.payload.trip.participants.find((item) => item.name === "Victor");
+    const reminderAnnaParticipant = reminderTripLoaded.payload.trip.participants.find((item) => item.name === "Anna");
+    await request(`/api/trips/${reminderTripId}/expenses`, {
+      method: "POST", cookie: ownerCookie,
+      body: { title: "Hytta", amount: "200", payerId: reminderOwnerParticipant.id, category: "stay", splitMode: "equal", entries: [{ participantId: reminderOwnerParticipant.id, value: 1 }, { participantId: reminderAnnaParticipant.id, value: 1 }] },
+    });
+    const memberCannotSendReminders = await request("/api/admin/remind-unpaid", { method: "POST", cookie: memberCookie, body: {} });
+    assert.equal(memberCannotSendReminders.response.status, 403);
+    const remindersSent = await request("/api/admin/remind-unpaid", { method: "POST", cookie: ownerCookie, body: {} });
+    assert.equal(remindersSent.response.status, 200, JSON.stringify(remindersSent.payload));
+    assert.ok(remindersSent.payload.sent >= 1, "Anna owes money on the dedicated trip, so at least one reminder must go out");
+    assert.equal(remindersSent.payload.errors.length, 0, JSON.stringify(remindersSent.payload.errors));
+    const reminderEmail = capturedEmails.find((item) => item.body.message.toRecipients[0].emailAddress.address === "anna@example.test");
+    assert.ok(reminderEmail, "Anna must receive a reminder for her half of the shared expense");
+    assert.match(reminderEmail.body.message.body.content, /Påminnelsetest — till Victor: 100,00 kr/);
+
+    // Forgot/reset password: identical generic response whether the address exists or not (no user
+    // enumeration), a working end-to-end reset via the mocked email's real link, single-use tokens,
+    // and every existing session for that user invalidated by a successful reset.
+    const forgotUnknown = await request("/api/auth/forgot-password", { method: "POST", body: { email: "nobody@example.test" } });
+    assert.equal(forgotUnknown.response.status, 200);
+    const emailsBeforeForgot = capturedEmails.length;
+    const forgotKnown = await request("/api/auth/forgot-password", { method: "POST", body: { email: "erik@example.test" } });
+    assert.equal(forgotKnown.response.status, 200);
+    assert.equal(forgotKnown.payload.message, forgotUnknown.payload.message, "the response must not reveal whether the address has an account");
+    assert.equal(capturedEmails.length, emailsBeforeForgot + 1);
+    const resetEmail = capturedEmails.at(-1);
+    assert.equal(resetEmail.body.message.toRecipients[0].emailAddress.address, "erik@example.test");
+    const resetLink = resetEmail.body.message.body.content.match(/https?:\/\/\S+/)?.[0];
+    assert.ok(resetLink, "the reset email must contain a link");
+    const resetToken = new URL(resetLink).hash.match(/^#reset-password=(.+)$/)?.[1];
+    assert.ok(resetToken, "the link must carry a reset token");
+
+    const invalidReset = await request("/api/auth/reset-password", { method: "POST", body: { token: "not-a-real-token", password: "another-new-password-1" } });
+    assert.equal(invalidReset.response.status, 400);
+    const hashBeforeReset = (await inspect.query("SELECT password_hash FROM users WHERE email = 'erik@example.test'")).rows[0].password_hash;
+    const validReset = await request("/api/auth/reset-password", { method: "POST", body: { token: resetToken, password: "eriks-new-password-1" } });
+    assert.equal(validReset.response.status, 200, JSON.stringify(validReset.payload));
+    const hashAfterReset = (await inspect.query("SELECT password_hash FROM users WHERE email = 'erik@example.test'")).rows[0].password_hash;
+    assert.notEqual(hashAfterReset, hashBeforeReset, "the stored password hash must actually change");
+    const oldSessionInvalidated = await request("/api/session", { cookie: erikCookie });
+    assert.equal(oldSessionInvalidated.payload.authenticated, false, "resetting the password must invalidate every existing session for that user");
+    const reusedToken = await request("/api/auth/reset-password", { method: "POST", body: { token: resetToken, password: "another-attempt-1" } });
+    assert.equal(reusedToken.response.status, 400, "a reset token must be single-use");
+
     const memberId = registration.payload.user.id;
     const promoted = await request(`/api/admin/users/${memberId}`, { method: "PATCH", cookie: ownerCookie, body: { isAdmin: true } });
     assert.equal(promoted.response.status, 200);
@@ -556,6 +670,8 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       () => request(`/api/trips/${demoTripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} }),
       () => request("/api/admin/quick-tabs/999999", { method: "DELETE", cookie: ownerCookie }),
       () => request("/api/admin/bug-reports/999999/resolve", { method: "POST", cookie: ownerCookie, body: { resolved: true } }),
+      () => request("/api/admin/email-settings", { cookie: ownerCookie }),
+      () => request("/api/admin/remind-unpaid", { method: "POST", cookie: ownerCookie, body: {} }),
     ]) {
       const result = await blocked();
       assert.equal(result.response.status, 403, JSON.stringify(result.payload));
@@ -609,10 +725,12 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     await admin.end().catch(() => {});
     throw error;
   } finally {
+    await inspect.end().catch(() => {});
     const exited = new Promise((resolve) => child.once("exit", resolve));
     child.kill("SIGTERM");
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
     if (child.exitCode === null) child.kill("SIGKILL");
+    await new Promise((resolve) => graphMock.close(resolve));
   }
 
   const verification = new pg.Client({ connectionString: databaseUrl.toString() });
@@ -632,7 +750,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 9);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 10);
   // 1 from "Middag på Kajen" + 1 from the Swedish-characters test quick tab ("Ångbåtsbryggan").
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 2);
   // "Erik Gäst" (claims below) + "Först Ansluten" (joined via the original first invite to prove it

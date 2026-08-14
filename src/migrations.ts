@@ -372,6 +372,34 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [9, "bug-reports"],
     );
+    // Microsoft Graph email config (single row, client secret write-only from the API's point of
+    // view — GET never returns it) and password reset tokens for the forgot-password flow. Both
+    // are enabled by the same app-only Graph credentials, since SMTP AUTH is being retired on
+    // Exchange Online. See scripts/setup-email-integration.ps1 for how the credentials are created.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS email_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        tenant_id TEXT,
+        client_id TEXT,
+        client_secret TEXT,
+        sender_email TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_by BIGINT REFERENCES users(id)
+      );
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id);
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [10, "email-settings-and-password-reset"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

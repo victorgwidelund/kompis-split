@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { InvitationPreview } from "../../types/models";
 import { shortVersion } from "../../utils/format";
 
-export type AuthMode = "setup" | "login" | "register" | "quick-guest";
+export type AuthMode = "setup" | "login" | "register" | "quick-guest" | "forgot" | "reset";
 
 interface AuthScreenProps {
   mode: AuthMode;
@@ -25,6 +25,8 @@ export function AuthScreen({ mode, needsSetup, invitation, version, onModeChange
   const subtitle = needsSetup ? "Skapa det första administratörskontot. Dina befintliga grupper bevaras."
     : mode === "quick-guest" ? "Ange bara namn och nummer för att bocka av din del."
     : mode === "register" ? invitation?.kind === "friend" ? "Skapa ditt konto för att lägga till vännen." : "Skapa ditt eget konto för att gå med."
+    : mode === "forgot" ? "Ange din e-postadress så skickar vi en länk för att återställa lösenordet."
+    : mode === "reset" ? "Välj ett nytt lösenord för ditt konto."
     : invitation?.kind === "friend" ? "Logga in så sparas ni som vänner." : invitation?.kind === "trip" ? "Logga in så läggs gruppen till på ditt konto." : "Logga in för att se dina grupper.";
   const summary = invitation?.kind === "friend"
     ? <><strong>{invitation.inviterName}</strong> vill lägga till dig som vän i Kompis Split.</>
@@ -39,14 +41,16 @@ export function AuthScreen({ mode, needsSetup, invitation, version, onModeChange
         {summary && <div className="invite-summary">{summary}</div>}
         <form className="auth-form" onSubmit={submit}>
           {mode === "setup" && <label>Installationslösenord<input name="setupPassword" type="password" autoComplete="one-time-code" required /></label>}
-          {mode !== "login" && <label>Ditt namn<input name="name" maxLength={60} autoComplete="name" required /></label>}
-          {mode !== "quick-guest" && <label>E-post<input name="email" type="email" maxLength={180} autoComplete="email" required /></label>}
-          {mode !== "login" && <label>{mode === "quick-guest" ? "Mobil- eller Swish-nummer" : "Swish-nummer"}<input name="swishPhone" inputMode="tel" autoComplete="tel" placeholder="070 123 45 67" required={mode === "quick-guest"} /></label>}
-          {mode !== "quick-guest" && <label>{mode === "login" ? "Lösenord" : "Nytt lösenord"}<input name="password" type="password" minLength={mode === "login" ? undefined : 10} autoComplete={mode === "login" ? "current-password" : "new-password"} required />{mode !== "login" && <small>Minst 10 tecken.</small>}</label>}
-          <button className="button primary wide" type="submit" disabled={busy}>{busy ? "Arbetar…" : mode === "setup" ? "Skapa administratör" : mode === "login" ? "Logga in" : mode === "quick-guest" ? "Öppna snabbnotan" : "Skapa konto och gå med"} <span>→</span></button>
+          {(mode === "register" || mode === "setup" || mode === "quick-guest") && <label>Ditt namn<input name="name" maxLength={60} autoComplete="name" required /></label>}
+          {(mode === "setup" || mode === "login" || mode === "register" || mode === "forgot") && <label>E-post<input name="email" type="email" maxLength={180} autoComplete="email" required /></label>}
+          {(mode === "register" || mode === "setup" || mode === "quick-guest") && <label>{mode === "quick-guest" ? "Mobil- eller Swish-nummer" : "Swish-nummer"}<input name="swishPhone" inputMode="tel" autoComplete="tel" placeholder="070 123 45 67" required={mode === "quick-guest"} /></label>}
+          {(mode === "setup" || mode === "login" || mode === "register" || mode === "reset") && <label>{mode === "login" ? "Lösenord" : "Nytt lösenord"}<input name="password" type="password" minLength={mode === "login" ? undefined : 10} autoComplete={mode === "login" ? "current-password" : "new-password"} required />{mode !== "login" && <small>Minst 10 tecken.</small>}</label>}
+          <button className="button primary wide" type="submit" disabled={busy}>{busy ? "Arbetar…" : mode === "setup" ? "Skapa administratör" : mode === "login" ? "Logga in" : mode === "quick-guest" ? "Öppna snabbnotan" : mode === "forgot" ? "Skicka återställningslänk" : mode === "reset" ? "Uppdatera lösenord" : "Skapa konto och gå med"} <span>→</span></button>
           <p className="form-error" role="alert">{error}</p>
           {mode === "login" && invitation && invitation.kind !== "quick_tab" && <button className="text-button" type="button" onClick={() => onModeChange("register")}>Ny här? Skapa konto med inbjudan</button>}
+          {mode === "login" && !needsSetup && <button className="text-button" type="button" onClick={() => onModeChange("forgot")}>Glömt lösenord?</button>}
           {mode === "register" && <button className="text-button" type="button" onClick={() => onModeChange("login")}>Har du redan konto? Logga in</button>}
+          {(mode === "forgot" || mode === "reset") && <button className="text-button" type="button" onClick={() => onModeChange("login")}>Tillbaka till inloggning</button>}
           {mode === "quick-guest" && <small className="muted">Inget konto eller lösenord behövs. Åtkomsten gäller bara den här snabbnotan.</small>}
         </form>
         <small className="app-version auth-version" title={`Installerad appversion: ${version}`}>Version {shortVersion(version)}</small>
