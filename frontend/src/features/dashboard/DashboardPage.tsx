@@ -1,7 +1,7 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Avatar } from "../../components/Avatar";
 import { EmptyState } from "../../components/EmptyState";
-import type { Category, DashboardResponse, QuickTabSummary, TripSummary, User, View } from "../../types/models";
+import type { Category, DashboardResponse, QuickTabSummary, ReminderResult, TripSummary, User, View } from "../../types/models";
 import { formatDate, formatMoney } from "../../utils/format";
 
 interface Props {
@@ -13,6 +13,8 @@ interface Props {
   onNewTrip: () => void;
   onNewQuickTab: () => void;
   onInviteFriend: () => void;
+  onRemindUnpaid: () => Promise<ReminderResult>;
+  notify: (message: string) => void;
 }
 
 function TripCard({ trip, index, onOpen }: { trip: TripSummary; index: number; onOpen: () => void }) {
@@ -20,16 +22,26 @@ function TripCard({ trip, index, onOpen }: { trip: TripSummary; index: number; o
   return <button className="trip-card" onClick={onOpen}><span className="trip-emoji">{["✦", "⌁", "◇", "◉"][index % 4]}</span><span className="trip-card-copy"><strong>{trip.name}</strong><small>{trip.participantCount} {trip.participantCount === 1 ? "person" : "personer"} · {formatMoney(trip.totalCents)}</small><em className={balance > 0 ? "positive" : balance < 0 ? "negative" : ""}>{balance > 0 ? `Får tillbaka ${formatMoney(balance)}` : balance < 0 ? `Skyldig ${formatMoney(-balance)}` : "Jämnt saldo"}</em></span></button>;
 }
 
-export function DashboardPage({ user, dashboard, quickTabs, categories, onNavigate, onNewTrip, onNewQuickTab, onInviteFriend }: Props) {
+export function DashboardPage({ user, dashboard, quickTabs, categories, onNavigate, onNewTrip, onNewQuickTab, onInviteFriend, onRemindUnpaid, notify }: Props) {
   const panelRef = useRef<HTMLElement>(null);
+  const [reminding, setReminding] = useState(false);
   const active = dashboard.trips.filter((trip) => !trip.archivedAt);
   const archived = dashboard.trips.filter((trip) => trip.archivedAt);
   const net = active.reduce((sum, trip) => sum + trip.myBalanceCents, 0);
   const spent = active.reduce((sum, trip) => sum + trip.totalCents, 0);
   const category = (slug: string) => categories.find((item) => item.slug === slug) || { emoji: "🧾", name: slug };
   const scrollToTrips = () => { panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); panelRef.current?.focus({ preventScroll: true }); };
+  const remindUnpaid = async () => {
+    if (!confirm("Skicka en påminnelse via mail till alla som är skyldiga dig pengar?")) return;
+    setReminding(true);
+    try {
+      const result = await onRemindUnpaid();
+      notify(result.total === 0 ? "Ingen är skyldig dig något just nu" : `Skickade ${result.sent} av ${result.total} påminnelser${result.errors.length ? ` (${result.errors.length} misslyckades)` : ""}`);
+    } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte skicka påminnelser"); }
+    finally { setReminding(false); }
+  };
   return <section className="home-dashboard">
-    <header className="dashboard-heading"><div><p className="eyebrow">Din överblick</p><h1>Hej, {user.name.split(/\s+/)[0]}!</h1><p>Alla grupper, utgifter och saldon på ett ställe.</p></div><div className="dashboard-heading-actions"><button className="button ghost" onClick={() => onNavigate({ page: "statistics" })}>📊 Statistik</button><button className="button primary" onClick={onNewTrip}>＋ Ny grupp</button></div></header>
+    <header className="dashboard-heading"><div><p className="eyebrow">Din överblick</p><h1>Hej, {user.name.split(/\s+/)[0]}!</h1><p>Alla grupper, utgifter och saldon på ett ställe.</p></div><div className="dashboard-heading-actions"><button className="button ghost" disabled={reminding} onClick={() => void remindUnpaid()} title="Skicka en mailpåminnelse till alla som är skyldiga dig pengar">{reminding ? "Skickar…" : "🔔 Påminn om obetalt"}</button><button className="button ghost" onClick={() => onNavigate({ page: "statistics" })}>📊 Statistik</button><button className="button primary" onClick={onNewTrip}>＋ Ny grupp</button></div></header>
     <div className="summary-grid home-stats">
       <button className="hero-stat coral stat-link" type="button" onClick={scrollToTrips}><span className="stat-icon">✦</span><p>Aktiva grupper</p><strong>{active.length}</strong><small>Visa pågående och kommande →</small></button>
       <article className="hero-stat cobalt"><span className="stat-icon">↗</span><p>Ditt nettosaldo</p><strong className={net < 0 ? "negative" : ""}>{formatMoney(Math.abs(net))}</strong><small>{net > 0 ? "Du får tillbaka totalt" : net < 0 ? "Du är skyldig totalt" : "Du ligger jämnt"}</small></article>

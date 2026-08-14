@@ -560,14 +560,16 @@ async function adminOverview() {
   };
 }
 
-async function unpaidReminders() {
-  // Aggregates two independent debt concepts into one reminder per registered user: trip
-  // settlements (simplifyDebts, the same computation loadTrip uses) and unpaid quick-tab shares
-  // (loadQuickTab's personTotals). Only registered users with a linked account are reminded --
-  // guests and unlinked participants have no email on file to send to.
+async function unpaidRemindersFor(creditorUserId: number) {
+  // Aggregates two independent debt concepts into one reminder per debtor who owes money
+  // specifically to the calling user: trip settlements (simplifyDebts, the same computation
+  // loadTrip uses) where they're the creditor, and unpaid quick-tab shares (loadQuickTab's
+  // personTotals) for quick tabs they own. Only registered debtors with a linked account are
+  // reminded -- guests and unlinked participants have no email on file to send to. This is a
+  // per-user action (any account can remind their own debtors), not an admin broadcast.
   const perUser = new Map<number, { name: string; email: string; items: Array<{ label: string; amountCents: number }> }>();
   const addItem = async (userId: number | null, label: string, amountCents: number) => {
-    if (!userId || amountCents <= 0) return;
+    if (!userId || userId === creditorUserId || amountCents <= 0) return;
     if (!perUser.has(userId)) {
       const account = await db.prepare("SELECT display_name, email FROM users WHERE id = ? AND is_disabled = FALSE").get<any>(userId);
       if (!account) return;
@@ -576,10 +578,13 @@ async function unpaidReminders() {
     perUser.get(userId)!.items.push({ label, amountCents });
   };
 
-  const trips = await db.prepare("SELECT id, name FROM trips WHERE deleted_at IS NULL AND is_demo = FALSE").all<any>();
+  const trips = await db.prepare(`
+    SELECT DISTINCT t.id, t.name FROM trips t
+    JOIN participants p ON p.trip_id = t.id
+    WHERE t.deleted_at IS NULL AND t.is_demo = FALSE AND p.user_id = ?
+  `).all<any>(creditorUserId);
   for (const trip of trips) {
     const participantRows = await db.prepare("SELECT id, name, user_id FROM participants WHERE trip_id = ?").all<any>(trip.id);
-    if (!participantRows.some((row) => row.user_id)) continue;
     const expenseRows = await db.prepare("SELECT id, payer_id, amount_cents FROM expenses WHERE trip_id = ? AND voided_at IS NULL").all<any>(trip.id);
     const shareRows = expenseRows.length
       ? await db.prepare("SELECT expense_id, participant_id, amount_cents FROM expense_shares WHERE expense_id = ANY(?)").all<any>(expenseRows.map((row) => row.id))
@@ -596,15 +601,16 @@ async function unpaidReminders() {
     if (!settlements.length) continue;
     const byId = new Map(participantRows.map((row) => [row.id, row]));
     for (const settlement of settlements) {
-      const debtor = byId.get(settlement.fromId);
       const creditor = byId.get(settlement.toId);
-      await addItem(debtor?.user_id ? Number(debtor.user_id) : null, `${trip.name} — till ${creditor?.name || "okänd"}`, settlement.amountCents);
+      if (Number(creditor?.user_id) !== creditorUserId) continue;
+      const debtor = byId.get(settlement.fromId);
+      await addItem(debtor?.user_id ? Number(debtor.user_id) : null, `${trip.name} — till dig`, settlement.amountCents);
     }
   }
 
-  const tabs = await db.prepare("SELECT id, name, created_by FROM quick_tabs WHERE is_demo = FALSE").all<any>();
+  const tabs = await db.prepare("SELECT id, name FROM quick_tabs WHERE is_demo = FALSE AND created_by = ?").all<any>(creditorUserId);
   for (const tab of tabs) {
-    const loaded = await loadQuickTab(Number(tab.id), { kind: "user", id: Number(tab.created_by), key: `u:${tab.created_by}`, role: "owner" });
+    const loaded = await loadQuickTab(Number(tab.id), { kind: "user", id: creditorUserId, key: `u:${creditorUserId}`, role: "owner" });
     for (const person of loaded.personTotals) {
       if (person.role === "owner" || person.paidAt || person.amountCents <= 0) continue;
       await addItem(person.userId, `Snabbnota: ${tab.name}`, person.amountCents);
@@ -964,7 +970,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (user?.demo_mode && [
     /^\/api\/users\/search$/, /^\/api\/contacts$/, /^\/api\/admin$/, /^\/api\/admin\/users\/\d+$/,
     /^\/api\/admin\/quick-tabs\/\d+$/, /^\/api\/admin\/bug-reports(\/.*)?$/,
-    /^\/api\/admin\/email-settings(\/.*)?$/, /^\/api\/admin\/remind-unpaid$/,
+    /^\/api\/admin\/email-settings(\/.*)?$/, /^\/api\/remind-unpaid$/,
     /^\/api\/friend-invitations$/, /^\/api\/trips\/\d+\/invitations$/, /^\/api\/quick-tabs\/\d+\/invitations$/,
   ].some((pattern) => pattern.test(url.pathname))) {
     throw new HttpError(403, "Den här funktionen är inte tillgänglig i demoläge");
@@ -1223,24 +1229,26 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     }
     return json(response, 200, { ok: true, recipient });
   }
-  if (request.method === "POST" && url.pathname === "/api/admin/remind-unpaid") {
-    requireAdmin(user);
+  if (request.method === "POST" && url.pathname === "/api/remind-unpaid") {
+    // Available to any account, not just admins -- this only ever reaches people who owe money
+    // to the caller specifically (unpaidRemindersFor scopes everything to creditorUserId), never
+    // anyone else's debts.
     if (!reminderAllowed(Number(user.id))) throw new HttpError(429, "Vänta en stund innan du skickar fler påminnelser.");
-    const summaries = await unpaidReminders();
+    const summaries = await unpaidRemindersFor(Number(user.id));
     let sent = 0;
     const errors: string[] = [];
     for (const summary of summaries) {
       const totalCents = summary.items.reduce((sum, item) => sum + item.amountCents, 0);
       const lines = summary.items.map((item) => `- ${item.label}: ${formatSek(item.amountCents)}`).join("\n");
       try {
-        await sendMail(summary.email, "Påminnelse: obetalda utgifter — Kompis Split",
-          `Hej ${summary.name}!\n\nDu har följande obetalda belopp i Kompis Split:\n\n${lines}\n\nTotalt: ${formatSek(totalCents)}\n\nLogga in på Kompis Split för att se detaljer och betala med Swish.`);
+        await sendMail(summary.email, `Påminnelse från ${user.display_name} — Kompis Split`,
+          `Hej ${summary.name}!\n\n${user.display_name} vill påminna om följande obetalda belopp i Kompis Split:\n\n${lines}\n\nTotalt: ${formatSek(totalCents)}\n\nLogga in på Kompis Split för att se detaljer och betala med Swish.`);
         sent += 1;
       } catch (error) {
         errors.push(`${summary.name}: ${error instanceof Error ? error.message : "okänt fel"}`);
       }
     }
-    await audit(user.id, null, "admin.reminders.sent", "user", null, { sent, total: summaries.length });
+    await audit(user.id, null, "reminders.sent", "user", null, { sent, total: summaries.length });
     return json(response, 200, { sent, total: summaries.length, errors });
   }
   match = url.pathname.match(/^\/api\/admin\/users\/(\d+)$/);
