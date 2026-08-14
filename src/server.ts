@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
+import { EmailError, emailSettingsStatus, saveEmailSettings, sendMail } from "./email.js";
 import { closeReceiptOcr, maxReceiptInputPixels, normalizeReceiptImage, recognizeReceipt } from "./receipt-ocr.js";
 import { allocateItemQuantities, calculateShares, simplifyDebts } from "./split.js";
 
@@ -53,6 +54,10 @@ function parseAmount(value: unknown) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 10_000_000) throw new Error("Ange ett giltigt belopp");
   return Math.round(amount * 100);
+}
+
+function formatSek(cents: number) {
+  return `${(cents / 100).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr`;
 }
 
 function validDate(value: unknown, fallback: string | null = null) {
@@ -551,8 +556,62 @@ async function adminOverview() {
     stats: {
       userCount: Number(stats.user_count), activeUserCount: Number(stats.active_user_count),
       activeTripCount: Number(stats.active_trip_count), tripCount: Number(stats.trip_count), deletedTripCount: Number(stats.deleted_trip_count), totalCents: Number(stats.total_cents),
-    }, users, trips, quickTabs, activity, bugReports,
+    }, users, trips, quickTabs, activity, bugReports, emailSettings: await emailSettingsStatus(),
   };
+}
+
+async function unpaidReminders() {
+  // Aggregates two independent debt concepts into one reminder per registered user: trip
+  // settlements (simplifyDebts, the same computation loadTrip uses) and unpaid quick-tab shares
+  // (loadQuickTab's personTotals). Only registered users with a linked account are reminded --
+  // guests and unlinked participants have no email on file to send to.
+  const perUser = new Map<number, { name: string; email: string; items: Array<{ label: string; amountCents: number }> }>();
+  const addItem = async (userId: number | null, label: string, amountCents: number) => {
+    if (!userId || amountCents <= 0) return;
+    if (!perUser.has(userId)) {
+      const account = await db.prepare("SELECT display_name, email FROM users WHERE id = ? AND is_disabled = FALSE").get<any>(userId);
+      if (!account) return;
+      perUser.set(userId, { name: account.display_name, email: account.email, items: [] });
+    }
+    perUser.get(userId)!.items.push({ label, amountCents });
+  };
+
+  const trips = await db.prepare("SELECT id, name FROM trips WHERE deleted_at IS NULL AND is_demo = FALSE").all<any>();
+  for (const trip of trips) {
+    const participantRows = await db.prepare("SELECT id, name, user_id FROM participants WHERE trip_id = ?").all<any>(trip.id);
+    if (!participantRows.some((row) => row.user_id)) continue;
+    const expenseRows = await db.prepare("SELECT id, payer_id, amount_cents FROM expenses WHERE trip_id = ? AND voided_at IS NULL").all<any>(trip.id);
+    const shareRows = expenseRows.length
+      ? await db.prepare("SELECT expense_id, participant_id, amount_cents FROM expense_shares WHERE expense_id = ANY(?)").all<any>(expenseRows.map((row) => row.id))
+      : [];
+    const sharesByExpense = new Map<number, any[]>();
+    for (const share of shareRows) { const list = sharesByExpense.get(share.expense_id) || []; list.push(share); sharesByExpense.set(share.expense_id, list); }
+    const expenses = expenseRows.map((row) => ({
+      payerId: row.payer_id, amountCents: row.amount_cents,
+      shares: (sharesByExpense.get(row.id) || []).map((share) => ({ participantId: share.participant_id, amountCents: share.amount_cents })),
+    }));
+    const paymentRows = await db.prepare("SELECT from_id, to_id, amount_cents FROM payments WHERE trip_id = ? AND voided_at IS NULL").all<any>(trip.id);
+    const payments = paymentRows.map((row) => ({ fromId: row.from_id, toId: row.to_id, amountCents: row.amount_cents }));
+    const { settlements } = simplifyDebts(participantRows.map((row) => ({ id: row.id })), expenses, payments);
+    if (!settlements.length) continue;
+    const byId = new Map(participantRows.map((row) => [row.id, row]));
+    for (const settlement of settlements) {
+      const debtor = byId.get(settlement.fromId);
+      const creditor = byId.get(settlement.toId);
+      await addItem(debtor?.user_id ? Number(debtor.user_id) : null, `${trip.name} — till ${creditor?.name || "okänd"}`, settlement.amountCents);
+    }
+  }
+
+  const tabs = await db.prepare("SELECT id, name, created_by FROM quick_tabs WHERE is_demo = FALSE").all<any>();
+  for (const tab of tabs) {
+    const loaded = await loadQuickTab(Number(tab.id), { kind: "user", id: Number(tab.created_by), key: `u:${tab.created_by}`, role: "owner" });
+    for (const person of loaded.personTotals) {
+      if (person.role === "owner" || person.paidAt || person.amountCents <= 0) continue;
+      await addItem(person.userId, `Snabbnota: ${tab.name}`, person.amountCents);
+    }
+  }
+
+  return [...perUser.values()];
 }
 
 async function invitationByToken(token: string) {
@@ -796,12 +855,42 @@ const attempts = new Map<string, { count: number; resetAt: number }>();
 const receiptAnalysisAttempts = new Map<number, { count: number; resetAt: number }>();
 const guestJoinAttempts = new Map<string, { count: number; resetAt: number }>();
 const bugReportAttempts = new Map<number, { count: number; resetAt: number }>();
+const forgotPasswordAttempts = new Map<string, { count: number; resetAt: number }>();
+const emailTestAttempts = new Map<number, { count: number; resetAt: number }>();
+const reminderAttempts = new Map<number, { count: number; resetAt: number }>();
 setInterval(() => {
   const now = Date.now();
   for (const [key, value] of attempts) if (value.resetAt < now) attempts.delete(key);
   for (const [key, value] of receiptAnalysisAttempts) if (value.resetAt < now) receiptAnalysisAttempts.delete(key);
   for (const [key, value] of guestJoinAttempts) if (value.resetAt < now) guestJoinAttempts.delete(key);
+  for (const [key, value] of forgotPasswordAttempts) if (value.resetAt < now) forgotPasswordAttempts.delete(key);
+  for (const [key, value] of emailTestAttempts) if (value.resetAt < now) emailTestAttempts.delete(key);
+  for (const [key, value] of reminderAttempts) if (value.resetAt < now) reminderAttempts.delete(key);
 }, 10 * 60000).unref();
+function forgotPasswordAllowed(ip: string) {
+  const now = Date.now();
+  const item = forgotPasswordAttempts.get(ip);
+  if (!item || item.resetAt < now) { forgotPasswordAttempts.set(ip, { count: 1, resetAt: now + 15 * 60000 }); return true; }
+  if (item.count >= 5) return false;
+  item.count += 1;
+  return true;
+}
+function emailTestAllowed(userId: number) {
+  const now = Date.now();
+  const item = emailTestAttempts.get(userId);
+  if (!item || item.resetAt < now) { emailTestAttempts.set(userId, { count: 1, resetAt: now + 60 * 60000 }); return true; }
+  if (item.count >= 10) return false;
+  item.count += 1;
+  return true;
+}
+function reminderAllowed(userId: number) {
+  const now = Date.now();
+  const item = reminderAttempts.get(userId);
+  if (!item || item.resetAt < now) { reminderAttempts.set(userId, { count: 1, resetAt: now + 60 * 60000 }); return true; }
+  if (item.count >= 3) return false;
+  item.count += 1;
+  return true;
+}
 function guestJoinAllowed(ip: string) {
   const now = Date.now();
   const item = guestJoinAttempts.get(ip);
@@ -875,6 +964,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (user?.demo_mode && [
     /^\/api\/users\/search$/, /^\/api\/contacts$/, /^\/api\/admin$/, /^\/api\/admin\/users\/\d+$/,
     /^\/api\/admin\/quick-tabs\/\d+$/, /^\/api\/admin\/bug-reports(\/.*)?$/,
+    /^\/api\/admin\/email-settings(\/.*)?$/, /^\/api\/admin\/remind-unpaid$/,
     /^\/api\/friend-invitations$/, /^\/api\/trips\/\d+\/invitations$/, /^\/api\/quick-tabs\/\d+\/invitations$/,
   ].some((pattern) => pattern.test(url.pathname))) {
     throw new HttpError(403, "Den här funktionen är inte tillgänglig i demoläge");
@@ -941,6 +1031,52 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     }
     attempts.delete(ip);
     return json(response, 200, { user: publicUser(account) }, { "Set-Cookie": sessionCookie(await createSession(account.id)) });
+  }
+  if (request.method === "POST" && url.pathname === "/api/auth/forgot-password") {
+    const ip = clientIp(request);
+    if (!forgotPasswordAllowed(ip)) return json(response, 429, { error: "För många försök. Vänta en stund." });
+    const body = await readJson(request);
+    // Always the same response whether or not the address exists, email is configured, or the send
+    // succeeds -- this endpoint must never let a caller find out which email addresses have accounts.
+    const generic = { ok: true, message: "Om adressen finns skickas ett mail med instruktioner för att återställa lösenordet." };
+    try {
+      const email = cleanEmail(body.email);
+      const account = await db.prepare("SELECT id, display_name FROM users WHERE email = ? AND is_disabled = FALSE").get<any>(email);
+      if (account) {
+        const token = randomBytes(32).toString("base64url");
+        const expiresAt = new Date(Date.now() + 30 * 60000).toISOString();
+        await db.prepare("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)").run(account.id, sha256(token), expiresAt);
+        const resetLink = new URL(`/#reset-password=${encodeURIComponent(token)}`, requestOrigin(request)).href;
+        await sendMail(email, "Återställ ditt lösenord — Kompis Split",
+          `Hej ${account.display_name}!\n\nNågon (förhoppningsvis du) begärde en lösenordsåterställning för ditt Kompis Split-konto.\n\nKlicka på länken nedan för att välja ett nytt lösenord. Länken slutar gälla om 30 minuter:\n${resetLink}\n\nOm du inte begärde detta kan du ignorera det här mailet -- ditt lösenord ändras inte förrän någon öppnar länken och väljer ett nytt.`);
+      }
+    } catch (error) {
+      console.error("Kunde inte skicka återställningsmail:", error instanceof Error ? error.message : error);
+    }
+    return json(response, 200, generic);
+  }
+  if (request.method === "POST" && url.pathname === "/api/auth/reset-password") {
+    const body = await readJson(request);
+    const token = String(body.token || "");
+    if (!token) return json(response, 400, { error: "Länken är ogiltig eller har gått ut" });
+    const record = await db.prepare(`
+      SELECT id, user_id FROM password_reset_tokens
+      WHERE token_hash = ? AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+    `).get<any>(sha256(token));
+    if (!record) return json(response, 400, { error: "Länken är ogiltig eller har gått ut" });
+    const account = await db.prepare("SELECT id FROM users WHERE id = ? AND is_disabled = FALSE").get<any>(record.user_id);
+    if (!account) return json(response, 400, { error: "Länken är ogiltig eller har gått ut" });
+    const passwordRecordValue = await passwordRecord(body.password);
+    await db.transaction(async () => {
+      await db.prepare("UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?").run(record.id);
+      await db.prepare("UPDATE users SET password_hash = ?, password_salt = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(passwordRecordValue.hash, passwordRecordValue.salt, account.id);
+      // Force a fresh login everywhere, same as disabling an account does -- a password reset should
+      // invalidate any session someone else might already hold, not just future ones.
+      await db.prepare("DELETE FROM sessions WHERE user_id = ?").run(account.id);
+      await audit(account.id, null, "user.password_reset", "user", account.id);
+    });
+    return json(response, 200, { ok: true });
   }
   if (request.method === "POST" && url.pathname === "/api/logout") {
     const token = cookieValue(request, "kompis_session");
@@ -1057,6 +1193,55 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "GET" && url.pathname === "/api/admin") {
     requireAdmin(user);
     return json(response, 200, await adminOverview());
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/email-settings") {
+    requireAdmin(user);
+    return json(response, 200, await emailSettingsStatus());
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/email-settings") {
+    requireAdmin(user);
+    const body = await readJson(request);
+    const tenantId = cleanText(body.tenantId, "Tenant-ID", 100);
+    const clientId = cleanText(body.clientId, "Klient-ID", 100);
+    const senderEmail = cleanEmail(body.senderEmail);
+    const clientSecret = body.clientSecret ? cleanText(body.clientSecret, "Klienthemlighet", 300) : undefined;
+    await saveEmailSettings({ tenantId, clientId, clientSecret, senderEmail }, user.id);
+    await audit(user.id, null, "admin.email_settings.updated", "email_settings", null);
+    return json(response, 200, await emailSettingsStatus());
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/email-settings/test") {
+    requireAdmin(user);
+    if (!emailTestAllowed(Number(user.id))) throw new HttpError(429, "För många testmail. Vänta en stund och försök igen.");
+    const body = await readJson(request);
+    const recipient = body.recipientEmail ? cleanEmail(body.recipientEmail) : user.email;
+    try {
+      await sendMail(recipient, "Kompis Split — testmail",
+        `Hej ${user.display_name}!\n\nDet här är ett testmail som bekräftar att e-postintegrationen för Kompis Split fungerar.`);
+    } catch (error) {
+      if (error instanceof EmailError) throw new HttpError(502, error.message);
+      throw error;
+    }
+    return json(response, 200, { ok: true, recipient });
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/remind-unpaid") {
+    requireAdmin(user);
+    if (!reminderAllowed(Number(user.id))) throw new HttpError(429, "Vänta en stund innan du skickar fler påminnelser.");
+    const summaries = await unpaidReminders();
+    let sent = 0;
+    const errors: string[] = [];
+    for (const summary of summaries) {
+      const totalCents = summary.items.reduce((sum, item) => sum + item.amountCents, 0);
+      const lines = summary.items.map((item) => `- ${item.label}: ${formatSek(item.amountCents)}`).join("\n");
+      try {
+        await sendMail(summary.email, "Påminnelse: obetalda utgifter — Kompis Split",
+          `Hej ${summary.name}!\n\nDu har följande obetalda belopp i Kompis Split:\n\n${lines}\n\nTotalt: ${formatSek(totalCents)}\n\nLogga in på Kompis Split för att se detaljer och betala med Swish.`);
+        sent += 1;
+      } catch (error) {
+        errors.push(`${summary.name}: ${error instanceof Error ? error.message : "okänt fel"}`);
+      }
+    }
+    await audit(user.id, null, "admin.reminders.sent", "user", null, { sent, total: summaries.length });
+    return json(response, 200, { sent, total: summaries.length, errors });
   }
   match = url.pathname.match(/^\/api\/admin\/users\/(\d+)$/);
   if (request.method === "PATCH" && match) {
