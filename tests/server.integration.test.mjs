@@ -570,9 +570,10 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(capturedEmails[0].body.message.toRecipients[0].emailAddress.address, "victor@example.test");
     assert.match(capturedEmails[0].body.message.subject, /testmail/i);
 
-    // Payment reminders: a dedicated small trip with one precisely known unpaid debt, so the
-    // aggregation and the reminder email content can be checked without depending on this test's
-    // accumulated, harder-to-predict balances elsewhere.
+    // Payment reminders: available to any account (not just admins), and strictly scoped to debts
+    // owed to the calling user -- a dedicated small trip with one precisely known unpaid debt, so
+    // the aggregation and the reminder email content can be checked without depending on this
+    // test's accumulated, harder-to-predict balances elsewhere.
     const reminderTrip = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Påminnelsetest" } });
     const reminderTripId = reminderTrip.payload.trip.id;
     const reminderInvite = await request(`/api/trips/${reminderTripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
@@ -584,15 +585,19 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       method: "POST", cookie: ownerCookie,
       body: { title: "Hytta", amount: "200", payerId: reminderOwnerParticipant.id, category: "stay", splitMode: "equal", entries: [{ participantId: reminderOwnerParticipant.id, value: 1 }, { participantId: reminderAnnaParticipant.id, value: 1 }] },
     });
-    const memberCannotSendReminders = await request("/api/admin/remind-unpaid", { method: "POST", cookie: memberCookie, body: {} });
-    assert.equal(memberCannotSendReminders.response.status, 403);
-    const remindersSent = await request("/api/admin/remind-unpaid", { method: "POST", cookie: ownerCookie, body: {} });
+    const emailsBeforeDebtorReminds = capturedEmails.length;
+    const debtorRemindersSent = await request("/api/remind-unpaid", { method: "POST", cookie: memberCookie, body: {} });
+    assert.equal(debtorRemindersSent.response.status, 200, JSON.stringify(debtorRemindersSent.payload));
+    assert.equal(debtorRemindersSent.payload.sent, 0, "Anna owes money but nobody owes Anna, so calling it as the debtor must send nothing");
+    assert.equal(capturedEmails.length, emailsBeforeDebtorReminds, "no email must go out when the caller has no debtors");
+    const remindersSent = await request("/api/remind-unpaid", { method: "POST", cookie: ownerCookie, body: {} });
     assert.equal(remindersSent.response.status, 200, JSON.stringify(remindersSent.payload));
-    assert.ok(remindersSent.payload.sent >= 1, "Anna owes money on the dedicated trip, so at least one reminder must go out");
+    assert.ok(remindersSent.payload.sent >= 1, "Anna owes Victor money on the dedicated trip, so at least one reminder must go out");
     assert.equal(remindersSent.payload.errors.length, 0, JSON.stringify(remindersSent.payload.errors));
     const reminderEmail = capturedEmails.find((item) => item.body.message.toRecipients[0].emailAddress.address === "anna@example.test");
     assert.ok(reminderEmail, "Anna must receive a reminder for her half of the shared expense");
-    assert.match(reminderEmail.body.message.body.content, /Påminnelsetest — till Victor: 100,00 kr/);
+    assert.match(reminderEmail.body.message.subject, /Victor/, "the subject must identify who is asking for the money");
+    assert.match(reminderEmail.body.message.body.content, /Påminnelsetest — till dig: 100,00 kr/);
 
     // Forgot/reset password: identical generic response whether the address exists or not (no user
     // enumeration), a working end-to-end reset via the mocked email's real link, single-use tokens,
@@ -671,7 +676,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
       () => request("/api/admin/quick-tabs/999999", { method: "DELETE", cookie: ownerCookie }),
       () => request("/api/admin/bug-reports/999999/resolve", { method: "POST", cookie: ownerCookie, body: { resolved: true } }),
       () => request("/api/admin/email-settings", { cookie: ownerCookie }),
-      () => request("/api/admin/remind-unpaid", { method: "POST", cookie: ownerCookie, body: {} }),
+      () => request("/api/remind-unpaid", { method: "POST", cookie: ownerCookie, body: {} }),
     ]) {
       const result = await blocked();
       assert.equal(result.response.status, 403, JSON.stringify(result.payload));

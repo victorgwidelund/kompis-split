@@ -155,8 +155,8 @@ fieldset { padding: 0; border: 0; }legend { margin-bottom: 9px; color: #4d514c; 
   .quick-edit-row > label:nth-child(3) { grid-column: 1 / 3; }
   .claim-row { grid-template-columns: 78px minmax(0, 1fr) auto; }
   .statistics-view { padding-top: 18px; }
-  .dashboard-heading-actions { display: grid; grid-template-columns: 1fr 1fr; margin-top: 18px; }
-  .dashboard-heading-actions .button { width: 100%; margin-top: 0; }
+  .dashboard-heading-actions { display: flex; flex-wrap: wrap; margin-top: 18px; }
+  .dashboard-heading-actions .button { flex: 1 1 calc(50% - 5px); margin-top: 0; }
   .statistics-grid { grid-template-columns: 1fr; gap: 10px; }
   .statistics-trend-panel { grid-column: auto; }
   .statistics-trend-panel .panel-title { display: block; }
