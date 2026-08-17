@@ -21,7 +21,11 @@ export function formatDate(value: string | null | undefined, fallback = "Inga da
 }
 
 export function initials(name: string): string {
-  return String(name || "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  // Picks the first actual letter of each word rather than part[0], so a name with a leading
+  // punctuation mark, dash, or emoji (e.g. a guest-typed "-Anna") still yields a sensible avatar.
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return parts.slice(0, 2).map((part) => part.match(/\p{L}/u)?.[0] || part[0] || "").join("").toUpperCase();
 }
 
 export function formatBytes(bytes: number): string {

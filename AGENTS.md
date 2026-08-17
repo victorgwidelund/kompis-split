@@ -40,6 +40,14 @@
 - Retain security headers, origin protection, rate limiting, secure cookies behind HTTPS, input validation, and generic internal-error responses.
 - Production sits behind Cloudflare then Nginx Proxy Manager. When `TRUST_PROXY` is enabled, derive client IP for rate limiting from `CF-Connecting-IP` (set authoritatively by Cloudflare's edge, not spoofable by the client) — never from the first entry of `X-Forwarded-For`, which every hop appends to and a client can still prepend arbitrary values onto. See `DEPLOYMENT.md` for the full trust model.
 
+## UX and design
+
+- Preserve the existing warm paper/coral/cobalt/mint/sun visual identity and friendly, non-corporate tone. Don't introduce generic modern-SaaS patterns (gradients-everywhere, glassmorphism, oversized hero sections, pill-everything, decorative motion) without a specific comprehension/trust/speed justification. See `UX_AUDIT.md` for the full v1.21.0 rationale.
+- In any layout that becomes a mobile grid, put the primary action first in DOM order — grid auto-placement follows markup order, so "last in the markup" silently becomes "buried in the bottom-right cell" on small screens.
+- Icon-only controls are 44×44px minimum and carry both `aria-label` and `title`. Every interactive element needs a visible `:focus-visible` state; for a control built on a visually-hidden native input, ring the visible sibling (`input:focus-visible + span`), not the hidden input.
+- Any field a user might type a decimal amount into is `type="text" inputMode="decimal"` with a manual filter, never `type="number"` — number inputs silently reject the Swedish comma decimal separator. Parse comma-or-period at the point a typed value first becomes a number, on both client and server.
+- Dialogs compose `<Modal>` + `<DialogHeader>` (`frontend/src/components/Modal.tsx`) so `aria-labelledby` wires up automatically — don't build a dialog heading without `DialogHeader`.
+
 ## Change discipline
 
 - Preserve backwards compatibility and user data by default.

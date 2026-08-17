@@ -221,6 +221,21 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(expense.payload.trip.expenses[0].expenseDate, null);
     assert.deepEqual(expense.payload.trip.expenses[0].shares.map((share) => share.amountCents), [5001, 5000]);
 
+    // Regression: amount/split-value fields are plain text inputs (not type="number", which
+    // silently rejects a comma decimal separator), so the server must accept the Swedish
+    // comma-decimal format exactly like a period. Voided immediately after so it doesn't disturb
+    // the trip's running totals used by assertions further down.
+    const commaExpense = await request(`/api/trips/${tripId}/expenses`, {
+      method: "POST", cookie: ownerCookie,
+      body: { title: "Kommatest", amount: "45,50", payerId: ownerParticipant.id, category: "food", splitMode: "exact", entries: [{ participantId: ownerParticipant.id, value: "20,50" }, { participantId: memberParticipant.id, value: "25" }] },
+    });
+    assert.equal(commaExpense.response.status, 201, JSON.stringify(commaExpense.payload));
+    const commaExpenseRecord = commaExpense.payload.trip.expenses.find((item) => item.title === "Kommatest");
+    assert.equal(commaExpenseRecord.amountCents, 4550);
+    assert.deepEqual(commaExpenseRecord.shares.map((share) => share.amountCents), [2050, 2500]);
+    const commaExpenseVoided = await request(`/api/expenses/${commaExpenseRecord.id}`, { method: "DELETE", cookie: ownerCookie, body: {} });
+    assert.equal(commaExpenseVoided.response.status, 200, JSON.stringify(commaExpenseVoided.payload));
+
     const memberCannotEdit = await request(`/api/expenses/${expense.payload.trip.expenses[0].id}`, {
       method: "PATCH",
       cookie: memberCookie,
@@ -759,8 +774,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   const revision = (await verification.query("SELECT payload_json FROM audit_log WHERE action = 'expense.updated'")).rows[0].payload_json;
   assert.equal(Number(revision.previous.amountCents), 10001);
   assert.deepEqual(revision.previous.shares.map((share) => Number(share.amountCents)), [5001, 5000]);
-  // 1 from the original "Middag uppdaterad" void + 1 from voiding the Swedish-characters test expense.
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 2);
+  // 1 from the original "Middag uppdaterad" void + 1 from voiding the comma-decimal regression
+  // expense + 1 from voiding the Swedish-characters test expense.
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'expense.voided'")).rows[0].count), 3);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action = 'payment.voided'")).rows[0].count), 1);
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM audit_log WHERE action IN ('trip.deleted', 'trip.undeleted')")).rows[0].count), 2);
   // 1 from the original upload + 5 from the concurrent-upload race-condition test (the cap rejects the 6th).
