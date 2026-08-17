@@ -152,6 +152,16 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const created = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Sälen", startDate: "2026-12-10", endDate: "2026-12-13" } });
     assert.equal(created.response.status, 201, JSON.stringify(created.payload));
     const tripId = created.payload.trip.id;
+    // Regression: POST /api/trips must not send its 201 response until the transaction has actually
+    // committed. It used to call json() (which ends the response) from inside db.transaction's work
+    // callback, before COMMIT ran -- so a client request that landed on a different pooled connection
+    // right after receiving the response could still miss the just-created trip (this caused
+    // intermittent CI failures: admin overview showing one trip short, and invitation creation on a
+    // freshly created trip failing with 403 because trip_access wasn't visible yet). Querying on a
+    // wholly separate connection (`inspect`, not the server's pool) immediately after the response
+    // reproduces exactly that race if it regresses.
+    const tripRowAfterCreate = await inspect.query("SELECT trip_id FROM trip_access WHERE trip_id = $1 AND user_id = $2", [tripId, setup.payload.user.id]);
+    assert.equal(tripRowAfterCreate.rows.length, 1, "trip_access for the new trip must be committed and visible on another connection immediately after the 201 response");
     const invite = await request(`/api/trips/${tripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
     assert.equal(invite.response.status, 201, JSON.stringify(invite.payload));
     assert.match(invite.payload.invitation.qrDataUrl, /^data:image\/png;base64,/);

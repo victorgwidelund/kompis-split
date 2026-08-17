@@ -1567,15 +1567,16 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   }
   if (request.method === "POST" && url.pathname === "/api/trips") {
     const body = await readJson(request);
-    return db.transaction(async () => {
+    const tripId = await db.transaction(async () => {
       const result = await db.prepare("INSERT INTO trips (name, start_date, end_date, created_by, is_demo, demo_batch_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
         .run(cleanText(body.name, "Gruppens namn", 80), validDate(body.startDate), validDate(body.endDate), user.id, Boolean(user.demo_mode), user.demo_mode ? user.demo_batch_id : null);
       const tripId = Number(result.lastInsertRowid);
       await db.prepare("INSERT INTO trip_access (trip_id, user_id, role) VALUES (?, ?, 'owner')").run(tripId, user.id);
       await db.prepare("INSERT INTO participants (trip_id, name, swish_phone, user_id) VALUES (?, ?, ?, ?)").run(tripId, user.display_name, user.swish_phone, user.id);
       await audit(user.id, tripId, "trip.created", "trip", tripId);
-      return json(response, 201, { trip: await loadTrip(tripId, user.id) });
+      return tripId;
     });
+    return json(response, 201, { trip: await loadTrip(tripId, user.id) });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)$/);
   if (request.method === "GET" && match) {
