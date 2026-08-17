@@ -1,0 +1,53 @@
+{
+  "id": "fastfood_pathological_dev1",
+  "category": "fastfood",
+  "difficulty": "pathological",
+  "split": "dev",
+  "merchant": "Snabbmat Expressen",
+  "date": "2026-04-18",
+  "totalOre": 42192,
+  "items": [
+    {
+      "name": "Milkshake",
+      "quantity": 2,
+      "totalOre": 11122
+    },
+    {
+      "name": "Meny 1 Cheeseburgare",
+      "quantity": 1,
+      "totalOre": 11294
+    },
+    {
+      "name": "Extra bacon",
+      "quantity": 1,
+      "totalOre": 1505
+    },
+    {
+      "name": "Pommes frites",
+      "quantity": 1,
+      "totalOre": 4469
+    },
+    {
+      "name": "Meny 2 Dubbelburgare",
+      "quantity": 1,
+      "totalOre": 13802
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Snabbmat Expressen\nGrillplatsen 7, Göteborg\n18 apr 2026\nMilkshake 2 st 111,22\nMeny 1 Cheeseburgare 112,94\nExtra bacon 15,05\nPommes frites 44,69\nMeny 2 Dubbelburgare 138,02\nMoms 12% 45,21\nAtt betala 421,92\nBetalt",
+  "photo": {
+    "rotationDeg": -10.6,
+    "shear": 0.09,
+    "frameFill": 0.42,
+    "blurSigma": 1.23,
+    "jpegQuality": 63,
+    "backgroundTone": "dark",
+    "canvasWidth": 1457,
+    "canvasHeight": 1391
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 480
+  }
+}

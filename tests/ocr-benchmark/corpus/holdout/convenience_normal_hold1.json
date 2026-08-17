@@ -1,0 +1,58 @@
+{
+  "id": "convenience_normal_hold1",
+  "category": "convenience",
+  "difficulty": "normal",
+  "split": "holdout",
+  "merchant": "Pressbyrån Centralen",
+  "date": "2025-10-08",
+  "totalOre": 23507,
+  "items": [
+    {
+      "name": "Tidning",
+      "quantity": 1,
+      "totalOre": 6009
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 2681
+    },
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 4138
+    },
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 2812
+    },
+    {
+      "name": "Energidryck",
+      "quantity": 1,
+      "totalOre": 3009
+    },
+    {
+      "name": "Korv med bröd",
+      "quantity": 1,
+      "totalOre": 4858
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Pressbyrån Centralen\nJärnvägstorget 1, Göteborg\n08-10-2025\nTidning 60,09\nKaffe 26,81\nGodispåse 41,38\nChoklad 28,12\nEnergidryck 30,09\nKorv med bröd 48,58\nMoms 12% 25,19\nSUMMA 235,07\nVisa",
+  "photo": {
+    "rotationDeg": 3.2,
+    "shear": -0.02,
+    "frameFill": 0.8,
+    "blurSigma": 0.17,
+    "jpegQuality": 89,
+    "backgroundTone": "light",
+    "canvasWidth": 570,
+    "canvasHeight": 661
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 420
+  }
+}

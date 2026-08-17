@@ -1,0 +1,68 @@
+{
+  "id": "grocery_normal_dev2",
+  "category": "grocery",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Hemköp Centrum",
+  "date": "2025-12-15",
+  "totalOre": 28158,
+  "items": [
+    {
+      "name": "Yoghurt",
+      "quantity": 1,
+      "totalOre": 2544
+    },
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 6449
+    },
+    {
+      "name": "Bananer",
+      "quantity": 1,
+      "totalOre": 2813
+    },
+    {
+      "name": "Ägg 12-pack",
+      "quantity": 1,
+      "totalOre": 4097
+    },
+    {
+      "name": "Kaffe 500g",
+      "quantity": 1,
+      "totalOre": 6167
+    },
+    {
+      "name": "Bröd",
+      "quantity": 1,
+      "totalOre": 2583
+    },
+    {
+      "name": "Tomater",
+      "quantity": 1,
+      "totalOre": 3305
+    },
+    {
+      "name": "Pant burk",
+      "quantity": 1,
+      "totalOre": 200
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Hemköp Centrum\nHandelsvägen 1, Stockholm\n15 dec 2025\nYoghurt 25,44\nRäksmörgås 64,49\nBananer 28,13\nÄgg 12-pack 40,97\nKaffe 500g 61,67\nBröd 25,83\nTomater 33,05\nPant burk 2,00\nMoms 12% 30,17\nTOTAL 281,58\nKort",
+  "photo": {
+    "rotationDeg": -3.5,
+    "shear": -0.02,
+    "frameFill": 0.78,
+    "blurSigma": 0.19,
+    "jpegQuality": 90,
+    "backgroundTone": "light",
+    "canvasWidth": 525,
+    "canvasHeight": 851
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 360
+  }
+}

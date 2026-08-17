@@ -1,0 +1,45 @@
+{
+  "id": "restaurant_clean_dev1",
+  "category": "restaurant",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Bistro Kajen",
+  "date": "2025-07-11",
+  "totalOre": 44307,
+  "items": [
+    {
+      "name": "Wienerschnitzel",
+      "quantity": 1,
+      "totalOre": 19894
+    },
+    {
+      "name": "Stor stark",
+      "quantity": 1,
+      "totalOre": 7628
+    },
+    {
+      "name": "Köttbullar med lingon",
+      "quantity": 1,
+      "totalOre": 16785
+    }
+  ],
+  "rejectedMetadata": [
+    "Referens 27794"
+  ],
+  "discountOre": 0,
+  "idealText": "Bistro Kajen\nStorgatan 12, Stockholm\nReferens 27794\n11 jul 2025\nWienerschnitzel 198,94\nStor stark 76,28\nKöttbullar med lingon 167,85\nMoms 12% 47,47\nTOTALT 443,07\nKort",
+  "photo": {
+    "rotationDeg": -0.6,
+    "shear": 0,
+    "frameFill": 0.93,
+    "blurSigma": 0.13,
+    "jpegQuality": 96,
+    "backgroundTone": "dark",
+    "canvasWidth": 606,
+    "canvasHeight": 521
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 560
+  }
+}

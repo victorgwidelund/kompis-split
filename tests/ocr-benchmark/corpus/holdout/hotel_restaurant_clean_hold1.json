@@ -1,0 +1,55 @@
+{
+  "id": "hotel_restaurant_clean_hold1",
+  "category": "hotel_restaurant",
+  "difficulty": "clean",
+  "split": "holdout",
+  "merchant": "Hotell Kajutan Frukost",
+  "date": "2025-07-31",
+  "totalOre": 135185,
+  "items": [
+    {
+      "name": "Frukostbuffé",
+      "quantity": 1,
+      "totalOre": 17292
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 6490
+    },
+    {
+      "name": "Trerätters meny",
+      "quantity": 1,
+      "totalOre": 49738
+    },
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 31573
+    },
+    {
+      "name": "Dagens lunch",
+      "quantity": 2,
+      "totalOre": 30092
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassa 8"
+  ],
+  "discountOre": 0,
+  "idealText": "Hotell Kajutan Frukost\nHotellgatan 1, Stockholm\nKassa 8\n31-07-2025\nFrukostbuffé 172,92\nRumsservice tillägg 64,90\nTrerätters meny 497,38\nVinpaket 3 glas 315,73\n2x Dagens lunch 300,92\nMoms 12% 144,84\nAtt betala 1351,85\nGodkänt",
+  "photo": {
+    "rotationDeg": -0.1,
+    "shear": 0,
+    "frameFill": 0.91,
+    "blurSigma": 0.05,
+    "jpegQuality": 92,
+    "backgroundTone": "dark",
+    "canvasWidth": 615,
+    "canvasHeight": 557
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 560
+  }
+}

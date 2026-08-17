@@ -1,0 +1,65 @@
+{
+  "id": "cafe_pathological_dev1",
+  "category": "cafe",
+  "difficulty": "pathological",
+  "split": "dev",
+  "merchant": "Kafé Linnéa",
+  "date": "2025-03-02",
+  "totalOre": 76830,
+  "items": [
+    {
+      "name": "Kaffe",
+      "quantity": 4,
+      "totalOre": 14696
+    },
+    {
+      "name": "Cappuccino",
+      "quantity": 6,
+      "totalOre": 27996
+    },
+    {
+      "name": "Kanelbulle",
+      "quantity": 1,
+      "totalOre": 3280
+    },
+    {
+      "name": "Latte",
+      "quantity": 3,
+      "totalOre": 15198
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 6568
+    },
+    {
+      "name": "Wienerbröd",
+      "quantity": 1,
+      "totalOre": 4093
+    },
+    {
+      "name": "Semla",
+      "quantity": 1,
+      "totalOre": 4999
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassör Erik"
+  ],
+  "discountOre": 0,
+  "idealText": "Kafé Linnéa\nVasagatan 4, Stockholm\nKassör Erik\n2025-03-02\nKaffe 4 st 146,96\n6x Cappuccino 279,96\nKanelbulle 32,80\n3 x Latte 151,98\nSmörgås skinka och ost 65,68\nWienerbröd 40,93\nSemla 49,99\nMoms 12% 82,32\nTOTAL 768,30\nGodkänt",
+  "photo": {
+    "rotationDeg": -12.5,
+    "shear": 0.09,
+    "frameFill": 0.47,
+    "blurSigma": 1.44,
+    "jpegQuality": 67,
+    "backgroundTone": "dark",
+    "canvasWidth": 1536,
+    "canvasHeight": 1411
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 560
+  }
+}

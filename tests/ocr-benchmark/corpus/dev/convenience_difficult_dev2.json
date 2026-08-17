@@ -1,0 +1,65 @@
+{
+  "id": "convenience_difficult_dev2",
+  "category": "convenience",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "7-Eleven Sergels Torg",
+  "date": "2025-11-06",
+  "totalOre": 27501,
+  "items": [
+    {
+      "name": "Korv med bröd",
+      "quantity": 1,
+      "totalOre": 4477
+    },
+    {
+      "name": "Tidning",
+      "quantity": 1,
+      "totalOre": 5286
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 3074
+    },
+    {
+      "name": "Energidryck",
+      "quantity": 1,
+      "totalOre": 3043
+    },
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 2712
+    },
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 5645
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3264
+    }
+  ],
+  "rejectedMetadata": [
+    "Transaktions-ID 980313"
+  ],
+  "discountOre": 0,
+  "idealText": "7-Eleven Sergels Torg\nCentralstationen, Stockholm\nTransaktions-ID 980313\n06/11/2025\nKorv med bröd 44,77\nTidning 52,86\nKaffe 30,74\nEnergidryck 30,43\nChoklad 27,12\nGodispåse 56,45\nChips 32,64\nMoms 12% 29,47\nSUMMA 275,01\nVisa",
+  "photo": {
+    "rotationDeg": -9.6,
+    "shear": -0.05,
+    "frameFill": 0.48,
+    "blurSigma": 0.59,
+    "jpegQuality": 78,
+    "backgroundTone": "light",
+    "canvasWidth": 1286,
+    "canvasHeight": 1471
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 480
+  }
+}

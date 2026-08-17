@@ -1,0 +1,53 @@
+{
+  "id": "convenience_clean_dev1",
+  "category": "convenience",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Kiosken Hörnan",
+  "date": "2025-08-07",
+  "totalOre": 15988,
+  "items": [
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 4787
+    },
+    {
+      "name": "Läsk 33cl",
+      "quantity": 1,
+      "totalOre": 2315
+    },
+    {
+      "name": "Energidryck",
+      "quantity": 1,
+      "totalOre": 2556
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3696
+    },
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 2634
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Kiosken Hörnan\nJärnvägstorget 1, Göteborg\n07-08-2025\nGodispåse 47,87\nLäsk 33cl 23,15\nEnergidryck 25,56\nChips 36,96\nChoklad 26,34\nMoms 12% 17,13\nATT BETALA 159,88\nKort",
+  "photo": {
+    "rotationDeg": 0.9,
+    "shear": 0,
+    "frameFill": 0.95,
+    "blurSigma": 0.1,
+    "jpegQuality": 93,
+    "backgroundTone": "light",
+    "canvasWidth": 452,
+    "canvasHeight": 539
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 420
+  }
+}

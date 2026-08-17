@@ -1,0 +1,65 @@
+{
+  "id": "takeaway_difficult_dev2",
+  "category": "takeaway",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Pizzeria Napoli",
+  "date": "2026-02-01",
+  "totalOre": 79297,
+  "items": [
+    {
+      "name": "Wok kyckling",
+      "quantity": 1,
+      "totalOre": 11637
+    },
+    {
+      "name": "Coca-Cola 33cl",
+      "quantity": 4,
+      "totalOre": 9336
+    },
+    {
+      "name": "Pizza nr 5 Vesuvio",
+      "quantity": 1,
+      "totalOre": 12054
+    },
+    {
+      "name": "Vårrullar",
+      "quantity": 1,
+      "totalOre": 5702
+    },
+    {
+      "name": "Pizza nr 12 Capricciosa",
+      "quantity": 1,
+      "totalOre": 11362
+    },
+    {
+      "name": "Sushi meny 1",
+      "quantity": 1,
+      "totalOre": 16896
+    },
+    {
+      "name": "Kebabtallrik",
+      "quantity": 1,
+      "totalOre": 12310
+    }
+  ],
+  "rejectedMetadata": [
+    "Beställning 163"
+  ],
+  "discountOre": 0,
+  "idealText": "Pizzeria Napoli\nTake Away-gatan 3, Stockholm\nBeställning 163\n01/02/2026\nWok kyckling 116,37\n4 x Coca-Cola 33cl 93,36\nPizza nr 5 Vesuvio 120,54\nVårrullar 57,02\nPizza nr 12 Capricciosa 113,62\nSushi meny 1 168,96\nKebabtallrik 123,10\nMoms 12% 84,96\nSUMMA 792,97\nGodkänt",
+  "photo": {
+    "rotationDeg": 10.8,
+    "shear": -0.05,
+    "frameFill": 0.6,
+    "blurSigma": 0.89,
+    "jpegQuality": 66,
+    "backgroundTone": "light",
+    "canvasWidth": 1161,
+    "canvasHeight": 1143
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 560
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "id": "restaurant_clean_hold1",
+  "category": "restaurant",
+  "difficulty": "clean",
+  "split": "holdout",
+  "merchant": "Restaurang Solgläntan",
+  "date": "2026-08-11",
+  "totalOre": 62872,
+  "items": [
+    {
+      "name": "Köttbullar med lingon",
+      "quantity": 1,
+      "totalOre": 15517
+    },
+    {
+      "name": "Pasta Carbonara",
+      "quantity": 1,
+      "totalOre": 17544
+    },
+    {
+      "name": "Caesarsallad",
+      "quantity": 1,
+      "totalOre": 13350
+    },
+    {
+      "name": "Dubbel espresso",
+      "quantity": 2,
+      "totalOre": 7004
+    },
+    {
+      "name": "Crème brûlée",
+      "quantity": 1,
+      "totalOre": 9457
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassa 1",
+    "Org.nr 559958-7093"
+  ],
+  "discountOre": 0,
+  "idealText": "Restaurang Solgläntan\nDrottninggatan 8, Uppsala\nKassa 1\n2026-08-11\nKöttbullar med lingon 155,17\nPasta Carbonara 175,44\nCaesarsallad 133,50\nDubbel espresso 2 st 70,04\nCrème brûlée 94,57\nMoms 12% 67,36\nOrg.nr 559958-7093\nATT BETALA 628,72\nGodkänt",
+  "photo": {
+    "rotationDeg": 0.8,
+    "shear": 0,
+    "frameFill": 0.83,
+    "blurSigma": 0.14,
+    "jpegQuality": 96,
+    "backgroundTone": "dark",
+    "canvasWidth": 584,
+    "canvasHeight": 679
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 480
+  }
+}

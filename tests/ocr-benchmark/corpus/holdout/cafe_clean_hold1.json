@@ -1,0 +1,43 @@
+{
+  "id": "cafe_clean_hold1",
+  "category": "cafe",
+  "difficulty": "clean",
+  "split": "holdout",
+  "merchant": "Fikahörnan",
+  "date": "2025-08-26",
+  "totalOre": 18561,
+  "items": [
+    {
+      "name": "Semla",
+      "quantity": 1,
+      "totalOre": 5471
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 2,
+      "totalOre": 6760
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 6330
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Fikahörnan\nNygatan 9, Lund\n26-08-2025\nSemla 54,71\n2 x Kaffe 33,80 67,60\nSmörgås skinka och ost 63,30\nMoms 12% 19,89\nAtt betala 185,61\nBetalt",
+  "photo": {
+    "rotationDeg": 0.1,
+    "shear": 0,
+    "frameFill": 0.91,
+    "blurSigma": 0.1,
+    "jpegQuality": 96,
+    "backgroundTone": "light",
+    "canvasWidth": 462,
+    "canvasHeight": 494
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 420
+  }
+}

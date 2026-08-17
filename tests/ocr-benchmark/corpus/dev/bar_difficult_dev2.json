@@ -1,0 +1,72 @@
+{
+  "id": "bar_difficult_dev2",
+  "category": "bar",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Cocktailbaren Söder",
+  "date": "2025-11-21",
+  "totalOre": 158472,
+  "items": [
+    {
+      "name": "Nachos",
+      "quantity": 1,
+      "totalOre": 10880
+    },
+    {
+      "name": "Negroni",
+      "quantity": 4,
+      "totalOre": 59244
+    },
+    {
+      "name": "Öl",
+      "quantity": 3,
+      "totalOre": 24564
+    },
+    {
+      "name": "Jordnötter",
+      "quantity": 1,
+      "totalOre": 4593
+    },
+    {
+      "name": "Cider",
+      "quantity": 1,
+      "totalOre": 7092
+    },
+    {
+      "name": "Gin & Tonic",
+      "quantity": 1,
+      "totalOre": 14399
+    },
+    {
+      "name": "Glas rödvin",
+      "quantity": 1,
+      "totalOre": 10310
+    },
+    {
+      "name": "IPA",
+      "quantity": 3,
+      "totalOre": 27390
+    }
+  ],
+  "rejectedMetadata": [
+    "Antal gäster 2",
+    "Kvitto 27599",
+    "Terminal 09"
+  ],
+  "discountOre": 0,
+  "idealText": "Cocktailbaren Söder\nAvenyn 14, Göteborg\nAntal gäster 2\nKvitto 27599\n21 nov 2025\nNachos 108,80\n4x Negroni 592,44\nÖl 3 st 245,64\nJordnötter 45,93\nCider 70,92\nGin & Tonic 143,99\nGlas rödvin 103,10\n3x IPA 273,90\nMoms 12% 169,79\nTerminal 09\nAtt betala 1584,72\nMastercard",
+  "photo": {
+    "rotationDeg": -6.4,
+    "shear": 0.05,
+    "frameFill": 0.6,
+    "blurSigma": 0.62,
+    "jpegQuality": 81,
+    "backgroundTone": "dark",
+    "canvasWidth": 1094,
+    "canvasHeight": 1131
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 560
+  }
+}

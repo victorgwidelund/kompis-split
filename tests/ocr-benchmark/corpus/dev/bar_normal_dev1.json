@@ -1,0 +1,61 @@
+{
+  "id": "bar_normal_dev1",
+  "category": "bar",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Puben Hörnan",
+  "date": "2025-05-26",
+  "totalOre": 94216,
+  "items": [
+    {
+      "name": "IPA",
+      "quantity": 3,
+      "totalOre": 28548
+    },
+    {
+      "name": "Cider",
+      "quantity": 3,
+      "totalOre": 23202
+    },
+    {
+      "name": "Jordnötter",
+      "quantity": 1,
+      "totalOre": 4156
+    },
+    {
+      "name": "Gin & Tonic",
+      "quantity": 1,
+      "totalOre": 14298
+    },
+    {
+      "name": "Glas rödvin",
+      "quantity": 1,
+      "totalOre": 10847
+    },
+    {
+      "name": "Negroni",
+      "quantity": 1,
+      "totalOre": 13165
+    }
+  ],
+  "rejectedMetadata": [
+    "Org.nr 558560-3226",
+    "Beställning 736"
+  ],
+  "discountOre": 0,
+  "idealText": "Puben Hörnan\nAvenyn 14, Göteborg\nOrg.nr 558560-3226\n2025/05/26\nIPA 3 st 285,48\n3x Cider 232,02\nJordnötter 41,56\nGin & Tonic 142,98\nGlas rödvin 108,47\nNegroni 131,65\nMoms 12% 100,95\nBeställning 736\nSUMMA 942,16\nGodkänt",
+  "photo": {
+    "rotationDeg": 1.6,
+    "shear": 0.02,
+    "frameFill": 0.76,
+    "blurSigma": 0.31,
+    "jpegQuality": 86,
+    "backgroundTone": "light",
+    "canvasWidth": 509,
+    "canvasHeight": 762
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 360
+  }
+}

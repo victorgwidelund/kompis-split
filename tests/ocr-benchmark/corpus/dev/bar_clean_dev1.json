@@ -1,0 +1,55 @@
+{
+  "id": "bar_clean_dev1",
+  "category": "bar",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Bar Nio",
+  "date": "2025-06-19",
+  "totalOre": 116528,
+  "items": [
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 6792
+    },
+    {
+      "name": "Whiskey",
+      "quantity": 4,
+      "totalOre": 70484
+    },
+    {
+      "name": "Nachos",
+      "quantity": 1,
+      "totalOre": 9368
+    },
+    {
+      "name": "Cider",
+      "quantity": 2,
+      "totalOre": 16836
+    },
+    {
+      "name": "Negroni",
+      "quantity": 1,
+      "totalOre": 13048
+    }
+  ],
+  "rejectedMetadata": [
+    "Terminal 02"
+  ],
+  "discountOre": 0,
+  "idealText": "Bar Nio\nHamngatan 3, Stockholm\nTerminal 02\n19/06/2025\nBlåbärspaj 67,92\n4 x Whiskey 704,84\nNachos 93,68\nCider 2 st 168,36\nNegroni 130,48\nMoms 12% 124,85\nAtt betala 1165,28\nBetalt",
+  "photo": {
+    "rotationDeg": -1,
+    "shear": 0,
+    "frameFill": 0.84,
+    "blurSigma": 0.14,
+    "jpegQuality": 92,
+    "backgroundTone": "light",
+    "canvasWidth": 440,
+    "canvasHeight": 665
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 360
+  }
+}

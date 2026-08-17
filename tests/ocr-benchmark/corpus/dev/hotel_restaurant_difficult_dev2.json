@@ -1,0 +1,63 @@
+{
+  "id": "hotel_restaurant_difficult_dev2",
+  "category": "hotel_restaurant",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Grand Hotellets Matsal",
+  "date": "2026-04-08",
+  "totalOre": 209560,
+  "items": [
+    {
+      "name": "Trerätters meny",
+      "quantity": 1,
+      "totalOre": 66309
+    },
+    {
+      "name": "Mineralvatten",
+      "quantity": 4,
+      "totalOre": 17296
+    },
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 32736
+    },
+    {
+      "name": "Dagens lunch",
+      "quantity": 1,
+      "totalOre": 14655
+    },
+    {
+      "name": "Frukostbuffé",
+      "quantity": 4,
+      "totalOre": 70848
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 7716
+    }
+  ],
+  "rejectedMetadata": [
+    "Antal gäster 6",
+    "Kassör Sara",
+    "Referens 16048",
+    "Org.nr 559648-7653"
+  ],
+  "discountOre": 0,
+  "idealText": "Grand Hotellets Matsal\nEsplanaden 6, Malmö\nAntal gäster 6\nKassör Sara\n2026-04-08\nTrerätters meny 663,09\n4 x Mineralvatten 43,24 172,96\nVinpaket 3 glas 327,36\nDagens lunch 146,55\n4 x Frukostbuffé 708,48\nRumsservice tillägg 77,16\nMoms 12% 224,53\nReferens 16048\nOrg.nr 559648-7653\nTOTAL 2095,60\nKort",
+  "photo": {
+    "rotationDeg": 8.9,
+    "shear": 0.05,
+    "frameFill": 0.7,
+    "blurSigma": 0.9,
+    "jpegQuality": 65,
+    "backgroundTone": "light",
+    "canvasWidth": 692,
+    "canvasHeight": 938
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 360
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "cafe_clean_dev1",
+  "category": "cafe",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Fikahörnan",
+  "date": "2025-05-21",
+  "totalOre": 31665,
+  "items": [
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 7488
+    },
+    {
+      "name": "Latte",
+      "quantity": 1,
+      "totalOre": 4462
+    },
+    {
+      "name": "Cappuccino",
+      "quantity": 1,
+      "totalOre": 4799
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 4,
+      "totalOre": 14916
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Fikahörnan\nVasagatan 4, Stockholm\n21-05-2025\nSmörgås skinka och ost 74,88\nLatte 44,62\nCappuccino 47,99\n4 x Kaffe 149,16\nMoms 12% 33,93\nSUMMA 316,65\nVisa",
+  "photo": {
+    "rotationDeg": -0.8,
+    "shear": 0,
+    "frameFill": 0.88,
+    "blurSigma": 0.11,
+    "jpegQuality": 96,
+    "backgroundTone": "light",
+    "canvasWidth": 554,
+    "canvasHeight": 593
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 480
+  }
+}

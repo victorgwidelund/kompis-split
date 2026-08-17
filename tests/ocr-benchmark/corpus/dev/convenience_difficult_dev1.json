@@ -1,0 +1,68 @@
+{
+  "id": "convenience_difficult_dev1",
+  "category": "convenience",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Pressbyrån Centralen",
+  "date": "2026-01-02",
+  "totalOre": 30285,
+  "items": [
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 5148
+    },
+    {
+      "name": "Läsk 33cl",
+      "quantity": 1,
+      "totalOre": 2727
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 2846
+    },
+    {
+      "name": "Korv med bröd",
+      "quantity": 1,
+      "totalOre": 4048
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3688
+    },
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 2006
+    },
+    {
+      "name": "Energidryck",
+      "quantity": 1,
+      "totalOre": 3102
+    },
+    {
+      "name": "Tidning",
+      "quantity": 1,
+      "totalOre": 6720
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Pressbyrån Centralen\nCentralstationen, Stockholm\n2026/01/02\n1x Godispåse\n1x Läsk 33cl\n1x Kaffe\n1x Korv med bröd\n1x Chips\n1x Choklad\n1x Energidryck\n1x Tidning\n51,48\n27,27\n28,46\n40,48\n36,88\n20,06\n31,02\n67,20\nMoms 12% 32,45\nTOTALT 302,85\nBetalt",
+  "photo": {
+    "rotationDeg": 10.1,
+    "shear": 0.05,
+    "frameFill": 0.48,
+    "blurSigma": 0.54,
+    "jpegQuality": 68,
+    "backgroundTone": "light",
+    "canvasWidth": 1517,
+    "canvasHeight": 1751
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 560
+  }
+}

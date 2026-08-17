@@ -347,7 +347,7 @@ test("integer SEK totals, preferred order dates and unit prices repair a low-res
   `, new Date("2026-08-11T12:00:00Z"));
   assert.equal(first.amount, "1312.00");
   assert.equal(first.expenseDate, "2018-01-25");
-  assert.deepEqual(first.items[0], { name: "Munn Cordon Roug ", quantity: 2, amount: "262.00" });
+  assert.deepEqual(first.items[0], { name: "Munn Cordon Roug", quantity: 2, amount: "262.00" });
   const second = parseReceiptText("1 x Créme Brölée 95,00\nATT BETALA 1312 SEK");
   const combined = combineReceiptPasses([
     { text: "", confidence: 72, suggestion: first },
@@ -509,6 +509,122 @@ test("invalid and future dates are not suggested", () => {
   assert.equal(suggestion.title, "HOTELL NORR");
   assert.equal(suggestion.expenseDate, null);
   assert.equal(suggestion.category, "stay");
+});
+
+test("a Swedish-worded date does not get its year misread as an item price", () => {
+  // Found via the OCR benchmark corpus (tests/ocr-benchmark): "11 jul 2025" silently became a fake
+  // item named "jul" for 20.25 kr, because the trailing "2025" satisfies the exact same bare-3-5-digit
+  // shape normalizeNumericGlyphs() repairs a lost-decimal price with (e.g. "13000" -> "130.00").
+  const suggestion = parseReceiptText(`
+    BISTRO KAJEN
+    Referens 27794
+    11 jul 2025
+    Wienerschnitzel 198,94
+    TOTALT 198,94
+  `);
+  assert.equal(suggestion.expenseDate, "2025-07-11");
+  assert.deepEqual(suggestion.items, [{ name: "Wienerschnitzel", quantity: 1, amount: "198.94" }]);
+});
+
+test("European DD/MM/YYYY and DD-MM-YYYY dates keep their year intact through numeric-glyph normalization", () => {
+  // Same root cause as the Swedish-worded date above, but for the far more common European numeric
+  // formats: every date in the OCR benchmark corpus using "/" or "-" separators came back as null
+  // before this was fixed, since the trailing year lost its own decimal-less "2025" shape.
+  const slash = parseReceiptText("KIOSKEN\n19/06/2025\nKaffe 35,00\nTOTALT 35,00");
+  assert.equal(slash.expenseDate, "2025-06-19");
+  const dash = parseReceiptText("KIOSKEN\n09-03-2025\nKaffe 35,00\nTOTALT 35,00");
+  assert.equal(dash.expenseDate, "2025-03-09");
+});
+
+test("a menu-numbered item name is not swallowed into a Swedish thousands-separated price", () => {
+  // "Sushi meny 1 159,90" is genuinely ambiguous with a real thousands-separated amount ("1 234,50",
+  // see the "editable suggestions" test above) -- amountCandidates() greedily read "1 159" as one
+  // number, 1159.90, silently merging the menu index into the price and corrupting both.
+  const suggestion = parseReceiptText(`
+    SUSHI EXPRESS
+    Sushi meny 1 159,90
+    Wok kyckling 125,62
+    ATT BETALA 285,52
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Sushi meny 1", quantity: 1, amount: "159.90" },
+    { name: "Wok kyckling", quantity: 1, amount: "125.62" },
+  ]);
+});
+
+test("a short business name is preferred over a longer street address for merchant detection", () => {
+  // merchantNameScore() used to be dominated by raw letter count, so "Vasagatan 4, Stockholm" (18
+  // letters) beat "Fikahörnan" (10 letters) on every receipt where the name wasn't printed twice.
+  const suggestion = parseReceiptText("Fikahörnan\nVasagatan 4, Stockholm\nKaffe 35,00\nTOTALT 35,00");
+  assert.equal(suggestion.title, "Fikahörnan");
+});
+
+test("business-type words require a whole-word match, not a substring inside an unrelated address", () => {
+  // An unanchored "butik"/"grill" matched inside "Butiksgatan" and "Grillplatsen" (street names), each
+  // wrongly handing the address the same scoring bonus meant to recognize an actual business name.
+  const grocery = parseReceiptText("Willys Söder\nButiksgatan 22, Örebro\nMjölk 15,90\nTOTALT 15,90");
+  assert.equal(grocery.title, "Willys Söder");
+  const fastfood = parseReceiptText("Snabbmat Expressen\nGrillplatsen 7, Göteborg\nPommes 35,00\nTOTALT 35,00");
+  assert.equal(fastfood.title, "Snabbmat Expressen");
+});
+
+test('"Grand" in a hotel name is not mistaken for the street-suffix "gränd"', () => {
+  // A self-caught regression while fixing the two tests above: giving "gränd" (alley) an OCR-tolerant
+  // ä->a variant also matched the common, legitimate word "Grand" ("Grand Hotel").
+  const suggestion = parseReceiptText(`
+    Grand Hotellets Matsal
+    Hotellgatan 1, Stockholm
+    Terminal 01
+    Dagens lunch 171,01
+    SUMMA 171,01
+  `);
+  assert.equal(suggestion.title, "Grand Hotellets Matsal");
+});
+
+test('a trailing "name N st price" quantity format is recognized', () => {
+  // quantityPattern only ever looks at the START of a line; "Öl 2 st 158,00" (quantity written after
+  // the name) fell back to quantity 1 with "2" stuck onto the item's name.
+  const suggestion = parseReceiptText("BAR NIO\nÖl 2 st 158,00\nTOTALT 158,00");
+  assert.deepEqual(suggestion.items, [{ name: "Öl", quantity: 2, amount: "158.00" }]);
+});
+
+test("trailing quantity/menu-index detection and name cleanup also work for non-ÅÄÖ Latin diacritics", () => {
+  // The narrower [A-Za-zÅÄÖåäö] class doesn't cover other diacritics Swedish text still borrows
+  // ("Frukostbuffé", "Café"); requiring a name to end in exactly one of those letters silently dropped
+  // the trailing "é" via the same trailing-junk-strip used everywhere a candidate name is cleaned up.
+  const suggestion = parseReceiptText("HOTELL KAJUTAN\nFrukostbuffé 4 st 736,44\nTOTALT 736,44");
+  assert.deepEqual(suggestion.items, [{ name: "Frukostbuffé", quantity: 4, amount: "736.44" }]);
+});
+
+test("merchant detection is not overwhelmed by a long line of OCR noise", () => {
+  // Real Tesseract output on a rotated/blurred synthetic receipt (via the OCR benchmark's image-pipeline
+  // mode): a 40+ letter garbled noise line beat the correct 14-letter "Pizzeria Napoli" purely on raw
+  // letter count. Letter count is now capped so a short correct name several lines above can still win.
+  const suggestion = parseReceiptText(`
+    Pizzeria Napoli
+    Take Away-gatan 3, Stockholm
+    binkekdrärnkdatentrtat ed ä dre ATT EEE PETTER
+    Pizza nr 12 Capricciosa 127,31
+    SUMMA 127,31
+  `);
+  assert.equal(suggestion.title, "Pizzeria Napoli");
+});
+
+test("a merchant name that legitimately starts with a digit keeps its leading digit", () => {
+  // The leading-punctuation trim used to strip "7-" off "7-Eleven", leaving just "Eleven".
+  const suggestion = parseReceiptText("7-Eleven Sergels Torg\nSergelsgatan 1, Stockholm\nLäsk 25,00\nTOTALT 25,00");
+  assert.equal(suggestion.title, "7-Eleven Sergels Torg");
+});
+
+test('a standalone "à" unit-price marker is stripped from every item name it appears on, not just the first', () => {
+  // "à" ("at [unit price] each") isn't part of the dish name, but \b doesn't reliably bound a non-ASCII
+  // letter, so a plain \bà\b never matched it at all -- confirmed by adding a second, third à-marked
+  // item to the existing "low-resolution restaurant receipt" fixture below.
+  const suggestion = parseReceiptText("BISTRO\n2 x Ostron à 29,00 58,00\n2 x La Croix Merlot à 95,00 190,00\nTOTALT 248,00");
+  assert.deepEqual(suggestion.items, [
+    { name: "Ostron", quantity: 2, amount: "58.00" },
+    { name: "La Croix Merlot", quantity: 2, amount: "190.00" },
+  ]);
 });
 
 test("two bundled Swedish OCR workers can process receipts concurrently", { timeout: 30_000 }, async () => {

@@ -1,0 +1,53 @@
+{
+  "id": "cafe_difficult_dev2",
+  "category": "cafe",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Café Ångbåtsbryggan",
+  "date": "2025-09-22",
+  "totalOre": 37906,
+  "items": [
+    {
+      "name": "Smör och ost macka",
+      "quantity": 1,
+      "totalOre": 5765
+    },
+    {
+      "name": "Kanelbulle",
+      "quantity": 2,
+      "totalOre": 7764
+    },
+    {
+      "name": "Wienerbröd",
+      "quantity": 1,
+      "totalOre": 3982
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 6183
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 4,
+      "totalOre": 14212
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Café Ångbåtsbryggan\nNygatan 9, Lund\n22-09-2025\nSmör och ost mac\nka 57,65\n2 x Kanelbulle 77,64\nWienerbröd 39,82\nSmörgås skinka och ost 61,83\n4x Kaffe 142,12\nMoms 12% 40,61\nTOTAL 379,06\nVisa",
+  "photo": {
+    "rotationDeg": 9.5,
+    "shear": 0.05,
+    "frameFill": 0.6,
+    "blurSigma": 0.78,
+    "jpegQuality": 74,
+    "backgroundTone": "dark",
+    "canvasWidth": 983,
+    "canvasHeight": 982
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 480
+  }
+}

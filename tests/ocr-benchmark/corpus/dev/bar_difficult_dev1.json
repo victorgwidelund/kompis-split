@@ -1,0 +1,63 @@
+{
+  "id": "bar_difficult_dev1",
+  "category": "bar",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Bar Nio",
+  "date": "2026-01-10",
+  "totalOre": 120131,
+  "items": [
+    {
+      "name": "Nachos",
+      "quantity": 1,
+      "totalOre": 9411
+    },
+    {
+      "name": "Negroni",
+      "quantity": 4,
+      "totalOre": 54360
+    },
+    {
+      "name": "Glas rödvin",
+      "quantity": 3,
+      "totalOre": 33810
+    },
+    {
+      "name": "Jordnötter",
+      "quantity": 1,
+      "totalOre": 4430
+    },
+    {
+      "name": "Öl",
+      "quantity": 1,
+      "totalOre": 8431
+    },
+    {
+      "name": "IPA",
+      "quantity": 1,
+      "totalOre": 9689
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassa 4",
+    "Kvitto 66196",
+    "Beställning 775",
+    "Bord 3"
+  ],
+  "discountOre": 0,
+  "idealText": "Bar Nio\nHamngatan 3, Stockholm\nKassa 4\nKvitto 66196\n2026-01-10\nNachos 94,11\n4 x Negroni 543,60\n3x Glas rödvin 338,10\nJordnötter 44,30\nÖl 84,31\nIPA 96,89\nMoms 12% 128,71\nBeställning 775\nBord 3\nAtt betala 1201,31\nMastercard",
+  "photo": {
+    "rotationDeg": 4.3,
+    "shear": -0.05,
+    "frameFill": 0.46,
+    "blurSigma": 0.8,
+    "jpegQuality": 78,
+    "backgroundTone": "dark",
+    "canvasWidth": 1210,
+    "canvasHeight": 1443
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 480
+  }
+}

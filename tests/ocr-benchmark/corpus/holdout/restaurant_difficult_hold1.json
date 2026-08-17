@@ -1,0 +1,63 @@
+{
+  "id": "restaurant_difficult_hold1",
+  "category": "restaurant",
+  "difficulty": "difficult",
+  "split": "holdout",
+  "merchant": "Matsalen Öster",
+  "date": "2026-01-27",
+  "totalOre": 85391,
+  "items": [
+    {
+      "name": "Crème brûlée",
+      "quantity": 1,
+      "totalOre": 8603
+    },
+    {
+      "name": "Hasselnötskräm",
+      "quantity": 1,
+      "totalOre": 9614
+    },
+    {
+      "name": "Köttbullar med lingon",
+      "quantity": 1,
+      "totalOre": 15528
+    },
+    {
+      "name": "Dubbel espresso",
+      "quantity": 1,
+      "totalOre": 3104
+    },
+    {
+      "name": "Wienerschnitzel",
+      "quantity": 1,
+      "totalOre": 23848
+    },
+    {
+      "name": "Biff Rydberg",
+      "quantity": 1,
+      "totalOre": 24694
+    }
+  ],
+  "rejectedMetadata": [
+    "Beställning 573",
+    "Bord 17",
+    "Kvitto 67364",
+    "Kassör Maria"
+  ],
+  "discountOre": 0,
+  "idealText": "Matsalen Öster\nSödra Vägen 21, Malmö\nBeställning 573\nBord 17\n2026-01-27\nCrème brûlée 86,03\nHasselnötskräm 96,14\nKöttbullar med lingon 155,28\nDubbel espresso 31,04\nWienerschnitzel 238,48\nBiff Rydberg 246,94\nMoms 12% 91,49\nKvitto 67364\nKassör Maria\nAtt betala 853,91\nKort",
+  "photo": {
+    "rotationDeg": -6.3,
+    "shear": -0.05,
+    "frameFill": 0.63,
+    "blurSigma": 0.51,
+    "jpegQuality": 71,
+    "backgroundTone": "light",
+    "canvasWidth": 1047,
+    "canvasHeight": 1057
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 560
+  }
+}

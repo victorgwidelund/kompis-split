@@ -1,0 +1,72 @@
+{
+  "id": "convenience_pathological_dev1",
+  "category": "convenience",
+  "difficulty": "pathological",
+  "split": "dev",
+  "merchant": "Kiosken Hörnan",
+  "date": "2025-11-23",
+  "totalOre": 30712,
+  "items": [
+    {
+      "name": "Läsk 33cl",
+      "quantity": 1,
+      "totalOre": 2251
+    },
+    {
+      "name": "Tidning",
+      "quantity": 1,
+      "totalOre": 6532
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3724
+    },
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 2286
+    },
+    {
+      "name": "Energidryck",
+      "quantity": 1,
+      "totalOre": 2628
+    },
+    {
+      "name": "Korv med bröd",
+      "quantity": 1,
+      "totalOre": 4169
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 3329
+    },
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 5793
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassa 5",
+    "Transaktions-ID 914612",
+    "Kassör Erik"
+  ],
+  "discountOre": 0,
+  "idealText": "Kiosken Hörnan\nJärnvägstorget 1, Göteborg\nKassa 5\nTransaktions-ID 914612\n23 nov 2025\nLäsk 33cl 22,51\nTidning 65,32\nChips 37,24\nChoklad 22,86\nEnergidryck 26,28\nKorv med bröd 41,69\nKaffe 33,29\nGodispåse 57,93\nMoms 12% 32,91\nKassör Erik\nTOTAL 307,12\nKort",
+  "photo": {
+    "rotationDeg": 16.4,
+    "shear": 0.09,
+    "frameFill": 0.44,
+    "blurSigma": 1.23,
+    "jpegQuality": 63,
+    "backgroundTone": "light",
+    "canvasWidth": 1786,
+    "canvasHeight": 1731
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 560
+  }
+}

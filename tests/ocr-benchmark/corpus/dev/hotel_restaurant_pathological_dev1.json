@@ -1,0 +1,64 @@
+{
+  "id": "hotel_restaurant_pathological_dev1",
+  "category": "hotel_restaurant",
+  "difficulty": "pathological",
+  "split": "dev",
+  "merchant": "Hotell Norrs Restaurang",
+  "date": "2025-12-27",
+  "totalOre": 178805,
+  "items": [
+    {
+      "name": "Dagens lunch",
+      "quantity": 4,
+      "totalOre": 63256
+    },
+    {
+      "name": "Frukostbuffé",
+      "quantity": 1,
+      "totalOre": 19182
+    },
+    {
+      "name": "Mineralvatten",
+      "quantity": 1,
+      "totalOre": 4875
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 6344
+    },
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 34506
+    },
+    {
+      "name": "Trerätters meny",
+      "quantity": 1,
+      "totalOre": 50642
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassör Lars",
+    "Antal gäster 6",
+    "Transaktions-ID 258429",
+    "Kvitto 14521",
+    "Kassa 8"
+  ],
+  "discountOre": 0,
+  "idealText": "Hotell Norrs Restaurang\nEsplanaden 6, Malmö\nKassör Lars\nAntal gäster 6\nTransaktions-ID 258429\n27/12/2025\n4 x Dagens lunch 158,14 632,56\nFrukostbuffé 191,82\nMineralvatten 48,75\nRumsservice tillägg 63,44\nVinpaket 3 glas 345,06\nTrerätters meny 506,42\nMoms 12% 191,58\nKvitto 14521\nKassa 8\nSUMMA 1788,05\nKort",
+  "photo": {
+    "rotationDeg": -11.3,
+    "shear": -0.09,
+    "frameFill": 0.53,
+    "blurSigma": 0.88,
+    "jpegQuality": 67,
+    "backgroundTone": "light",
+    "canvasWidth": 1131,
+    "canvasHeight": 1356
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 420
+  }
+}

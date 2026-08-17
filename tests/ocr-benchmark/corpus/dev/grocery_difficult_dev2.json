@@ -1,0 +1,68 @@
+{
+  "id": "grocery_difficult_dev2",
+  "category": "grocery",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Coop Konsum Norr",
+  "date": "2025-03-26",
+  "totalOre": 26945,
+  "items": [
+    {
+      "name": "Mjölk 1L",
+      "quantity": 1,
+      "totalOre": 1435
+    },
+    {
+      "name": "Ost Herrgård",
+      "quantity": 1,
+      "totalOre": 6544
+    },
+    {
+      "name": "Tomater",
+      "quantity": 1,
+      "totalOre": 3522
+    },
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 5278
+    },
+    {
+      "name": "Bananer",
+      "quantity": 1,
+      "totalOre": 1873
+    },
+    {
+      "name": "Kaffe 500g",
+      "quantity": 1,
+      "totalOre": 5316
+    },
+    {
+      "name": "Bröd",
+      "quantity": 1,
+      "totalOre": 2577
+    },
+    {
+      "name": "Pant burk",
+      "quantity": 2,
+      "totalOre": 400
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Coop Konsum Norr\nButiksgatan 22, Örebro\n26/03/2025\n1x Mjölk 1L\n1x Ost Herrgård\n1x Tomater\n1x Blåbärspaj\n1x Bananer\n1x Kaffe 500g\n1x Bröd\n2x Pant burk\n14,35\n65,44\n35,22\n52,78\n18,73\n53,16\n25,77\n4,00\nMoms 12% 28,87\nATT BETALA 269,45\nBetalt",
+  "photo": {
+    "rotationDeg": 8,
+    "shear": 0.05,
+    "frameFill": 0.51,
+    "blurSigma": 0.72,
+    "jpegQuality": 76,
+    "backgroundTone": "dark",
+    "canvasWidth": 1152,
+    "canvasHeight": 1834
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 420
+  }
+}

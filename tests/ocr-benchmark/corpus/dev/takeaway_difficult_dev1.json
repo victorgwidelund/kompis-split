@@ -1,0 +1,65 @@
+{
+  "id": "takeaway_difficult_dev1",
+  "category": "takeaway",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Sushi Express",
+  "date": "2026-06-29",
+  "totalOre": 72520,
+  "items": [
+    {
+      "name": "Sushi meny 1",
+      "quantity": 1,
+      "totalOre": 15990
+    },
+    {
+      "name": "Wok kyckling",
+      "quantity": 1,
+      "totalOre": 12562
+    },
+    {
+      "name": "Pizza nr 5 Vesuvio",
+      "quantity": 1,
+      "totalOre": 10859
+    },
+    {
+      "name": "Kebabtallrik",
+      "quantity": 1,
+      "totalOre": 13177
+    },
+    {
+      "name": "Pizza nr 12 Capricciosa",
+      "quantity": 1,
+      "totalOre": 12889
+    },
+    {
+      "name": "Coca-Cola 33cl",
+      "quantity": 1,
+      "totalOre": 2475
+    },
+    {
+      "name": "Vårrullar",
+      "quantity": 1,
+      "totalOre": 4568
+    }
+  ],
+  "rejectedMetadata": [
+    "Transaktions-ID 373667"
+  ],
+  "discountOre": 0,
+  "idealText": "Sushi Express\nTake Away-gatan 3, Stockholm\nTransaktions-ID 373667\n2026-06-29\nSushi meny 1 159,90\nWok kyckling 125,62\nPizza nr 5 Vesuvio 108,59\nKebabtallrik 131,77\nPizza nr 12 Capricciosa 128,89\nCoca-Cola 33cl 24,75\nVårrullar 45,68\nMoms 12% 77,70\nATT BETALA 725,20\nMastercard",
+  "photo": {
+    "rotationDeg": -9.5,
+    "shear": 0.05,
+    "frameFill": 0.66,
+    "blurSigma": 0.47,
+    "jpegQuality": 77,
+    "backgroundTone": "dark",
+    "canvasWidth": 908,
+    "canvasHeight": 967
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 480
+  }
+}

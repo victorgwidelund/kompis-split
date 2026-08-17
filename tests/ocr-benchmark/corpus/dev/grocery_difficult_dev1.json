@@ -1,0 +1,55 @@
+{
+  "id": "grocery_difficult_dev1",
+  "category": "grocery",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "ICA Supermarket Väster",
+  "date": "2025-08-14",
+  "totalOre": 21867,
+  "items": [
+    {
+      "name": "Ost Herrgård",
+      "quantity": 1,
+      "totalOre": 6782
+    },
+    {
+      "name": "Bananer",
+      "quantity": 1,
+      "totalOre": 2629
+    },
+    {
+      "name": "Ägg 12-pack",
+      "quantity": 1,
+      "totalOre": 3914
+    },
+    {
+      "name": "Pasta",
+      "quantity": 1,
+      "totalOre": 2136
+    },
+    {
+      "name": "Kaffe 500g",
+      "quantity": 1,
+      "totalOre": 6406
+    }
+  ],
+  "rejectedMetadata": [
+    "Terminal 05"
+  ],
+  "discountOre": 0,
+  "idealText": "ICA Supermarket Väster\nButiksgatan 22, Örebro\nTerminal 05\n14-08-2025\nOst Herrgård 67,82\nBananer 26,29\nÄgg 12-pack 39,14\nPasta 21,36\nKaffe 500g 64,06\nMoms 12% 23,43\nSUMMA 218,67\nMastercard",
+  "photo": {
+    "rotationDeg": 10.6,
+    "shear": 0.05,
+    "frameFill": 0.59,
+    "blurSigma": 0.42,
+    "jpegQuality": 81,
+    "backgroundTone": "dark",
+    "canvasWidth": 928,
+    "canvasHeight": 1085
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 420
+  }
+}

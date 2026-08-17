@@ -1,0 +1,62 @@
+{
+  "id": "hotel_restaurant_normal_dev2",
+  "category": "hotel_restaurant",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Grand Hotellets Matsal",
+  "date": "2025-02-27",
+  "totalOre": 180918,
+  "items": [
+    {
+      "name": "Trerätters meny",
+      "quantity": 1,
+      "totalOre": 58814
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 6637
+    },
+    {
+      "name": "Mineralvatten",
+      "quantity": 4,
+      "totalOre": 16868
+    },
+    {
+      "name": "Frukostbuffé",
+      "quantity": 1,
+      "totalOre": 17794
+    },
+    {
+      "name": "Dagens lunch",
+      "quantity": 3,
+      "totalOre": 47640
+    },
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 33165
+    }
+  ],
+  "rejectedMetadata": [
+    "Kvitto 53013",
+    "Org.nr 557904-2155",
+    "Transaktions-ID 178246"
+  ],
+  "discountOre": 0,
+  "idealText": "Grand Hotellets Matsal\nHotellgatan 1, Stockholm\nKvitto 53013\nOrg.nr 557904-2155\n27 feb 2025\nTrerätters me\nny 588,14\nRumsservice tillägg 66,37\n4 x Mineralvatten 168,68\nFrukostbuffé 177,94\n3x Dagens lunch 476,40\nVinpaket 3 glas 331,65\nMoms 12% 193,84\nTransaktions-ID 178246\nAtt betala 1809,18\nGodkänt",
+  "photo": {
+    "rotationDeg": -1.5,
+    "shear": -0.02,
+    "frameFill": 0.7,
+    "blurSigma": 0.32,
+    "jpegQuality": 83,
+    "backgroundTone": "light",
+    "canvasWidth": 642,
+    "canvasHeight": 996
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 420
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "cafe_normal_dev1",
+  "category": "cafe",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Café Blomman",
+  "date": "2025-04-11",
+  "totalOre": 27661,
+  "items": [
+    {
+      "name": "Kanelbulle",
+      "quantity": 2,
+      "totalOre": 8366
+    },
+    {
+      "name": "Wienerbröd",
+      "quantity": 1,
+      "totalOre": 4245
+    },
+    {
+      "name": "Chokladboll",
+      "quantity": 3,
+      "totalOre": 8691
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 6359
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Café Blomman\nPrästgatan 2, Visby\n11 apr 2025\n2 x Kanelbulle 83,66\nWienerbröd 42,45\nChokladboll 3 st 86,91\nSmörgås skinka och ost 63,59\nMoms 12% 29,64\nTOTAL 276,61\nBetalt",
+  "photo": {
+    "rotationDeg": -4,
+    "shear": 0.02,
+    "frameFill": 0.8,
+    "blurSigma": 0.32,
+    "jpegQuality": 84,
+    "backgroundTone": "light",
+    "canvasWidth": 657,
+    "canvasHeight": 662
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 480
+  }
+}

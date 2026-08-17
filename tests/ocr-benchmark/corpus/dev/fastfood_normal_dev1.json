@@ -1,0 +1,50 @@
+{
+  "id": "fastfood_normal_dev1",
+  "category": "fastfood",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Snabbmat Expressen",
+  "date": "2026-07-14",
+  "totalOre": 29613,
+  "items": [
+    {
+      "name": "Meny 1 Cheeseburgare",
+      "quantity": 1,
+      "totalOre": 10390
+    },
+    {
+      "name": "Meny 2 Dubbelburgare",
+      "quantity": 1,
+      "totalOre": 12184
+    },
+    {
+      "name": "Extra bacon",
+      "quantity": 1,
+      "totalOre": 1952
+    },
+    {
+      "name": "Milkshake",
+      "quantity": 1,
+      "totalOre": 5087
+    }
+  ],
+  "rejectedMetadata": [
+    "Kvitto 56025"
+  ],
+  "discountOre": 0,
+  "idealText": "Snabbmat Expressen\nGrillplatsen 7, Göteborg\nKvitto 56025\n2026/07/14\nMeny 1 Cheeseburgare 103,90\nMeny 2 Dubbelburgare 121,84\nExtra bacon 19,52\nMilkshake 50,87\nMoms 12% 31,73\nAtt betala 296,13\nMastercard",
+  "photo": {
+    "rotationDeg": -2.5,
+    "shear": -0.02,
+    "frameFill": 0.74,
+    "blurSigma": 0.22,
+    "jpegQuality": 82,
+    "backgroundTone": "dark",
+    "canvasWidth": 529,
+    "canvasHeight": 696
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 360
+  }
+}

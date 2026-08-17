@@ -1,0 +1,48 @@
+{
+  "id": "grocery_clean_hold1",
+  "category": "grocery",
+  "difficulty": "clean",
+  "split": "holdout",
+  "merchant": "ICA Maxi Häggvik",
+  "date": "2025-09-09",
+  "totalOre": 12546,
+  "items": [
+    {
+      "name": "Yoghurt",
+      "quantity": 1,
+      "totalOre": 2264
+    },
+    {
+      "name": "Bananer",
+      "quantity": 1,
+      "totalOre": 1918
+    },
+    {
+      "name": "Bröd",
+      "quantity": 1,
+      "totalOre": 3251
+    },
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 5113
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "ICA Maxi Häggvik\nStorköpsgatan 15, Göteborg\n09/09/2025\nYoghurt 22,64\nBananer 19,18\nBröd 32,51\nBlåbärspaj 51,13\nMoms 12% 13,44\nTOTAL 125,46\nGodkänt",
+  "photo": {
+    "rotationDeg": 0.8,
+    "shear": 0,
+    "frameFill": 0.84,
+    "blurSigma": 0.14,
+    "jpegQuality": 96,
+    "backgroundTone": "dark",
+    "canvasWidth": 435,
+    "canvasHeight": 549
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 360
+  }
+}

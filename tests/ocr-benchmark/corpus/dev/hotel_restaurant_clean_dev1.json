@@ -1,0 +1,45 @@
+{
+  "id": "hotel_restaurant_clean_dev1",
+  "category": "hotel_restaurant",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Grand Hotellets Matsal",
+  "date": "2025-05-29",
+  "totalOre": 52440,
+  "items": [
+    {
+      "name": "Mineralvatten",
+      "quantity": 1,
+      "totalOre": 4447
+    },
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 30892
+    },
+    {
+      "name": "Dagens lunch",
+      "quantity": 1,
+      "totalOre": 17101
+    }
+  ],
+  "rejectedMetadata": [
+    "Terminal 01"
+  ],
+  "discountOre": 0,
+  "idealText": "Grand Hotellets Matsal\nHotellgatan 1, Stockholm\nTerminal 01\n2025-05-29\nMineralvatten 44,47\nVinpaket 3 glas 308,92\nDagens lunch 171,01\nMoms 12% 56,19\nSUMMA 524,40\nBetalt",
+  "photo": {
+    "rotationDeg": -0.9,
+    "shear": 0,
+    "frameFill": 0.9,
+    "blurSigma": 0.12,
+    "jpegQuality": 96,
+    "backgroundTone": "dark",
+    "canvasWidth": 409,
+    "canvasHeight": 539
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 360
+  }
+}

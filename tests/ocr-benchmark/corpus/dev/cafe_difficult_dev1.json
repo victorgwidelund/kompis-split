@@ -1,0 +1,66 @@
+{
+  "id": "cafe_difficult_dev1",
+  "category": "cafe",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Café Blomman",
+  "date": "2025-05-02",
+  "totalOre": 37124,
+  "items": [
+    {
+      "name": "Wienerbröd",
+      "quantity": 1,
+      "totalOre": 4319
+    },
+    {
+      "name": "Latte",
+      "quantity": 1,
+      "totalOre": 4970
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 6253
+    },
+    {
+      "name": "Chokladboll",
+      "quantity": 4,
+      "totalOre": 9456
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 3212
+    },
+    {
+      "name": "Semla",
+      "quantity": 1,
+      "totalOre": 4718
+    },
+    {
+      "name": "Kanelbulle",
+      "quantity": 1,
+      "totalOre": 4196
+    }
+  ],
+  "rejectedMetadata": [
+    "Bord 38",
+    "Kvitto 75854"
+  ],
+  "discountOre": 0,
+  "idealText": "Café Blomman\nPrästgatan 2, Visby\nBord 38\n02/05/2025\nWienerbröd 43,19\nLatte 49,70\nSmörgås skinka och ost 62,53\n4 x Chokladboll 23,64 94,56\nKaffe 32,12\nSemla 47,18\nKanelbulle 41,96\nMoms 12% 39,78\nKvitto 75854\nSUMMA 371,24\nVisa",
+  "photo": {
+    "rotationDeg": -8.3,
+    "shear": -0.05,
+    "frameFill": 0.49,
+    "blurSigma": 0.76,
+    "jpegQuality": 68,
+    "backgroundTone": "light",
+    "canvasWidth": 1397,
+    "canvasHeight": 1487
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 560
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "id": "grocery_pathological_dev1",
+  "category": "grocery",
+  "difficulty": "pathological",
+  "split": "dev",
+  "merchant": "Coop Konsum Norr",
+  "date": "2025-04-28",
+  "totalOre": 32389,
+  "items": [
+    {
+      "name": "Kaffe 500g",
+      "quantity": 1,
+      "totalOre": 6334
+    },
+    {
+      "name": "Pasta",
+      "quantity": 1,
+      "totalOre": 1849
+    },
+    {
+      "name": "Köttfärs 500g",
+      "quantity": 1,
+      "totalOre": 5394
+    },
+    {
+      "name": "Bananer",
+      "quantity": 1,
+      "totalOre": 2006
+    },
+    {
+      "name": "Ost Herrgård",
+      "quantity": 1,
+      "totalOre": 5043
+    },
+    {
+      "name": "Mjölk 1L",
+      "quantity": 1,
+      "totalOre": 1309
+    },
+    {
+      "name": "Tomater",
+      "quantity": 1,
+      "totalOre": 2465
+    },
+    {
+      "name": "Smör",
+      "quantity": 1,
+      "totalOre": 4205
+    },
+    {
+      "name": "Ägg 12-pack",
+      "quantity": 1,
+      "totalOre": 4334
+    },
+    {
+      "name": "Pant burk",
+      "quantity": 2,
+      "totalOre": 400
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 950,
+  "idealText": "Coop Konsum Norr\nHandelsvägen 1, Stockholm\n2025-04-28\nKaffe 500g 63,34\nPasta 18,49\nKöttfärs 500g 53,94\nBananer 20,06\nOst Herrgård 50,43\nMjölk 1L 13,09\nTomater 24,65\nSmör 42,05\nÄgg 12-pack 43,34\n2 x Pant burk 2,00 4,00\nRabatt -9,50\nMoms 12% 34,70\nTOTAL 323,89\nVisa",
+  "photo": {
+    "rotationDeg": 12.9,
+    "shear": 0.09,
+    "frameFill": 0.37,
+    "blurSigma": 1.45,
+    "jpegQuality": 48,
+    "backgroundTone": "dark",
+    "canvasWidth": 1820,
+    "canvasHeight": 1963
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 480
+  }
+}

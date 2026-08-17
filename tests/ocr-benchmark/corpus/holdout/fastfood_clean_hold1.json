@@ -1,0 +1,43 @@
+{
+  "id": "fastfood_clean_hold1",
+  "category": "fastfood",
+  "difficulty": "clean",
+  "split": "holdout",
+  "merchant": "Snabbmat Expressen",
+  "date": "2026-07-11",
+  "totalOre": 29545,
+  "items": [
+    {
+      "name": "Meny 2 Dubbelburgare",
+      "quantity": 1,
+      "totalOre": 13822
+    },
+    {
+      "name": "Milkshake",
+      "quantity": 1,
+      "totalOre": 5229
+    },
+    {
+      "name": "Meny 1 Cheeseburgare",
+      "quantity": 1,
+      "totalOre": 10494
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Snabbmat Expressen\nSnabbmatsgatan 2, Stockholm\n2026/07/11\nMeny 2 Dubbelburgare 138,22\nMilkshake 52,29\nMeny 1 Cheeseburgare 104,94\nMoms 12% 31,66\nATT BETALA 295,45\nBetalt",
+  "photo": {
+    "rotationDeg": -0.2,
+    "shear": 0,
+    "frameFill": 0.93,
+    "blurSigma": 0.02,
+    "jpegQuality": 97,
+    "backgroundTone": "light",
+    "canvasWidth": 601,
+    "canvasHeight": 475
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 560
+  }
+}

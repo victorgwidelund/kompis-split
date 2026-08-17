@@ -1,0 +1,73 @@
+{
+  "id": "grocery_difficult_hold1",
+  "category": "grocery",
+  "difficulty": "difficult",
+  "split": "holdout",
+  "merchant": "ICA Supermarket Väster",
+  "date": "2026-02-19",
+  "totalOre": 32630,
+  "items": [
+    {
+      "name": "Smör",
+      "quantity": 1,
+      "totalOre": 4814
+    },
+    {
+      "name": "Ost Herrgård",
+      "quantity": 1,
+      "totalOre": 5518
+    },
+    {
+      "name": "Pasta",
+      "quantity": 1,
+      "totalOre": 2233
+    },
+    {
+      "name": "Tomater",
+      "quantity": 1,
+      "totalOre": 2699
+    },
+    {
+      "name": "Kaffe 500g",
+      "quantity": 1,
+      "totalOre": 6153
+    },
+    {
+      "name": "Yoghurt",
+      "quantity": 1,
+      "totalOre": 2701
+    },
+    {
+      "name": "Bröd",
+      "quantity": 1,
+      "totalOre": 2647
+    },
+    {
+      "name": "Ägg 12-pack",
+      "quantity": 1,
+      "totalOre": 4383
+    },
+    {
+      "name": "Mjölk 1L",
+      "quantity": 1,
+      "totalOre": 1482
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "ICA Supermarket Väster\nStorköpsgatan 15, Göteborg\n2026/02/19\nSmör 48,14\nOst Herrgård 55,18\nPasta 22,33\nTomater 26,99\nKaffe 500g 61,53\nYoghurt 27,01\nBröd 26,47\nÄgg 12-pack 43,83\nMjölk 1L 14,82\nMoms 12% 34,96\nAtt betala 326,30\nBetalt",
+  "photo": {
+    "rotationDeg": 5,
+    "shear": 0.05,
+    "frameFill": 0.69,
+    "blurSigma": 0.53,
+    "jpegQuality": 74,
+    "backgroundTone": "dark",
+    "canvasWidth": 832,
+    "canvasHeight": 1036
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 480
+  }
+}

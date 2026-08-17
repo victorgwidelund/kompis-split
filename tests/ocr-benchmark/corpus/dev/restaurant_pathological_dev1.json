@@ -1,0 +1,68 @@
+{
+  "id": "restaurant_pathological_dev1",
+  "category": "restaurant",
+  "difficulty": "pathological",
+  "split": "dev",
+  "merchant": "Restaurang Lindgården",
+  "date": "2025-06-16",
+  "totalOre": 116394,
+  "items": [
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 18559
+    },
+    {
+      "name": "Wienerschnitzel",
+      "quantity": 1,
+      "totalOre": 20299
+    },
+    {
+      "name": "Glas husets rödvin",
+      "quantity": 1,
+      "totalOre": 11586
+    },
+    {
+      "name": "Biff Rydberg",
+      "quantity": 1,
+      "totalOre": 19994
+    },
+    {
+      "name": "Kycklingsallad",
+      "quantity": 1,
+      "totalOre": 16231
+    },
+    {
+      "name": "Pasta Carbonara",
+      "quantity": 1,
+      "totalOre": 17293
+    },
+    {
+      "name": "Bryggkaffe",
+      "quantity": 3,
+      "totalOre": 12432
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassör Lars",
+    "Beställning 986",
+    "Kvitto 11989",
+    "Transaktions-ID 374433"
+  ],
+  "discountOre": 0,
+  "idealText": "Restaurang Lindgården\nStorgatan 12, Stockholm\nKassör Lars\nBeställning 986\n16 jun 2025\nRäksmörgås 185,59\nWienerschnitzel 202,99\nGlas husets rödvin 115,86\nBiff Rydberg 199,94\nKycklingsallad 162,31\nPasta Carbonara 172,93\n3x Bryggkaffe 124,32\nMoms 12% 124,71\nKvitto 11989\nTransaktions-ID 374433\nAtt betala 1163,94\nMastercard",
+  "photo": {
+    "rotationDeg": 16,
+    "shear": 0.09,
+    "frameFill": 0.47,
+    "blurSigma": 0.99,
+    "jpegQuality": 59,
+    "backgroundTone": "dark",
+    "canvasWidth": 1709,
+    "canvasHeight": 1771
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 560
+  }
+}

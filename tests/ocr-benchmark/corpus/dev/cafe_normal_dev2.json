@@ -1,0 +1,50 @@
+{
+  "id": "cafe_normal_dev2",
+  "category": "cafe",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Kafé Linnéa",
+  "date": "2026-02-06",
+  "totalOre": 20241,
+  "items": [
+    {
+      "name": "Cappuccino",
+      "quantity": 1,
+      "totalOre": 4015
+    },
+    {
+      "name": "Wienerbröd",
+      "quantity": 1,
+      "totalOre": 3847
+    },
+    {
+      "name": "Semla",
+      "quantity": 1,
+      "totalOre": 5316
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 7063
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassör Lars"
+  ],
+  "discountOre": 0,
+  "idealText": "Kafé Linnéa\nVasagatan 4, Stockholm\nKassör Lars\n6 feb 2026\nCappuccino 40,15\nWienerbröd 38,47\nSemla 53,16\nSmörgås skinka och ost 70,63\nMoms 12% 21,69\nAtt betala 202,41\nMastercard",
+  "photo": {
+    "rotationDeg": 4.9,
+    "shear": -0.02,
+    "frameFill": 0.73,
+    "blurSigma": 0.32,
+    "jpegQuality": 90,
+    "backgroundTone": "dark",
+    "canvasWidth": 736,
+    "canvasHeight": 795
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 480
+  }
+}

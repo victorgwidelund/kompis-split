@@ -34,8 +34,18 @@ export type ReceiptSuggestion = {
 };
 
 const ignoredMerchantWords = /^(kassa)?kvitto$|^g[äa]stnota$|^välkommen|^tack för|^org\.?\s*nr|^datum|^tid|^tel|^telefon|^www\.|^moms|^total|^summa|^att betala|^butik\s*nr|^[^\s]*örhandsvisning|tillbaka|^bord\b|^kassa\b|^kassör|^beställning|^order\b|^referens|^transaktions?[-\s]?id|^antal\s+g[äa]ster|^g[äa]ster\b|^swish\b/i;
+// \p{L}/\p{N} rather than the narrower [A-Za-zÅÄÖåäö0-9]: a name can legitimately carry other Latin
+// diacritics Swedish text still borrows ("Frukostbuffé", "Crème brûlée", "Café"). The old ASCII+ÅÄÖ-only
+// class silently trimmed a trailing "é" off as if it were punctuation -- confirmed via the OCR benchmark
+// corpus ("Frukostbuffé" became "Frukostbuff" after an otherwise-correct quantity/price match).
+const leadingNonLetterJunk = /^[^\p{L}]+/u;
+const trailingNonNameJunk = /[^\p{L}\p{N})&'. -]+$/u;
 const totalWords = /att\s+betala|betalt|kortbelopp|belopp\s+sek|totalt?|f[öo]tatt|summa/i;
-const excludedTotalWords = /moms|vat|växel|change|rabatt|subtotal|delsumma/i;
+// Word-boundaried for the same reason metadataLineWords is (see below): an unanchored "vat" matched
+// "Mineralvatten" (mineral water) and "moms" or "vat" as bare substrings could equally catch other
+// legitimate Swedish product names -- confirmed via the OCR benchmark corpus, where "Mineralvatten"
+// was silently dropped as an item on every hotel-restaurant fixture that ordered it.
+const excludedTotalWords = /\bmoms\b|\bvat\b|\bväxel\b|\bchange\b|\brabatt\b|\bsubtotal\b|\bdelsumma\b/i;
 // Receipt structure/metadata that must never become a purchased row, even when a nearby unrelated
 // price gets merged onto it by the multi-line "name, then price on the next line" OCR heuristic.
 // Word-boundaried so real product names are never caught (e.g. a wine called "Bordeaux" must not
@@ -71,10 +81,18 @@ function normalizeNumericGlyphs(line: string, previousLine?: string) {
     .replace(/(\d+[.,]\d{2})0(?=\s*(?:kr|sek)?$)/i, "$1")
     .replace(/(?<![\d.,])(\d{1,6})(?=\s*(?:kr|sek)\s*$)/i, "$1.00")
     .replace(/(\d{1,5})\s+(\d{2})(?=\s*(?:kr|sek)?$)/i, "$1.$2");
-  // A bare 3-5 digit line is only treated as a price with an implied decimal point when it isn't the
-  // continuation of a terminal/register code printed on the line above it (e.g. "XCL AT-150-E-18E #1"
-  // followed by "3564") — that's an id fragment, not a SEK amount, even though it has the same shape.
-  if (!(previousLine !== undefined && looksLikeSystemCode(previousLine))) {
+  // A trailing bare 3-5 digit number is only treated as a price with an implied decimal point when it
+  // isn't the continuation of a terminal/register code printed on the line above it (e.g.
+  // "XCL AT-150-E-18E #1" followed by "3564" — an id fragment, not a SEK amount, despite the same shape)
+  // and isn't the year of a complete date on the SAME line, in any of the three formats receiptDate()
+  // itself recognizes (ISO, European DD-MM-YYYY/DD/MM/YYYY, or Swedish-worded "11 jul 2025") -- confirmed
+  // via the OCR benchmark corpus: without this guard, EVERY European-format date silently lost its year
+  // ("19/06/2025" -> "19/06/20.25", no longer matching receiptDate()'s own year pattern at all) and a
+  // Swedish-worded date became a fake item ("11 jul 2025" -> item "jul" for 20.25 kr), because a
+  // complete date's trailing year satisfies the exact same bare-digit-run shape as a lost-decimal price
+  // ("Heineken 13000" -> "Heineken 130.00", which this same regex must still keep repairing).
+  const trailingCompleteDate = /\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b|\b20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}\s+(?:jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|nov|dec)[a-zåäö]*\s+(?:\d{2}|20\d{2})\b/i;
+  if (!(previousLine !== undefined && looksLikeSystemCode(previousLine)) && !trailingCompleteDate.test(line)) {
     result = result.replace(/(?<!\d)(\d{3,5})(?=\s*(?:kr|sek)?$)/i, (value) => `${value.slice(0, -2)}.${value.slice(-2)}`);
   }
   return result.replace(/(?<![A-Za-zÅÄÖåäö])[\dOo]{1,8}[.,][\dOo]{2}(?![A-Za-zÅÄÖåäö])/g, (value) => value.replace(/[Oo]/g, "0"));
@@ -159,16 +177,20 @@ function receiptDate(lines: string[], now: Date) {
 }
 
 function merchantName(lines: string[]) {
-  const candidates: string[] = [];
-  for (const line of lines.slice(0, 14)) {
-    if (line.length < 2 || line.length > 60 || ignoredMerchantWords.test(line)) continue;
-    if (amountCandidates(line).length) continue;
+  const candidates: Array<{ text: string; index: number }> = [];
+  lines.slice(0, 14).forEach((line, index) => {
+    if (line.length < 2 || line.length > 60 || ignoredMerchantWords.test(line)) return;
+    if (amountCandidates(line).length) return;
     const letters = (line.match(/[A-Za-zÅÄÖåäö]/g) || []).length;
     const digits = (line.match(/\d/g) || []).length;
-    if (letters < 3 || digits > letters) continue;
-    const candidate = line.replace(/^[^A-Za-zÅÄÖåäö]+|[^A-Za-zÅÄÖåäö0-9)&'. -]+$/g, "").slice(0, 60);
-    if (candidate) candidates.push(candidate);
-  }
+    if (letters < 3 || digits > letters) return;
+    // A leading "digit(s)-letter" prefix is kept rather than trimmed as punctuation -- a real Swedish
+    // chain is legitimately named that way ("7-Eleven"), and stripping it left an admin-facing title of
+    // just "Eleven".
+    const keepsLeadingDigits = /^\d{1,2}-[A-Za-zÅÄÖåäö]/.test(line);
+    const text = (keepsLeadingDigits ? line : line.replace(leadingNonLetterJunk, "")).replace(trailingNonNameJunk, "").slice(0, 60);
+    if (text) candidates.push({ text, index });
+  });
   // A merchant's name is often printed twice near the top of a Swedish receipt (once in the header,
   // again just above the order/table details), while a street address only appears once — a candidate
   // repeated verbatim is a much stronger signal of being the actual business name than whichever line
@@ -176,23 +198,48 @@ function merchantName(lines: string[]) {
   // twice lost to the single-occurrence "Stranvägskajen 27" on letter count alone before this).
   const repeatCounts = new Map<string, number>();
   for (const candidate of candidates) {
-    const key = candidate.toLocaleLowerCase("sv-SE");
+    const key = candidate.text.toLocaleLowerCase("sv-SE");
     repeatCounts.set(key, (repeatCounts.get(key) || 0) + 1);
   }
   return candidates.sort((first, second) => {
-    const repeats = (repeatCounts.get(second.toLocaleLowerCase("sv-SE")) || 1) - (repeatCounts.get(first.toLocaleLowerCase("sv-SE")) || 1);
-    return repeats || merchantNameScore(second) - merchantNameScore(first);
-  })[0] || null;
+    const repeats = (repeatCounts.get(second.text.toLocaleLowerCase("sv-SE")) || 1) - (repeatCounts.get(first.text.toLocaleLowerCase("sv-SE")) || 1);
+    return repeats || merchantNameScore(second.text, second.index) - merchantNameScore(first.text, first.index);
+  })[0]?.text || null;
 }
 
-function merchantNameScore(value: string) {
+// Swedish street/thoroughfare suffixes ("Vasagatan", "Kungsvägen", "Sergels Torg") -- a strong,
+// structural (not name-specific) signal that a line is an address rather than a business name. Combined
+// with the comma penalty below (street + city are conventionally comma-joined, "Vasagatan 4,
+// Stockholm"), this reliably beats a plain letter-count comparison, which previously picked the address
+// over the merchant on every short/generic business name that isn't printed twice (confirmed via the
+// OCR benchmark corpus: "Fikahörnan" consistently lost to "Vasagatan 4, Stockholm" on letter count alone).
+// "gränd" (alley) is intentionally NOT given an ä->a OCR-tolerant variant like "vägen" has: doing so
+// would also match "grand" -- a common, legitimate word in real hotel/restaurant names ("Grand Hotel")
+// -- trading a rare OCR miss for a much more common false positive (confirmed via the benchmark corpus:
+// "Grand Hotellets Matsal" lost to "Terminal 01" once "Grand" itself started scoring as a street name).
+const streetSuffixWord = /\b\w*(?:gatan|vägen|v[äa]gen|torget|platsen|gränd(?:en)?|all[ée]n?|planen|backen|stigen|esplanaden)\b/i;
+function merchantNameScore(value: string, lineIndex = 0) {
   const letters = (value.match(/[A-Za-zÅÄÖåäö]/g) || []).length;
   const digits = (value.match(/\d/g) || []).length;
-  const businessWord = /restaurang|restaurant|ste[a-z]{1,3}house|hotell|hotel|café|cafe|bistro|bar\b|grill|krog|butik/i.test(value);
+  // Word-boundaried (with common Swedish inflection suffixes allowed, e.g. "Grillen") so this only
+  // credits the actual business-type word, not any longer compound word that happens to start with the
+  // same letters -- an unanchored "butik" matched inside "Butiksgatan" (a street name) and "grill"
+  // matched inside "Grillplatsen" (ditto), each wrongly handing an address the same +100 bonus meant to
+  // recognize an actual "Restaurang X"/"X Grill" business name.
+  const businessWord = /\brestaurang(?:en)?\b|\brestaurant\b|\bste[a-z]{1,3}house\b|\bhotell(?:et)?\b|\bhotel\b|\bcafé\b|\bcafe\b|\bbistro(?:n)?\b|\bbar\b|\bgrill(?:en|et)?\b|\bkrog(?:en)?\b|\bbutik(?:en|er)?\b|\bpizzeria(?:n)?\b/i.test(value);
   const isolatedLetters = (value.match(/(?:^|\s)[A-Za-zÅÄÖåäö](?=\s|$)/g) || []).length;
+  const looksLikeStreet = streetSuffixWord.test(value);
+  const hasComma = value.includes(",");
   // A street address almost always has a number in it (house number, postcode); a business name
   // almost never does, so a small per-digit penalty helps tell them apart when letter counts are close.
-  return letters + (businessWord ? 100 : 0) - isolatedLetters * 4 - digits * 3;
+  // The merchant's own name is also reliably one of the very first printed lines (header/logo), so
+  // earlier candidates get a bonus rather than relying on letter count alone -- and raw letter count is
+  // capped, because real OCR garbage (a misread barcode/noise line) can rack up far more letters than
+  // any real business name ever does, and would otherwise silently outscore a short but correct name
+  // several lines above it (confirmed via the OCR benchmark's real Tesseract pass: a nonsense 40+
+  // letter line beat the correct 14-letter "Pizzeria Napoli" on letter count alone).
+  return Math.min(letters, 28) + (businessWord ? 100 : 0) - isolatedLetters * 4 - digits * 3
+    - (looksLikeStreet ? 40 : 0) - (hasComma ? 20 : 0) + Math.max(0, 6 - lineIndex) * 3;
 }
 
 function receiptTotal(lines: string[]) {
@@ -282,6 +329,42 @@ function receiptItems(lines: string[]) {
   const seen = new Set<string>();
   for (const line of itemLines) {
     if (totalWords.test(line) || excludedTotalWords.test(line) || metadataLineWords.test(line) || nonItemAdjustmentWords.test(line) || looksLikeSystemCode(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
+    // "Öl 2 st 158,00" -- quantity written AFTER the name ("name N st price") instead of before it. The
+    // shared quantityPattern below only ever looks at the START of a line, so this row-total format
+    // (confirmed missed entirely on every corpus fixture using it: quantity silently fell back to 1 and
+    // the trailing digit stuck onto the item's name, e.g. "Cider" became "Cider 2") needs its own check.
+    // \p{L} rather than the narrower [A-Za-zÅÄÖåäö]: a dish name can carry other Latin diacritics
+    // Swedish text still borrows ("Frukostbuffé", "Crème brûlée"), and requiring the name to end in
+    // exactly Å/Ä/Ö silently fell through to the generic path (wrong quantity) for those.
+    const trailingCountMatch = /^(.+\p{L})\s+(\d{1,2})\s*st\.?\s+((?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
+    if (trailingCountMatch) {
+      const amount = parseMoney(trailingCountMatch[3]!);
+      const name = trailingCountMatch[1]!.replace(leadingNonLetterJunk, "").replace(trailingNonNameJunk, "").slice(0, 100);
+      const quantity = Math.min(20, Math.max(1, Number(trailingCountMatch[2])));
+      if (amount && (name.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2) {
+        const key = `${name.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "")}|${quantity}|${amount.toFixed(2)}`;
+        if (!seen.has(key)) { seen.add(key); items.push({ name, quantity, amount: amount.toFixed(2) }); if (items.length >= 60) break; }
+        continue;
+      }
+    }
+    // A menu-numbered item name ("Sushi meny 1", "Pizza nr 5", "Meny 1") followed by its price is
+    // genuinely ambiguous with a Swedish thousands-separated amount ("1 234,50", a real, already-tested
+    // format -- see receiptTotal): amountCandidates() greedily reads "1 159,90" as one number, 1159.90,
+    // silently merging the menu index into the price and corrupting both. A real quantity marker
+    // (x/*/",00 ") is always present when a leading number genuinely means quantity (see quantityPattern
+    // below); a BARE small number directly before a price, coming right after real name text, is far
+    // more likely to be part of the item's own printed name than an unmarked quantity, so treat it that
+    // way rather than letting the shared thousands-separator parsing eat it.
+    const menuIndexAmbiguity = /^(.*\p{L})\s+(\d{1,2})\s+(\d{3}[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
+    if (menuIndexAmbiguity) {
+      const amount = parseMoney(menuIndexAmbiguity[3]!);
+      const name = `${menuIndexAmbiguity[1]} ${menuIndexAmbiguity[2]}`.replace(leadingNonLetterJunk, "").replace(trailingNonNameJunk, "").slice(0, 100);
+      if (amount && (name.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2) {
+        const key = `${name.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "")}|1|${amount.toFixed(2)}`;
+        if (!seen.has(key)) { seen.add(key); items.push({ name, quantity: 1, amount: amount.toFixed(2) }); if (items.length >= 60) break; }
+        continue;
+      }
+    }
     const amounts = amountCandidates(line);
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
     const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s+|\s*\*\s+)/;
@@ -300,10 +383,15 @@ function receiptItems(lines: string[]) {
       .replace(/(?<!\d)(\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}(?!\d)/g, " ")
       .replace(/\(\s*\)/g, " ")
       .replace(/\b(?:kr|sek|st)\b/gi, " ")
+      // A standalone "à" is the "at [unit price] each" marker ("2 x Wine à 131,00 262,00"), not part of
+      // the name -- \b doesn't reliably bound a non-ASCII letter like à, so it's matched by surrounding
+      // whitespace/string-edges instead of a word-boundary here.
+      .replace(/(^|\s)à(\s|$)/gi, " ")
       .replace(/[.·_-]{2,}/g, " ")
       .replace(/\s+/g, " ").trim()
       .replace(/^(?:[oO]{0,2}[1Il|]\s*)?(?:[oO]?[xX][oO]?\s*)/, "")
-      .replace(/^[^A-Za-zÅÄÖåäö]+|[^A-Za-zÅÄÖåäö0-9)&'. -]+$/g, "")
+      .replace(leadingNonLetterJunk, "")
+      .replace(trailingNonNameJunk, "")
       .slice(0, 100);
     if ((name.match(/[A-Za-zÅÄÖåäö]/g) || []).length < 2 || amount <= 0) continue;
     const key = `${name.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "")}|${quantity}|${amount.toFixed(2)}`;
@@ -343,7 +431,7 @@ function itemCents(item: ReceiptSuggestion["items"][number]) {
   return Math.round(Number(item.amount) * 100);
 }
 
-function editDistance(first: string, second: string) {
+export function editDistance(first: string, second: string) {
   const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
   for (let row = 1; row <= first.length; row += 1) {
     const current = [row];
@@ -359,14 +447,20 @@ function editDistance(first: string, second: string) {
   return previous[second.length]!;
 }
 
-function normalizedItemName(value: string) {
+export function normalizedItemName(value: string) {
   return value.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "");
 }
 
-function similarItem(first: ReceiptSuggestion["items"][number], second: ReceiptSuggestion["items"][number]) {
-  if (first.quantity !== second.quantity) return false;
-  const left = normalizedItemName(first.name); const right = normalizedItemName(second.name);
+// Name-only similarity (ignores quantity) -- used by the OCR benchmark to match a predicted item to its
+// ground-truth counterpart independently of whether the quantity was read correctly, so a wrong
+// quantity is scored as its own metric rather than silently also counting as "item not found."
+export function namesSimilar(firstName: string, secondName: string) {
+  const left = normalizedItemName(firstName); const right = normalizedItemName(secondName);
   return left === right || editDistance(left, right) <= Math.max(2, Math.floor(Math.max(left.length, right.length) * 0.18));
+}
+
+function similarItem(first: ReceiptSuggestion["items"][number], second: ReceiptSuggestion["items"][number]) {
+  return first.quantity === second.quantity && namesSimilar(first.name, second.name);
 }
 
 function sameItem(first: ReceiptSuggestion["items"][number], second: ReceiptSuggestion["items"][number]) {

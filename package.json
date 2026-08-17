@@ -1,6 +1,6 @@
 {
   "name": "kompis-split",
-  "version": "1.21.0",
+  "version": "1.22.0",
   "private": true,
   "packageManager": "pnpm@11.16.0",
   "type": "module",
@@ -17,7 +17,9 @@
     "typecheck": "tsc --noEmit && tsc -p frontend/tsconfig.json --noEmit",
     "check": "pnpm typecheck && pnpm lint",
     "lint": "eslint src frontend/src frontend/vite.config.ts",
-    "test": "pnpm build && node --test tests/*.test.mjs && vitest run --config frontend/vitest.config.ts"
+    "test": "pnpm build && node --test tests/*.test.mjs && vitest run --config frontend/vitest.config.ts",
+    "benchmark:ocr:corpus": "node tests/ocr-benchmark/generator/generate-corpus.mjs",
+    "benchmark:ocr": "pnpm build:server && node tests/ocr-benchmark/run-benchmark.mjs"
   },
   "dependencies": {
     "@tesseract.js-data/swe": "1.0.0",
