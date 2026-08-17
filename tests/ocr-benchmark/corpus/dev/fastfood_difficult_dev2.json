@@ -1,0 +1,55 @@
+{
+  "id": "fastfood_difficult_dev2",
+  "category": "fastfood",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Burger Bar",
+  "date": "2026-07-19",
+  "totalOre": 45498,
+  "items": [
+    {
+      "name": "Meny 1 Cheeseburgare",
+      "quantity": 1,
+      "totalOre": 11594
+    },
+    {
+      "name": "Milkshake",
+      "quantity": 3,
+      "totalOre": 15576
+    },
+    {
+      "name": "Extra bacon",
+      "quantity": 1,
+      "totalOre": 1835
+    },
+    {
+      "name": "Pommes frites",
+      "quantity": 1,
+      "totalOre": 3633
+    },
+    {
+      "name": "Meny 2 Dubbelburgare",
+      "quantity": 1,
+      "totalOre": 12860
+    }
+  ],
+  "rejectedMetadata": [
+    "Bord 25"
+  ],
+  "discountOre": 0,
+  "idealText": "Burger Bar\nGrillplatsen 7, Göteborg\nBord 25\n2026/07/19\nMeny 1 Cheeseburgare 115,94\n3 x Milkshake 155,76\nExtra bacon 18,35\nPommes frites 36,33\nMeny 2 Dubbelburgare 128,60\nMoms 12% 48,75\nSUMMA 454,98\nBetalt",
+  "photo": {
+    "rotationDeg": -10.3,
+    "shear": 0.05,
+    "frameFill": 0.54,
+    "blurSigma": 0.62,
+    "jpegQuality": 67,
+    "backgroundTone": "light",
+    "canvasWidth": 1241,
+    "canvasHeight": 1131
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 560
+  }
+}

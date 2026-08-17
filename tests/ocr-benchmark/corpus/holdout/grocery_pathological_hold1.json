@@ -1,0 +1,77 @@
+{
+  "id": "grocery_pathological_hold1",
+  "category": "grocery",
+  "difficulty": "pathological",
+  "split": "holdout",
+  "merchant": "Coop Konsum Norr",
+  "date": "2025-02-27",
+  "totalOre": 35372,
+  "items": [
+    {
+      "name": "Tomater",
+      "quantity": 1,
+      "totalOre": 2552
+    },
+    {
+      "name": "Bröd",
+      "quantity": 1,
+      "totalOre": 2531
+    },
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 4531
+    },
+    {
+      "name": "Köttfärs 500g",
+      "quantity": 1,
+      "totalOre": 6369
+    },
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 4628
+    },
+    {
+      "name": "Ost Herrgård",
+      "quantity": 1,
+      "totalOre": 5788
+    },
+    {
+      "name": "Kaffe 500g",
+      "quantity": 1,
+      "totalOre": 6059
+    },
+    {
+      "name": "Bananer",
+      "quantity": 1,
+      "totalOre": 2897
+    },
+    {
+      "name": "Pant burk",
+      "quantity": 2,
+      "totalOre": 400
+    }
+  ],
+  "rejectedMetadata": [
+    "Terminal 06",
+    "Org.nr 558098-6393",
+    "Bord 10"
+  ],
+  "discountOre": 383,
+  "idealText": "Coop Konsum Norr\nHandelsvägen 1, Stockholm\nTerminal 06\nOrg.nr 558098-6393\n2025/02/27\nTomater 25,52\nBröd 25,31\nRäksmörgås 45,31\nKöttfärs 500g 63,69\nBlåbärspaj 46,28\nOst Herrgård 57,88\nKaffe 500g 60,59\nBananer 28,97\nPant burk 2 st 4,00\nRabatt -3,83\nMoms 12% 37,90\nBord 10\nTOTAL 353,72\nBetalt",
+  "photo": {
+    "rotationDeg": -9.8,
+    "shear": 0.09,
+    "frameFill": 0.55,
+    "blurSigma": 1.18,
+    "jpegQuality": 67,
+    "backgroundTone": "dark",
+    "canvasWidth": 991,
+    "canvasHeight": 1385
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 360
+  }
+}

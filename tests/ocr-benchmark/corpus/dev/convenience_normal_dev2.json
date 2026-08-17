@@ -1,0 +1,65 @@
+{
+  "id": "convenience_normal_dev2",
+  "category": "convenience",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Narvesen Station",
+  "date": "2026-02-09",
+  "totalOre": 24490,
+  "items": [
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 1910
+    },
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 4351
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 2809
+    },
+    {
+      "name": "Läsk 33cl",
+      "quantity": 1,
+      "totalOre": 2768
+    },
+    {
+      "name": "Korv med bröd",
+      "quantity": 1,
+      "totalOre": 4612
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3151
+    },
+    {
+      "name": "Tidning",
+      "quantity": 1,
+      "totalOre": 4889
+    }
+  ],
+  "rejectedMetadata": [
+    "Terminal 08"
+  ],
+  "discountOre": 0,
+  "idealText": "Narvesen Station\nJärnvägstorget 1, Göteborg\nTerminal 08\n2026/02/09\nChoklad 19,10\nGodispåse 43,51\nKaffe 28,09\nLäsk 33cl 27,68\nKorv med bröd 46,12\nChips 31,51\nTidning 48,89\nMoms 12% 26,24\nAtt betala 244,90\nKort",
+  "photo": {
+    "rotationDeg": 4,
+    "shear": -0.02,
+    "frameFill": 0.72,
+    "blurSigma": 0.48,
+    "jpegQuality": 85,
+    "backgroundTone": "light",
+    "canvasWidth": 649,
+    "canvasHeight": 821
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 420
+  }
+}

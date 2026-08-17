@@ -1,0 +1,55 @@
+{
+  "id": "fastfood_difficult_dev1",
+  "category": "fastfood",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Burger Bar",
+  "date": "2025-04-29",
+  "totalOre": 46335,
+  "items": [
+    {
+      "name": "Meny 1 Cheeseburgare",
+      "quantity": 1,
+      "totalOre": 10634
+    },
+    {
+      "name": "Extra bacon",
+      "quantity": 1,
+      "totalOre": 1847
+    },
+    {
+      "name": "Milkshake",
+      "quantity": 1,
+      "totalOre": 5764
+    },
+    {
+      "name": "Pommes frites",
+      "quantity": 4,
+      "totalOre": 15304
+    },
+    {
+      "name": "Meny 2 Dubbelburgare",
+      "quantity": 1,
+      "totalOre": 12786
+    }
+  ],
+  "rejectedMetadata": [
+    "Kvitto 45455"
+  ],
+  "discountOre": 0,
+  "idealText": "Burger Bar\nGrillplatsen 7, Göteborg\nKvitto 45455\n29 apr 2025\n1.00 Meny 1 Cheeseburga\nre\n106,34\nExtra bacon 18,47\nMilkshake 57,64\n4 x Pommes frites 38,26 153,04\nMeny 2 Dubbelburgare 127,86\nMoms 12% 49,64\nAtt betala 463,35\nBetalt",
+  "photo": {
+    "rotationDeg": 4.3,
+    "shear": -0.05,
+    "frameFill": 0.58,
+    "blurSigma": 0.89,
+    "jpegQuality": 70,
+    "backgroundTone": "dark",
+    "canvasWidth": 753,
+    "canvasHeight": 1087
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 360
+  }
+}

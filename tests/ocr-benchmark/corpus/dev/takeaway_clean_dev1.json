@@ -1,0 +1,53 @@
+{
+  "id": "takeaway_clean_dev1",
+  "category": "takeaway",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Pizzeria Napoli",
+  "date": "2026-08-13",
+  "totalOre": 51720,
+  "items": [
+    {
+      "name": "Wok kyckling",
+      "quantity": 1,
+      "totalOre": 12190
+    },
+    {
+      "name": "Kebabtallrik",
+      "quantity": 1,
+      "totalOre": 11741
+    },
+    {
+      "name": "Pizza nr 5 Vesuvio",
+      "quantity": 1,
+      "totalOre": 10230
+    },
+    {
+      "name": "Vårrullar",
+      "quantity": 1,
+      "totalOre": 4828
+    },
+    {
+      "name": "Pizza nr 12 Capricciosa",
+      "quantity": 1,
+      "totalOre": 12731
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Pizzeria Napoli\nTake Away-gatan 3, Stockholm\n13/08/2026\nWok kyckling 121,90\nKebabtallrik 117,41\nPizza nr 5 Vesuvio 102,30\nVårrullar 48,28\nPizza nr 12 Capricciosa 127,31\nMoms 12% 55,41\nSUMMA 517,20\nGodkänt",
+  "photo": {
+    "rotationDeg": 0.5,
+    "shear": 0,
+    "frameFill": 0.82,
+    "blurSigma": 0.14,
+    "jpegQuality": 93,
+    "backgroundTone": "light",
+    "canvasWidth": 687,
+    "canvasHeight": 628
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 560
+  }
+}

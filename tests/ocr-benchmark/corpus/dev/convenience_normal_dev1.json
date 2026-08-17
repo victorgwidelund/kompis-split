@@ -1,0 +1,60 @@
+{
+  "id": "convenience_normal_dev1",
+  "category": "convenience",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Kiosken Hörnan",
+  "date": "2025-03-26",
+  "totalOre": 23130,
+  "items": [
+    {
+      "name": "Tidning",
+      "quantity": 1,
+      "totalOre": 5901
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3230
+    },
+    {
+      "name": "Läsk 33cl",
+      "quantity": 1,
+      "totalOre": 2316
+    },
+    {
+      "name": "Energidryck",
+      "quantity": 1,
+      "totalOre": 2834
+    },
+    {
+      "name": "Korv med bröd",
+      "quantity": 1,
+      "totalOre": 4771
+    },
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 4078
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassör Erik"
+  ],
+  "discountOre": 0,
+  "idealText": "Kiosken Hörnan\nJärnvägstorget 1, Göteborg\nKassör Erik\n26 mar 2025\nTidning 59,01\nChips 32,30\nLäsk 33cl 23,16\nEnergidryck 28,34\nKorv med bröd 47,71\nGodispåse 40,78\nMoms 12% 24,78\nATT BETALA 231,30\nKort",
+  "photo": {
+    "rotationDeg": -2.5,
+    "shear": -0.02,
+    "frameFill": 0.7,
+    "blurSigma": 0.29,
+    "jpegQuality": 91,
+    "backgroundTone": "dark",
+    "canvasWidth": 736,
+    "canvasHeight": 887
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 480
+  }
+}

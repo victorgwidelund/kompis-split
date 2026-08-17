@@ -1,0 +1,43 @@
+{
+  "id": "fastfood_clean_dev1",
+  "category": "fastfood",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Burger Bar",
+  "date": "2025-02-20",
+  "totalOre": 18349,
+  "items": [
+    {
+      "name": "Milkshake",
+      "quantity": 1,
+      "totalOre": 5735
+    },
+    {
+      "name": "Meny 1 Cheeseburgare",
+      "quantity": 1,
+      "totalOre": 10717
+    },
+    {
+      "name": "Extra bacon",
+      "quantity": 1,
+      "totalOre": 1897
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Burger Bar\nSnabbmatsgatan 2, Stockholm\n2025-02-20\nMilkshake 57,35\nMeny 1 Cheeseburgare 107,17\nExtra bacon 18,97\nMoms 12% 19,66\nAtt betala 183,49\nKort",
+  "photo": {
+    "rotationDeg": 0.6,
+    "shear": 0,
+    "frameFill": 0.94,
+    "blurSigma": 0.06,
+    "jpegQuality": 93,
+    "backgroundTone": "dark",
+    "canvasWidth": 513,
+    "canvasHeight": 495
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 480
+  }
+}

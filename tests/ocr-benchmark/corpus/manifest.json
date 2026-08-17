@@ -1,0 +1,21 @@
+{
+  "total": 80,
+  "dev": 48,
+  "holdout": 32,
+  "byCategory": {
+    "restaurant": 10,
+    "bar": 10,
+    "cafe": 10,
+    "grocery": 10,
+    "convenience": 10,
+    "hotel_restaurant": 10,
+    "takeaway": 10,
+    "fastfood": 10
+  },
+  "byDifficulty": {
+    "clean": 16,
+    "normal": 24,
+    "difficult": 24,
+    "pathological": 16
+  }
+}

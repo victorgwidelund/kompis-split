@@ -48,6 +48,24 @@
 - Any field a user might type a decimal amount into is `type="text" inputMode="decimal"` with a manual filter, never `type="number"` — number inputs silently reject the Swedish comma decimal separator. Parse comma-or-period at the point a typed value first becomes a number, on both client and server.
 - Dialogs compose `<Modal>` + `<DialogHeader>` (`frontend/src/components/Modal.tsx`) so `aria-labelledby` wires up automatically — don't build a dialog heading without `DialogHeader`.
 
+## Receipt OCR
+
+- Measure before changing `src/receipt-ocr.ts`: run `pnpm benchmark:ocr` (see `tests/ocr-benchmark/README.md`)
+  before and after any parsing/preprocessing change, on both `dev` and `holdout`. Never claim an OCR
+  accuracy improvement without a benchmark number backing it, and revert a change that regresses the
+  benchmark even if it fixed the one fixture that motivated it — see `OCR_BENCHMARK.md` for the full
+  rationale and the "rejected experiments" this rule already prevented from shipping.
+- Fix the earliest reliable layer (preprocessing/OCR/line-normalization/semantic-parsing/reconciliation),
+  not the symptom. A metadata word that leaks into items is usually a missing `\b` word boundary, not a
+  reason to blacklist the specific merchant/product name that exposed it.
+- Regexes matching Swedish letters must be word-boundaried (`\b`) and should use `\p{L}`/`\p{N}` (with the
+  `u` flag) rather than the narrower `[A-Za-zÅÄÖåäö]` class when matching or cleaning up free-form text —
+  real Swedish receipts borrow other Latin diacritics too (é, à, û). An unanchored substring match on a
+  short word (`vat`, `butik`, `grill`) *will* eventually collide with an unrelated Swedish word that
+  merely contains it.
+- Every receipt-parsing bug fix needs a regression test in `tests/receipt-ocr.test.mjs` reproducing the
+  exact failure with a minimal fixture, in addition to the benchmark corpus.
+
 ## Change discipline
 
 - Preserve backwards compatibility and user data by default.

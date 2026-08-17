@@ -1,0 +1,55 @@
+{
+  "id": "fastfood_normal_dev2",
+  "category": "fastfood",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Burger Bar",
+  "date": "2025-04-19",
+  "totalOre": 46988,
+  "items": [
+    {
+      "name": "Extra bacon",
+      "quantity": 1,
+      "totalOre": 1760
+    },
+    {
+      "name": "Meny 2 Dubbelburgare",
+      "quantity": 1,
+      "totalOre": 13332
+    },
+    {
+      "name": "Meny 1 Cheeseburgare",
+      "quantity": 1,
+      "totalOre": 10643
+    },
+    {
+      "name": "Pommes frites",
+      "quantity": 1,
+      "totalOre": 4231
+    },
+    {
+      "name": "Milkshake",
+      "quantity": 3,
+      "totalOre": 17022
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassa 9"
+  ],
+  "discountOre": 0,
+  "idealText": "Burger Bar\nSnabbmatsgatan 2, Stockholm\nKassa 9\n19 apr 2025\n1.00 Extra baco\nn\n17,60\nMeny 2 Dubbelburgare 133,32\nMeny 1 Cheeseburgare 106,43\nPommes frites 42,31\nMilkshake 3 st 170,22\nMoms 12% 50,34\nSUMMA 469,88\nGodkänt",
+  "photo": {
+    "rotationDeg": -1.2,
+    "shear": -0.02,
+    "frameFill": 0.66,
+    "blurSigma": 0.23,
+    "jpegQuality": 87,
+    "backgroundTone": "dark",
+    "canvasWidth": 884,
+    "canvasHeight": 897
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 560
+  }
+}

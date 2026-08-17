@@ -1,0 +1,53 @@
+{
+  "id": "grocery_clean_dev1",
+  "category": "grocery",
+  "difficulty": "clean",
+  "split": "dev",
+  "merchant": "Willys Söder",
+  "date": "2025-03-11",
+  "totalOre": 19102,
+  "items": [
+    {
+      "name": "Smör",
+      "quantity": 1,
+      "totalOre": 4451
+    },
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 5288
+    },
+    {
+      "name": "Kaffe 500g",
+      "quantity": 1,
+      "totalOre": 5846
+    },
+    {
+      "name": "Tomater",
+      "quantity": 1,
+      "totalOre": 2917
+    },
+    {
+      "name": "Pant burk",
+      "quantity": 3,
+      "totalOre": 600
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Willys Söder\nHandelsvägen 1, Stockholm\n11 mar 2025\nSmör 44,51\nRäksmörgås 52,88\nKaffe 500g 58,46\nTomater 29,17\n3 x Pant burk 6,00\nMoms 12% 20,47\nATT BETALA 191,02\nBetalt",
+  "photo": {
+    "rotationDeg": -1,
+    "shear": 0,
+    "frameFill": 0.84,
+    "blurSigma": 0.13,
+    "jpegQuality": 94,
+    "backgroundTone": "dark",
+    "canvasWidth": 513,
+    "canvasHeight": 657
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 420
+  }
+}

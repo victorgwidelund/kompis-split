@@ -1,0 +1,43 @@
+{
+  "id": "convenience_clean_hold1",
+  "category": "convenience",
+  "difficulty": "clean",
+  "split": "holdout",
+  "merchant": "Kiosken Hörnan",
+  "date": "2026-04-07",
+  "totalOre": 7863,
+  "items": [
+    {
+      "name": "Läsk 33cl",
+      "quantity": 1,
+      "totalOre": 2485
+    },
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 2211
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3167
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Kiosken Hörnan\nJärnvägstorget 1, Göteborg\n2026-04-07\nLäsk 33cl 24,85\nChoklad 22,11\nChips 31,67\nMoms 12% 8,42\nTOTALT 78,63\nSwish",
+  "photo": {
+    "rotationDeg": -0.4,
+    "shear": 0,
+    "frameFill": 0.9,
+    "blurSigma": 0.14,
+    "jpegQuality": 96,
+    "backgroundTone": "dark",
+    "canvasWidth": 405,
+    "canvasHeight": 534
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 360
+  }
+}

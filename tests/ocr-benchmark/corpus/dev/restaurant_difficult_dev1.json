@@ -1,0 +1,57 @@
+{
+  "id": "restaurant_difficult_dev1",
+  "category": "restaurant",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Restaurang Lindgården",
+  "date": "2026-05-18",
+  "totalOre": 61298,
+  "items": [
+    {
+      "name": "Dubbel espresso",
+      "quantity": 1,
+      "totalOre": 3700
+    },
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 18011
+    },
+    {
+      "name": "Crème brûlée",
+      "quantity": 1,
+      "totalOre": 9193
+    },
+    {
+      "name": "Wienerschnitzel",
+      "quantity": 1,
+      "totalOre": 21948
+    },
+    {
+      "name": "Hasselnötskräm",
+      "quantity": 1,
+      "totalOre": 8446
+    }
+  ],
+  "rejectedMetadata": [
+    "Transaktions-ID 674768",
+    "Org.nr 559454-9849",
+    "Kassör Maria"
+  ],
+  "discountOre": 0,
+  "idealText": "Restaurang Lindgården\nDrottninggatan 8, Uppsala\nTransaktions-ID 674768\nOrg.nr 559454-9849\n2026/05/18\nDubbel espresso 37,00\nRäksmörgås 180,11\nCrème brûlée 91,93\nWienerschnitzel 219,48\nHasselnötskräm 84,46\nMoms 12% 65,68\nKassör Maria\nSUMMA 612,98\nVisa",
+  "photo": {
+    "rotationDeg": -7,
+    "shear": -0.05,
+    "frameFill": 0.57,
+    "blurSigma": 0.74,
+    "jpegQuality": 71,
+    "backgroundTone": "dark",
+    "canvasWidth": 811,
+    "canvasHeight": 1115
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 360
+  }
+}

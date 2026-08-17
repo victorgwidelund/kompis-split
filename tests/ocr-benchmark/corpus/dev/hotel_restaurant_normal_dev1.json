@@ -1,0 +1,53 @@
+{
+  "id": "hotel_restaurant_normal_dev1",
+  "category": "hotel_restaurant",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Grand Hotellets Matsal",
+  "date": "2025-09-09",
+  "totalOre": 139470,
+  "items": [
+    {
+      "name": "Frukostbuffé",
+      "quantity": 2,
+      "totalOre": 35562
+    },
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 31909
+    },
+    {
+      "name": "Trerätters meny",
+      "quantity": 1,
+      "totalOre": 66921
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 5078
+    }
+  ],
+  "rejectedMetadata": [
+    "Transaktions-ID 688202",
+    "Org.nr 559424-1572",
+    "Kassa 5",
+    "Kassör Maria"
+  ],
+  "discountOre": 0,
+  "idealText": "Grand Hotellets Matsal\nHotellgatan 1, Stockholm\nTransaktions-ID 688202\nOrg.nr 559424-1572\n09-09-2025\n2 x Frukostbuffé 355,62\nVinpaket 3 glas 319,09\nTrerätters meny 669,21\nRumsservice tillägg 50,78\nMoms 12% 149,43\nKassa 5\nKassör Maria\nTOTALT 1394,70\nMastercard",
+  "photo": {
+    "rotationDeg": -4.6,
+    "shear": 0.02,
+    "frameFill": 0.69,
+    "blurSigma": 0.17,
+    "jpegQuality": 80,
+    "backgroundTone": "light",
+    "canvasWidth": 892,
+    "canvasHeight": 891
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 560
+  }
+}

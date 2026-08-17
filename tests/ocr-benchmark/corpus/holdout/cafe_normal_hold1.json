@@ -1,0 +1,50 @@
+{
+  "id": "cafe_normal_hold1",
+  "category": "cafe",
+  "difficulty": "normal",
+  "split": "holdout",
+  "merchant": "Café Ångbåtsbryggan",
+  "date": "2025-06-22",
+  "totalOre": 32851,
+  "items": [
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 7645
+    },
+    {
+      "name": "Smör och ost macka",
+      "quantity": 1,
+      "totalOre": 6646
+    },
+    {
+      "name": "Kanelbulle",
+      "quantity": 4,
+      "totalOre": 15556
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 3004
+    }
+  ],
+  "rejectedMetadata": [
+    "Transaktions-ID 953221"
+  ],
+  "discountOre": 0,
+  "idealText": "Café Ångbåtsbryggan\nPrästgatan 2, Visby\nTransaktions-ID 953221\n22 jun 2025\nSmörgås skinka och ost 76,45\nSmör och ost macka 66,46\n4 x Kanelbulle 155,56\nKaffe 30,04\nMoms 12% 35,20\nSUMMA 328,51\nVisa",
+  "photo": {
+    "rotationDeg": 3.1,
+    "shear": 0.02,
+    "frameFill": 0.69,
+    "blurSigma": 0.22,
+    "jpegQuality": 81,
+    "backgroundTone": "dark",
+    "canvasWidth": 576,
+    "canvasHeight": 771
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 360
+  }
+}

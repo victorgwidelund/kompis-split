@@ -10,3 +10,4 @@ dist/
 frontend/dist/
 .compose-validator/
 .DS_Store
+tests/ocr-benchmark/reports/

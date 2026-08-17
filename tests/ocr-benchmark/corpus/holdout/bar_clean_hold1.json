@@ -1,0 +1,51 @@
+{
+  "id": "bar_clean_hold1",
+  "category": "bar",
+  "difficulty": "clean",
+  "split": "holdout",
+  "merchant": "Bar Nio",
+  "date": "2025-08-26",
+  "totalOre": 112677,
+  "items": [
+    {
+      "name": "Gin & Tonic",
+      "quantity": 3,
+      "totalOre": 42264
+    },
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 7439
+    },
+    {
+      "name": "Öl",
+      "quantity": 1,
+      "totalOre": 7386
+    },
+    {
+      "name": "Negroni",
+      "quantity": 4,
+      "totalOre": 55588
+    }
+  ],
+  "rejectedMetadata": [
+    "Transaktions-ID 537539",
+    "Kassa 5"
+  ],
+  "discountOre": 0,
+  "idealText": "Bar Nio\nAvenyn 14, Göteborg\nTransaktions-ID 537539\n26/08/2025\nGin & Tonic 3 st 422,64\nBlåbärspaj 74,39\nÖl 73,86\n4 x Negroni 138,97 555,88\nMoms 12% 120,73\nKassa 5\nATT BETALA 1126,77\nMastercard",
+  "photo": {
+    "rotationDeg": -0.7,
+    "shear": 0,
+    "frameFill": 0.83,
+    "blurSigma": 0.03,
+    "jpegQuality": 95,
+    "backgroundTone": "light",
+    "canvasWidth": 517,
+    "canvasHeight": 680
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 420
+  }
+}

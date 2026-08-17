@@ -1,0 +1,53 @@
+{
+  "id": "takeaway_normal_dev2",
+  "category": "takeaway",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Kebabhuset Söder",
+  "date": "2026-03-24",
+  "totalOre": 57436,
+  "items": [
+    {
+      "name": "Coca-Cola 33cl",
+      "quantity": 3,
+      "totalOre": 7047
+    },
+    {
+      "name": "Pizza nr 5 Vesuvio",
+      "quantity": 1,
+      "totalOre": 12698
+    },
+    {
+      "name": "Sushi meny 1",
+      "quantity": 1,
+      "totalOre": 15014
+    },
+    {
+      "name": "Wok kyckling",
+      "quantity": 1,
+      "totalOre": 11133
+    },
+    {
+      "name": "Kebabtallrik",
+      "quantity": 1,
+      "totalOre": 11544
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Kebabhuset Söder\nTake Away-gatan 3, Stockholm\n24-03-2026\n3x Coca-Cola 33cl 70,47\nPizza nr 5 Vesuvio 126,98\nSushi meny 1 150,14\nWok kyckling 111,33\nKebabtallrik 115,44\nMoms 12% 61,54\nATT BETALA 574,36\nKort",
+  "photo": {
+    "rotationDeg": -2.2,
+    "shear": -0.02,
+    "frameFill": 0.81,
+    "blurSigma": 0.28,
+    "jpegQuality": 82,
+    "backgroundTone": "dark",
+    "canvasWidth": 728,
+    "canvasHeight": 649
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 560
+  }
+}

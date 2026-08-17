@@ -1,0 +1,52 @@
+{
+  "id": "restaurant_normal_dev2",
+  "category": "restaurant",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Restaurang Lindgården",
+  "date": "2026-03-10",
+  "totalOre": 70426,
+  "items": [
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 18860
+    },
+    {
+      "name": "Fish and Chips",
+      "quantity": 1,
+      "totalOre": 18671
+    },
+    {
+      "name": "Dubbel espresso",
+      "quantity": 4,
+      "totalOre": 15152
+    },
+    {
+      "name": "Pasta Carbonara",
+      "quantity": 1,
+      "totalOre": 17743
+    }
+  ],
+  "rejectedMetadata": [
+    "Beställning 946",
+    "Bord 23",
+    "Transaktions-ID 278070"
+  ],
+  "discountOre": 0,
+  "idealText": "Restaurang Lindgården\nKungsgatan 5, Göteborg\nBeställning 946\nBord 23\n2026-03-10\nRäksmörgås 188,60\nFish and Chips 186,71\n4x Dubbel espresso 151,52\nPasta Carbonara 177,43\nMoms 12% 75,46\nTransaktions-ID 278070\nTOTALT 704,26\nGodkänt",
+  "photo": {
+    "rotationDeg": 2.6,
+    "shear": -0.02,
+    "frameFill": 0.82,
+    "blurSigma": 0.16,
+    "jpegQuality": 81,
+    "backgroundTone": "light",
+    "canvasWidth": 722,
+    "canvasHeight": 685
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 560
+  }
+}

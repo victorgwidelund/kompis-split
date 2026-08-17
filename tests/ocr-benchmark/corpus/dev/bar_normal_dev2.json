@@ -1,0 +1,51 @@
+{
+  "id": "bar_normal_dev2",
+  "category": "bar",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Ångbåtsbryggans Pub",
+  "date": "2025-03-09",
+  "totalOre": 109093,
+  "items": [
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 7663
+    },
+    {
+      "name": "Öl",
+      "quantity": 4,
+      "totalOre": 29204
+    },
+    {
+      "name": "Whiskey",
+      "quantity": 2,
+      "totalOre": 34522
+    },
+    {
+      "name": "Glas rödvin",
+      "quantity": 4,
+      "totalOre": 37704
+    }
+  ],
+  "rejectedMetadata": [
+    "Antal gäster 2",
+    "Kassa 3"
+  ],
+  "discountOre": 0,
+  "idealText": "Ångbåtsbryggans Pub\nAvenyn 14, Göteborg\nAntal gäster 2\n09-03-2025\nBlåbärspaj 76,63\n4x Öl 292,04\n2x Whiskey 345,22\n4 x Glas rödvin 94,26 377,04\nMoms 12% 116,89\nKassa 3\nAtt betala 1090,93\nSwish",
+  "photo": {
+    "rotationDeg": 1.1,
+    "shear": 0.02,
+    "frameFill": 0.8,
+    "blurSigma": 0.32,
+    "jpegQuality": 87,
+    "backgroundTone": "light",
+    "canvasWidth": 551,
+    "canvasHeight": 737
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 420
+  }
+}

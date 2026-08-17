@@ -1,0 +1,69 @@
+{
+  "id": "bar_pathological_dev1",
+  "category": "bar",
+  "difficulty": "pathological",
+  "split": "dev",
+  "merchant": "Cocktailbaren Söder",
+  "date": "2025-04-13",
+  "totalOre": 137340,
+  "items": [
+    {
+      "name": "Glas rödvin",
+      "quantity": 5,
+      "totalOre": 51550
+    },
+    {
+      "name": "Negroni",
+      "quantity": 1,
+      "totalOre": 15648
+    },
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 7712
+    },
+    {
+      "name": "IPA",
+      "quantity": 3,
+      "totalOre": 28716
+    },
+    {
+      "name": "Gin & Tonic",
+      "quantity": 1,
+      "totalOre": 14722
+    },
+    {
+      "name": "Nachos",
+      "quantity": 1,
+      "totalOre": 10467
+    },
+    {
+      "name": "Öl",
+      "quantity": 1,
+      "totalOre": 8525
+    }
+  ],
+  "rejectedMetadata": [
+    "Antal gäster 3",
+    "Transaktions-ID 870370",
+    "Terminal 02",
+    "Beställning 125",
+    "Kassör Erik"
+  ],
+  "discountOre": 0,
+  "idealText": "Cocktailbaren Söder\nHamngatan 3, Stockholm\nAntal gäster 3\nTransaktions-ID 870370\nTerminal 02\n13-04-2025\nGlas rödvin 5 st 515,50\nNegroni 156,48\nBlåbärspaj 77,12\nIPA 3 st 287,16\nGin & Tonic 147,22\nNachos 104,67\nÖl 85,25\nMoms 12% 147,15\nBeställning 125\nKassör Erik\nTOTAL 1373,40\nVisa",
+  "photo": {
+    "rotationDeg": -12.8,
+    "shear": -0.09,
+    "frameFill": 0.47,
+    "blurSigma": 1.01,
+    "jpegQuality": 52,
+    "backgroundTone": "dark",
+    "canvasWidth": 1685,
+    "canvasHeight": 1840
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 560
+  }
+}

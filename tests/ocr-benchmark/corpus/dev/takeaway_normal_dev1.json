@@ -1,0 +1,48 @@
+{
+  "id": "takeaway_normal_dev1",
+  "category": "takeaway",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Kebabhuset Söder",
+  "date": "2025-06-12",
+  "totalOre": 44342,
+  "items": [
+    {
+      "name": "Pizza nr 12 Capricciosa",
+      "quantity": 1,
+      "totalOre": 13055
+    },
+    {
+      "name": "Vårrullar",
+      "quantity": 1,
+      "totalOre": 5755
+    },
+    {
+      "name": "Kebabtallrik",
+      "quantity": 1,
+      "totalOre": 13702
+    },
+    {
+      "name": "Wok kyckling",
+      "quantity": 1,
+      "totalOre": 11830
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Kebabhuset Söder\nTake Away-gatan 3, Stockholm\n12 jun 2025\nPizza nr 12 Capricciosa 130,55\nVårrullar 57,55\nKebabtallrik 137,02\nWok kyckling 118,30\nMoms 12% 47,51\nTOTAL 443,42\nSwish",
+  "photo": {
+    "rotationDeg": -4.2,
+    "shear": 0.02,
+    "frameFill": 0.84,
+    "blurSigma": 0.46,
+    "jpegQuality": 90,
+    "backgroundTone": "light",
+    "canvasWidth": 718,
+    "canvasHeight": 594
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 560
+  }
+}

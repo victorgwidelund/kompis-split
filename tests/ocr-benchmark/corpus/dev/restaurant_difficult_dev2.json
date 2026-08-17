@@ -1,0 +1,67 @@
+{
+  "id": "restaurant_difficult_dev2",
+  "category": "restaurant",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Restaurang Lindgården",
+  "date": "2025-03-26",
+  "totalOre": 111857,
+  "items": [
+    {
+      "name": "Hasselnötskräm",
+      "quantity": 1,
+      "totalOre": 9228
+    },
+    {
+      "name": "Biff Rydberg",
+      "quantity": 1,
+      "totalOre": 20946
+    },
+    {
+      "name": "Köttbullar med lingon",
+      "quantity": 1,
+      "totalOre": 15290
+    },
+    {
+      "name": "Fish and Chips",
+      "quantity": 1,
+      "totalOre": 19686
+    },
+    {
+      "name": "Kycklingsallad",
+      "quantity": 1,
+      "totalOre": 16183
+    },
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 16923
+    },
+    {
+      "name": "Pytt i panna",
+      "quantity": 1,
+      "totalOre": 13601
+    }
+  ],
+  "rejectedMetadata": [
+    "Kassa 7",
+    "Beställning 809",
+    "Transaktions-ID 456720"
+  ],
+  "discountOre": 0,
+  "idealText": "Restaurang Lindgården\nSödra Vägen 21, Malmö\nKassa 7\nBeställning 809\n2025-03-26\n1x Hasselnötskräm\n1x Biff Rydberg\n1x Köttbullar med lingon\n1x Fish and Chips\n1x Kycklingsallad\n1x Räksmörgås\n1x Pytt i panna\n92,28\n209,46\n152,90\n196,86\n161,83\n169,23\n136,01\nMoms 12% 119,85\nTransaktions-ID 456720\nAtt betala 1118,57\nGodkänt",
+  "photo": {
+    "rotationDeg": 8.2,
+    "shear": -0.05,
+    "frameFill": 0.47,
+    "blurSigma": 0.75,
+    "jpegQuality": 74,
+    "backgroundTone": "light",
+    "canvasWidth": 1356,
+    "canvasHeight": 1897
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 480
+  }
+}

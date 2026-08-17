@@ -1,0 +1,53 @@
+{
+  "id": "grocery_normal_dev1",
+  "category": "grocery",
+  "difficulty": "normal",
+  "split": "dev",
+  "merchant": "Willys Söder",
+  "date": "2025-05-08",
+  "totalOre": 20728,
+  "items": [
+    {
+      "name": "Pasta",
+      "quantity": 1,
+      "totalOre": 2373
+    },
+    {
+      "name": "Bröd",
+      "quantity": 1,
+      "totalOre": 3315
+    },
+    {
+      "name": "Ost Herrgård",
+      "quantity": 1,
+      "totalOre": 5469
+    },
+    {
+      "name": "Räksmörgås",
+      "quantity": 1,
+      "totalOre": 5597
+    },
+    {
+      "name": "Ägg 12-pack",
+      "quantity": 1,
+      "totalOre": 3974
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Willys Söder\nButiksgatan 22, Örebro\n8 maj 2025\nPasta 23,73\nBröd 33,15\nOst Herrgård 54,69\nRäksmörgås 55,97\nÄgg 12-pack 39,74\nMoms 12% 22,21\nTOTALT 207,28\nGodkänt",
+  "photo": {
+    "rotationDeg": 2.8,
+    "shear": -0.02,
+    "frameFill": 0.77,
+    "blurSigma": 0.29,
+    "jpegQuality": 81,
+    "backgroundTone": "dark",
+    "canvasWidth": 669,
+    "canvasHeight": 707
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 480
+  }
+}

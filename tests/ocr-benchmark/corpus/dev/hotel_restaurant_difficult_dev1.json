@@ -1,0 +1,64 @@
+{
+  "id": "hotel_restaurant_difficult_dev1",
+  "category": "hotel_restaurant",
+  "difficulty": "difficult",
+  "split": "dev",
+  "merchant": "Grand Hotellets Matsal",
+  "date": "2026-05-04",
+  "totalOre": 216731,
+  "items": [
+    {
+      "name": "Trerätters meny",
+      "quantity": 1,
+      "totalOre": 63278
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 7315
+    },
+    {
+      "name": "Mineralvatten",
+      "quantity": 1,
+      "totalOre": 4633
+    },
+    {
+      "name": "Dagens lunch",
+      "quantity": 3,
+      "totalOre": 52224
+    },
+    {
+      "name": "Frukostbuffé",
+      "quantity": 3,
+      "totalOre": 50769
+    },
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 38512
+    }
+  ],
+  "rejectedMetadata": [
+    "Org.nr 558835-1038",
+    "Transaktions-ID 740325",
+    "Terminal 07",
+    "Beställning 578",
+    "Antal gäster 2"
+  ],
+  "discountOre": 0,
+  "idealText": "Grand Hotellets Matsal\nEsplanaden 6, Malmö\nOrg.nr 558835-1038\nTransaktions-ID 740325\nTerminal 07\n4 maj 2026\nTrerätters meny 632,78\nRumsservice tillägg 73,15\nMineralvatten 46,33\n3 x Dagens lunch 522,24\n3 x Frukostbuffé 169,23 507,69\nVinpaket 3 glas 385,12\nMoms 12% 232,21\nBeställning 578\nAntal gäster 2\nTOTAL 2167,31\nMastercard",
+  "photo": {
+    "rotationDeg": 9.9,
+    "shear": 0.05,
+    "frameFill": 0.53,
+    "blurSigma": 0.51,
+    "jpegQuality": 72,
+    "backgroundTone": "light",
+    "canvasWidth": 1075,
+    "canvasHeight": 1414
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 420
+  }
+}

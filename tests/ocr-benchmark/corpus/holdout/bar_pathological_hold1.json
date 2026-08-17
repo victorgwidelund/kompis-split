@@ -1,0 +1,85 @@
+{
+  "id": "bar_pathological_hold1",
+  "category": "bar",
+  "difficulty": "pathological",
+  "split": "holdout",
+  "merchant": "Puben Hörnan",
+  "date": "2025-12-16",
+  "totalOre": 158984,
+  "items": [
+    {
+      "name": "Negroni",
+      "quantity": 1,
+      "totalOre": 13141
+    },
+    {
+      "name": "Cider",
+      "quantity": 2,
+      "totalOre": 14158
+    },
+    {
+      "name": "Blåbärspaj",
+      "quantity": 1,
+      "totalOre": 6571
+    },
+    {
+      "name": "Glas rödvin",
+      "quantity": 3,
+      "totalOre": 30600
+    },
+    {
+      "name": "Gin & Tonic",
+      "quantity": 1,
+      "totalOre": 12446
+    },
+    {
+      "name": "Öl",
+      "quantity": 6,
+      "totalOre": 42852
+    },
+    {
+      "name": "IPA",
+      "quantity": 1,
+      "totalOre": 8241
+    },
+    {
+      "name": "Nachos",
+      "quantity": 1,
+      "totalOre": 9006
+    },
+    {
+      "name": "Jordnötter",
+      "quantity": 1,
+      "totalOre": 4858
+    },
+    {
+      "name": "Whiskey",
+      "quantity": 1,
+      "totalOre": 17111
+    }
+  ],
+  "rejectedMetadata": [
+    "Transaktions-ID 910686",
+    "Beställning 842",
+    "Bord 35",
+    "Terminal 01",
+    "Antal gäster 6",
+    "Kassör Maria"
+  ],
+  "discountOre": 0,
+  "idealText": "Puben Hörnan\nAvenyn 14, Göteborg\nTransaktions-ID 910686\nBeställning 842\nBord 35\n2025-12-16\nNegroni 131,41\n2 x Cider 141,58\nBlåbärspaj 65,71\nGlas rödvin 3 st 306,00\nGin & Tonic 124,46\n6 x Öl 428,52\nIPA 82,41\nNachos 90,06\nJordnötter 48,58\nWhiskey 171,11\nMoms 12% 170,34\nTerminal 01\nAntal gäster 6\nKassör Maria\nSUMMA 1589,84\nSwish",
+  "photo": {
+    "rotationDeg": -17.8,
+    "shear": 0.09,
+    "frameFill": 0.55,
+    "blurSigma": 0.94,
+    "jpegQuality": 52,
+    "backgroundTone": "dark",
+    "canvasWidth": 1484,
+    "canvasHeight": 1786
+  },
+  "layout": {
+    "fontFamily": "Courier New, monospace",
+    "width": 480
+  }
+}
