@@ -13,9 +13,11 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: "kompis-split-static-styles",
+      name: "kompis-split-static-assets",
       closeBundle() {
-        copyFileSync(resolve(frontendRoot, "../public/styles.css"), resolve(frontendRoot, "dist/styles.css"));
+        for (const file of ["styles.css", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]) {
+          copyFileSync(resolve(frontendRoot, "../public", file), resolve(frontendRoot, "dist", file));
+        }
       },
     },
   ],

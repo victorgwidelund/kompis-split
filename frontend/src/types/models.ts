@@ -272,19 +272,21 @@ export interface AdminResponse {
     actorName: string | null;
     tripName: string | null;
   }>;
-  bugReports: Array<{
-    id: number;
-    description: string;
-    pageUrl: string | null;
-    userAgent: string | null;
-    appVersion: string | null;
-    breadcrumbs: string[];
-    hasScreenshot: boolean;
-    createdAt: string;
-    resolvedAt: string | null;
-    reporterName: string | null;
-  }>;
+  bugReports: BugReport[];
   emailSettings: EmailSettings;
+}
+
+export interface BugReport {
+  id: number;
+  description: string;
+  pageUrl: string | null;
+  userAgent: string | null;
+  appVersion: string | null;
+  breadcrumbs: string[];
+  hasScreenshot: boolean;
+  createdAt: string;
+  resolvedAt: string | null;
+  reporterName: string | null;
 }
 
 export interface EmailSettings {
