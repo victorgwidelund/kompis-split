@@ -41,10 +41,10 @@ export function DashboardPage({ user, dashboard, quickTabs, categories, onNaviga
     finally { setReminding(false); }
   };
   return <section className="home-dashboard">
-    <header className="dashboard-heading"><div><p className="eyebrow">Din överblick</p><h1>Hej, {user.name.split(/\s+/)[0]}!</h1><p>Alla grupper, utgifter och saldon på ett ställe.</p></div><div className="dashboard-heading-actions"><button className="button ghost" disabled={reminding} onClick={() => void remindUnpaid()} title="Skicka en mailpåminnelse till alla som är skyldiga dig pengar">{reminding ? "Skickar…" : "🔔 Påminn om obetalt"}</button><button className="button ghost" onClick={() => onNavigate({ page: "statistics" })}>📊 Statistik</button><button className="button primary" onClick={onNewTrip}>＋ Ny grupp</button></div></header>
+    <header className="dashboard-heading"><div><p className="eyebrow">Din överblick</p><h1>Hej, {user.name.split(/\s+/)[0]}!</h1><p>Alla grupper, utgifter och saldon på ett ställe.</p></div><div className="dashboard-heading-actions"><button className="button primary" onClick={onNewTrip}>＋ Ny grupp</button><button className="button ghost" onClick={() => onNavigate({ page: "statistics" })}>📊 Statistik</button></div></header>
     <div className="summary-grid home-stats">
       <button className="hero-stat coral stat-link" type="button" onClick={scrollToTrips}><span className="stat-icon">✦</span><p>Aktiva grupper</p><strong>{active.length}</strong><small>Visa pågående och kommande →</small></button>
-      <article className="hero-stat cobalt"><span className="stat-icon">↗</span><p>Ditt nettosaldo</p><strong className={net < 0 ? "negative" : ""}>{formatMoney(Math.abs(net))}</strong><small>{net > 0 ? "Du får tillbaka totalt" : net < 0 ? "Du är skyldig totalt" : "Du ligger jämnt"}</small></article>
+      <article className="hero-stat cobalt"><span className="stat-icon">↗</span><p>Ditt nettosaldo</p><strong className={net < 0 ? "negative" : ""}>{formatMoney(Math.abs(net))}</strong><small>{net > 0 ? "Du får tillbaka totalt" : net < 0 ? "Du är skyldig totalt" : "Du ligger jämnt"}</small>{net > 0 && <button type="button" className="stat-cta" disabled={reminding} onClick={() => void remindUnpaid()} title="Skicka en mailpåminnelse till alla som är skyldiga dig pengar">{reminding ? "Skickar…" : "🔔 Påminn om obetalt"}</button>}</article>
       <article className="member-stat"><p>Totalt registrerat</p><strong>{formatMoney(spent)}</strong><small>i aktiva grupper</small></article>
     </div>
     <div className="dashboard-grid home-grid">

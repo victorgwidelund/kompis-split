@@ -51,7 +51,10 @@ function cleanEmail(value: unknown) {
 }
 
 function parseAmount(value: unknown) {
-  const amount = Number(value);
+  // Accepts "249.50" or the Swedish "249,50" -- the frontend's amount fields are plain text inputs
+  // (not type="number", which silently rejects a comma decimal separator), so this is the actual
+  // system boundary where a user-typed amount first becomes a number.
+  const amount = Number(String(value).trim().replace(",", "."));
   if (!Number.isFinite(amount) || amount <= 0 || amount > 10_000_000) throw new Error("Ange ett giltigt belopp");
   return Math.round(amount * 100);
 }

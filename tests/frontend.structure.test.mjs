@@ -10,7 +10,7 @@ test("React-ingången är svensk, mobilanpassad och Vite-baserad", async () => {
     read("frontend/index.html"), read("frontend/src/main.tsx"), read("frontend/src/App.tsx"),
   ]);
   assert.match(html, /<html lang="sv">/);
-  assert.match(html, /name="viewport" content="width=device-width, initial-scale=1.0"/);
+  assert.match(html, /name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/);
   assert.match(html, /id="root"/);
   assert.match(html, /src="\/src\/main\.tsx"/);
   assert.match(main, /createRoot/);

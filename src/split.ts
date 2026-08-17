@@ -36,18 +36,25 @@ export function allocateItemQuantities(totalCents: number, itemQuantity: number,
   };
 }
 
+// Accepts either "33.33" or the Swedish "33,33" -- the frontend's split/amount fields are plain
+// text inputs (not type="number", which silently rejects a comma decimal separator entirely), so
+// this is the actual system boundary where a user-typed value first becomes a number.
+function parseDecimal(value: unknown): number {
+  return Number(String(value).trim().replace(",", "."));
+}
+
 export function calculateShares(totalCents: number, mode: string, entries: Array<{ value: unknown }>): number[] {
   if (!Array.isArray(entries) || entries.length === 0) throw new Error("Choose at least one participant");
   if (mode === "equal") return allocateByWeights(totalCents, entries.map(() => 1));
-  if (mode === "shares") return allocateByWeights(totalCents, entries.map((entry) => Number(entry.value)));
+  if (mode === "shares") return allocateByWeights(totalCents, entries.map((entry) => parseDecimal(entry.value)));
   if (mode === "percentage") {
-    const percentages = entries.map((entry) => Number(entry.value));
+    const percentages = entries.map((entry) => parseDecimal(entry.value));
     const total = percentages.reduce((sum, value) => sum + value, 0);
     if (Math.abs(total - 100) > 0.001) throw new Error("Percentages must add up to 100");
     return allocateByWeights(totalCents, percentages);
   }
   if (mode === "exact") {
-    const shares = entries.map((entry) => Math.round(Number(entry.value) * 100));
+    const shares = entries.map((entry) => Math.round(parseDecimal(entry.value) * 100));
     if (shares.some((share) => !Number.isInteger(share) || share < 0)) throw new Error("Exact amounts must be valid and non-negative");
     if (shares.reduce((sum, value) => sum + value, 0) !== totalCents) throw new Error("Exact amounts must equal the expense total");
     return shares;

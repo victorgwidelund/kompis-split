@@ -69,6 +69,14 @@ test("percentage and exact splits validate totals", () => {
   assert.throws(() => calculateShares(50000, "percentage", [{ value: 50 }, { value: 40 }]), /100/);
 });
 
+test("Swedish comma-decimal values are accepted identically to period-decimal values", () => {
+  // The frontend's split-value fields are plain text inputs (not type="number", which silently
+  // rejects a comma), so a real request can carry "33,33" here -- this must parse the same as "33.33".
+  assert.deepEqual(calculateShares(50000, "percentage", [{ value: "60" }, { value: "40" }]), calculateShares(50000, "percentage", [{ value: "60,0" }, { value: "40,0" }]));
+  assert.deepEqual(calculateShares(50000, "exact", [{ value: "125,00" }, { value: "375" }]), [12500, 37500]);
+  assert.deepEqual(calculateShares(90000, "shares", [{ value: "1,5" }, { value: "1" }]), calculateShares(90000, "shares", [{ value: 1.5 }, { value: 1 }]));
+});
+
 test("settlements account for expenses and recorded payments", () => {
   const people = [{ id: 1 }, { id: 2 }, { id: 3 }];
   const expenses = [{
