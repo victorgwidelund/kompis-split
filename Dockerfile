@@ -5,7 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.buil
 RUN pnpm install --frozen-lockfile
 COPY src ./src
 COPY frontend ./frontend
-COPY public/styles.css ./public/styles.css
+COPY public ./public
 RUN npm run build
 
 FROM node:24.17.0-alpine3.23

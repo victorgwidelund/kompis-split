@@ -2,12 +2,33 @@ import { useState } from "react";
 import { Avatar } from "../../components/Avatar";
 import { DialogHeader, Modal } from "../../components/Modal";
 import { EmptyState } from "../../components/EmptyState";
-import type { AdminResponse, EmailSettings } from "../../types/models";
+import type { AdminResponse, BugReport, EmailSettings } from "../../types/models";
+import { copyText } from "../../utils/browser";
 import { formatDate, formatMoney } from "../../utils/format";
 
 const activityLabels: Record<string, string> = {
   "account.bootstrap": "Administratörskonto skapades", "trip.created": "Grupp skapades", "trip.archived": "Grupp arkiverades", "trip.restored": "Grupp återställdes", "trip.deleted": "Grupp flyttades till papperskorgen", "trip.undeleted": "Grupp återställdes från papperskorgen", "participant.added": "Person lades till", "expense.created": "Utgift skapades", "expense.updated": "Utgift redigerades", "expense.voided": "Utgift togs bort från beräkningen", "receipt.created": "Kvitto laddades upp", "receipt.deleted": "Kvitto togs bort", "category.created": "Kategori skapades", "category.updated": "Kategori uppdaterades", "payment.created": "Betalning registrerades", "payment.voided": "Betalning togs bort från beräkningen", "invitation.created": "Inbjudan skapades", "invitation.joined": "Inbjudan användes", "friend_invitation.created": "Väninbjudan skapades", "friend_invitation.joined": "Väninbjudan användes", "admin.user.updated": "Användarkonto uppdaterades", "quick_tab.deleted": "Snabbnota togs bort", "bug_report.created": "Buggrapport skickades", "admin.email_settings.updated": "E-postinställningar uppdaterades", "reminders.sent": "Betalningspåminnelser skickades", "user.password_reset": "Lösenord återställdes",
 };
+
+function bugReportText(report: BugReport): string {
+  const lines = [
+    `Buggrapport #${report.id} · ${report.resolvedAt ? "Löst" : "Olöst"}`,
+    `Rapporterad av: ${report.reporterName || "Okänd"} · ${formatDate(report.createdAt)}`,
+    "",
+    "Beskrivning:",
+    report.description,
+    "",
+    "Teknisk information:",
+    `Sida: ${report.pageUrl || "Okänd"}`,
+    `Appversion: ${report.appVersion || "Okänd"}`,
+    `Webbläsare: ${report.userAgent || "Okänd"}`,
+    report.hasScreenshot
+      ? `Skärmbild: ${location.origin}/api/admin/bug-reports/${report.id}/screenshot (öppnas inloggad som admin)`
+      : "Ingen skärmbild bifogad",
+  ];
+  if (report.breadcrumbs.length) lines.push("", "Senaste API-anrop:", ...report.breadcrumbs.map((entry) => `- ${entry}`));
+  return lines.join("\n");
+}
 
 interface EmailSettingsPanelProps {
   settings: EmailSettings;
@@ -70,7 +91,13 @@ interface Props {
 
 export function AdminPage({ data, currentUserId, demoMode, onEnterDemo, onBack, onRefresh, onOpenTrip, onUserUpdate, onTripArchive, onTripRestore, onQuickTabDelete, onBugReportResolve, onBugReportDelete, onEmailSettingsSave, onEmailSettingsTest }: Props) {
   const [openReportId, setOpenReportId] = useState<number | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
   const openReport = data.bugReports.find((item) => item.id === openReportId) || null;
+  const copyReport = async (report: BugReport) => {
+    try { await copyText(bugReportText(report)); setCopyStatus("Kopierat!"); }
+    catch { setCopyStatus("Kunde inte kopiera"); }
+    setTimeout(() => setCopyStatus(""), 2500);
+  };
   return <section className="admin-view">
     <header className="dashboard-heading"><div><button className="mobile-back visible-back" onClick={onBack}>← Till startsidan</button><p className="eyebrow">Appadministration</p><h1>Hela Kompis Split</h1><p>Användare, grupper och aktivitet. Alla åtgärder kontrolleras på servern.</p></div><div className="header-actions"><button className="button ghost" disabled={demoMode} onClick={onEnterDemo} title={demoMode ? "Redan i demoläge" : "Visa appen med fiktiva exempeldata utan att röra riktiga konton"}>Demoläge</button><button className="button ghost" onClick={onRefresh}>Uppdatera</button></div></header>
     <div className="summary-grid admin-stats"><article className="hero-stat coral"><span className="stat-icon">●</span><p>Användare</p><strong>{data.stats.userCount}</strong><small>{data.stats.activeUserCount} aktiva</small></article><article className="hero-stat cobalt"><span className="stat-icon">✦</span><p>Grupper</p><strong>{data.stats.tripCount}</strong><small>{data.stats.activeTripCount} aktiva · {data.stats.deletedTripCount} borttagna</small></article><article className="member-stat"><p>Registrerade utgifter</p><strong>{formatMoney(data.stats.totalCents)}</strong><small>över hela appen</small></article></div>
@@ -80,6 +107,6 @@ export function AdminPage({ data, currentUserId, demoMode, onEnterDemo, onBack, 
     <EmailSettingsPanel key={data.emailSettings.updatedAt || "unset"} settings={data.emailSettings} onSave={onEmailSettingsSave} onTest={onEmailSettingsTest} />
     <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Felsökning</p><h2>Buggrapporter</h2></div></div><div className="admin-list">{data.bugReports.length ? data.bugReports.map((report) => <article className={`admin-row${report.resolvedAt ? " disabled-row" : ""}`} key={report.id}><span className="trip-emoji">⚠</span><div className="admin-row-main"><strong>{report.description.slice(0, 80)}{report.description.length > 80 ? "…" : ""} {report.resolvedAt && <span className="role-badge positive-badge">Löst</span>}</strong><small>{report.reporterName || "Okänd"} · {formatDate(report.createdAt)}{report.hasScreenshot ? " · Skärmbild bifogad" : ""}</small></div><div className="admin-actions"><button className="button ghost small-button" onClick={() => setOpenReportId(report.id)}>Visa</button><button className={`button ghost small-button ${report.resolvedAt ? "" : "positive"}`} onClick={() => onBugReportResolve(report.id, !report.resolvedAt)}>{report.resolvedAt ? "Markera olöst" : "Markera löst"}</button><button className="button ghost small-button danger" onClick={() => confirm("Ta bort buggrapporten permanent?") && onBugReportDelete(report.id)}>Ta bort</button></div></article>) : <EmptyState title="Inga buggrapporter">Rapporter som skickas in via "Rapportera en bugg" visas här.</EmptyState>}</div></section>
     <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Spårbarhet</p><h2>Senaste aktivitet</h2></div></div><div className="admin-list">{data.activity.length ? data.activity.map((item) => <article className="activity-row" key={item.id}><span className="activity-dot" /><div><strong>{activityLabels[item.action] || item.action}</strong><small>{item.actorName || "Systemet"}{item.tripName ? ` · ${item.tripName}` : ""} · {formatDate(item.createdAt)}</small></div></article>) : <EmptyState title="Ingen aktivitet">Administrativa och ekonomiska händelser visas här.</EmptyState>}</div></section>
-    <Modal open={Boolean(openReport)} onClose={() => setOpenReportId(null)}>{openReport && <><DialogHeader eyebrow={`${openReport.reporterName || "Okänd"} · ${formatDate(openReport.createdAt)}`} title="Buggrapport" onClose={() => setOpenReportId(null)} /><p>{openReport.description}</p>{openReport.hasScreenshot && <img className="receipt-view-image" src={`/api/admin/bug-reports/${openReport.id}/screenshot`} alt="Bifogad skärmbild" />}<details className="bug-report-context" open><summary>Teknisk information</summary><small>Sida: {openReport.pageUrl || "Okänd"}</small><small>Appversion: {openReport.appVersion || "Okänd"}</small><small>Webbläsare: {openReport.userAgent || "Okänd"}</small>{openReport.breadcrumbs.length > 0 && <ul className="bug-report-breadcrumbs">{openReport.breadcrumbs.map((entry, index) => <li key={index}>{entry}</li>)}</ul>}</details></>}</Modal>
+    <Modal open={Boolean(openReport)} onClose={() => { setOpenReportId(null); setCopyStatus(""); }}>{openReport && <><DialogHeader eyebrow={`${openReport.reporterName || "Okänd"} · ${formatDate(openReport.createdAt)}`} title="Buggrapport" onClose={() => setOpenReportId(null)} /><p>{openReport.description}</p>{openReport.hasScreenshot && <img className="receipt-view-image" src={`/api/admin/bug-reports/${openReport.id}/screenshot`} alt="Bifogad skärmbild" />}<details className="bug-report-context" open><summary>Teknisk information</summary><small>Sida: {openReport.pageUrl || "Okänd"}</small><small>Appversion: {openReport.appVersion || "Okänd"}</small><small>Webbläsare: {openReport.userAgent || "Okänd"}</small>{openReport.breadcrumbs.length > 0 && <ul className="bug-report-breadcrumbs">{openReport.breadcrumbs.map((entry, index) => <li key={index}>{entry}</li>)}</ul>}</details><div className="email-settings-actions"><button className="button dark wide" type="button" onClick={() => void copyReport(openReport)}>📋 Kopiera för utvecklare</button></div>{copyStatus && <small className="email-settings-status">{copyStatus}</small>}</>}</Modal>
   </section>;
 }

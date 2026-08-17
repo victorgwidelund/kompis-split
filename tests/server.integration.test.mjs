@@ -585,16 +585,21 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     // the aggregation and the reminder email content can be checked without depending on this
     // test's accumulated, harder-to-predict balances elsewhere.
     const reminderTrip = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Påminnelsetest" } });
+    assert.equal(reminderTrip.response.status, 201, JSON.stringify(reminderTrip.payload));
     const reminderTripId = reminderTrip.payload.trip.id;
     const reminderInvite = await request(`/api/trips/${reminderTripId}/invitations`, { method: "POST", cookie: ownerCookie, body: {} });
-    await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token: reminderInvite.payload.invitation.token } });
+    assert.equal(reminderInvite.response.status, 201, JSON.stringify(reminderInvite.payload));
+    const reminderJoined = await request("/api/invitations/join", { method: "POST", cookie: memberCookie, body: { token: reminderInvite.payload.invitation.token } });
+    assert.equal(reminderJoined.response.status, 200, JSON.stringify(reminderJoined.payload));
     const reminderTripLoaded = await request(`/api/trips/${reminderTripId}`, { cookie: ownerCookie });
+    assert.equal(reminderTripLoaded.response.status, 200, JSON.stringify(reminderTripLoaded.payload));
     const reminderOwnerParticipant = reminderTripLoaded.payload.trip.participants.find((item) => item.name === "Victor");
     const reminderAnnaParticipant = reminderTripLoaded.payload.trip.participants.find((item) => item.name === "Anna");
-    await request(`/api/trips/${reminderTripId}/expenses`, {
+    const reminderExpense = await request(`/api/trips/${reminderTripId}/expenses`, {
       method: "POST", cookie: ownerCookie,
       body: { title: "Hytta", amount: "200", payerId: reminderOwnerParticipant.id, category: "stay", splitMode: "equal", entries: [{ participantId: reminderOwnerParticipant.id, value: 1 }, { participantId: reminderAnnaParticipant.id, value: 1 }] },
     });
+    assert.equal(reminderExpense.response.status, 201, JSON.stringify(reminderExpense.payload));
     const emailsBeforeDebtorReminds = capturedEmails.length;
     const debtorRemindersSent = await request("/api/remind-unpaid", { method: "POST", cookie: memberCookie, body: {} });
     assert.equal(debtorRemindersSent.response.status, 200, JSON.stringify(debtorRemindersSent.payload));
