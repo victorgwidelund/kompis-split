@@ -50,7 +50,10 @@ const excludedTotalWords = /\bmoms\b|\bvat\b|\bväxel\b|\bchange\b|\brabatt\b|\b
 // price gets merged onto it by the multi-line "name, then price on the next line" OCR heuristic.
 // Word-boundaried so real product names are never caught (e.g. a wine called "Bordeaux" must not
 // match \bbord\b).
-const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b|\btip\b|\bdricks\b|\bnetto(?:belopp)?\b|\bnet\s+amount\b/i;
+// serveringsavgift/service and tel/telefon/telephone added after a real example (a receipt's phone
+// number header and service charge line were both captured as purchased items) -- both are ordinary
+// receipt-header/footer content on genuine Swedish kvitton too, not specific to that one example.
+const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b|\btip\b|\bdricks\b|\bnetto(?:belopp)?\b|\bnet\s+amount\b|\bserveringsavgift\b|\bservice\b|\btelefon(?:nummer)?\b|\btel\b|\btelephone\b|\bphone\b/i;
 // Discounts/coupons reduce the total rather than describing something purchased; letting them
 // become an "item" both mislabels them and throws off the exact-total reconciliation.
 const nonItemAdjustmentWords = /\brabatt\b|\bkupong\b|\bcoupon\b/i;
@@ -106,7 +109,7 @@ function normalizeNumericGlyphs(line: string, previousLine?: string) {
 // confirmed against a real receipt: "1.00 Caesarsalla 285.00" then bare "d"), the fragment has to be
 // spliced in *before* the price rather than appended at the very end — appending after "285.00" would
 // leave the row not ending in a price and it would be dropped entirely, not just misnamed.
-const trailingPricePattern = /^(.*\S)(\s+)((?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}\s*(?:kr|sek)?)$/i;
+const trailingPricePattern = /^(.*\S)(\s+)((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2}\s*(?:kr|sek)?)$/i;
 function reuniteWrappedWords(lines: string[]) {
   const result: string[] = [];
   for (const line of lines) {
@@ -133,13 +136,20 @@ function normalizedLines(text: string) {
 }
 
 function parseMoney(value: string) {
-  const compact = value.replace(/\s/g, "").replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".");
+  // Receipts spell the same amount under at least four conventions: space or period as the thousands
+  // separator, comma or period as the decimal mark ("1 234,50", "1.234,50", "1,234.50", "1234.50"). The
+  // decimal mark is always whichever "," or "." comes LAST (every caller's regex already constrains the
+  // value to end in exactly two digits after it) -- so treat that one as the decimal point and strip
+  // every earlier "," or "." as a thousands separator, rather than assuming comma is always decimal.
+  const trimmed = value.replace(/\s/g, "");
+  const decimalIndex = Math.max(trimmed.lastIndexOf(","), trimmed.lastIndexOf("."));
+  const compact = decimalIndex === -1 ? trimmed : `${trimmed.slice(0, decimalIndex).replace(/[,.]/g, "")}.${trimmed.slice(decimalIndex + 1)}`;
   const amount = Number(compact);
   return Number.isFinite(amount) && amount > 0 && amount <= 10_000_000 ? amount : null;
 }
 
 function amountCandidates(line: string) {
-  return [...line.matchAll(/(?<!\d)(\d{1,3}(?:[ .]\d{3})*|\d+)[,.](\d{2})(?!\d)/g)]
+  return [...line.matchAll(/(?<!\d)(\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.](\d{2})(?!\d)/g)]
     .map((match) => parseMoney(`${match[1]}.${match[2]}`)).filter((amount): amount is number => amount !== null);
 }
 
@@ -336,7 +346,7 @@ function receiptItems(lines: string[]) {
     // \p{L} rather than the narrower [A-Za-zÅÄÖåäö]: a dish name can carry other Latin diacritics
     // Swedish text still borrows ("Frukostbuffé", "Crème brûlée"), and requiring the name to end in
     // exactly Å/Ä/Ö silently fell through to the generic path (wrong quantity) for those.
-    const trailingCountMatch = /^(.+\p{L})\s+(\d{1,2})\s*st\.?\s+((?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
+    const trailingCountMatch = /^(.+\p{L})\s+(\d{1,2})\s*st\.?\s+((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
     if (trailingCountMatch) {
       const amount = parseMoney(trailingCountMatch[3]!);
       const name = trailingCountMatch[1]!.replace(leadingNonLetterJunk, "").replace(trailingNonNameJunk, "").slice(0, 100);
@@ -380,7 +390,7 @@ function receiptItems(lines: string[]) {
     const name = line
       .replace(quantityPattern, "")
       .replace(/\(\s*\d+[,.]\d{2}\s*\)/g, " ")
-      .replace(/(?<!\d)(\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}(?!\d)/g, " ")
+      .replace(/(?<!\d)(\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2}(?!\d)/g, " ")
       .replace(/\(\s*\)/g, " ")
       .replace(/\b(?:kr|sek|st)\b/gi, " ")
       // A standalone "à" is the "at [unit price] each" marker ("2 x Wine à 131,00 262,00"), not part of
