@@ -552,6 +552,43 @@ test("a menu-numbered item name is not swallowed into a Swedish thousands-separa
   ]);
 });
 
+test("comma-thousands amounts (the English/international convention) are read as whole numbers, not truncated", () => {
+  // "2,200.00" (comma as thousands separator, period as decimal -- the opposite of Swedish "2 200,00")
+  // used to have its leading "2," silently dropped by amountCandidates()/parseMoney(), truncating the
+  // amount to just "200.00" and leaving the stray "2," stuck onto the item name. Real example from a
+  // user-shared receipt: "Grilled Tomahawk Steak 2 1,100.00 2,200.00" became an item named "Grilled
+  // Tomahawk Steak 2 1, 2" priced at 200.00 instead of 2200.00, and the grand total was lost entirely.
+  const suggestion = parseReceiptText(`
+    HOTELL ARLANDA
+    Konferenspaket 2,200.00
+    Vin 3,100.00
+    TOTALT ATT BETALA 5,300.00
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Konferenspaket", quantity: 1, amount: "2200.00" },
+    { name: "Vin", quantity: 1, amount: "3100.00" },
+  ]);
+  assert.equal(suggestion.amount, "5300.00");
+});
+
+test("a service charge line and a phone-number header line never become purchased items", () => {
+  // Same user-shared receipt: "SERVICE (10%)" and "Telephone: +46 8 123 45 67" were both captured as
+  // purchased items (the phone number's last two digit pairs read as a price). Both are ordinary
+  // receipt header/footer content on genuine Swedish kvitton too, not specific to that one receipt.
+  const suggestion = parseReceiptText(`
+    RESTAURANG SKÄRGÅRDEN
+    Tel: 08-123 45 67
+    Fisksoppa 145,00
+    Vin 195,00
+    Serveringsavgift 34,00
+    ATT BETALA 374,00
+  `);
+  assert.deepEqual(suggestion.items, [
+    { name: "Fisksoppa", quantity: 1, amount: "145.00" },
+    { name: "Vin", quantity: 1, amount: "195.00" },
+  ]);
+});
+
 test("a short business name is preferred over a longer street address for merchant detection", () => {
   // merchantNameScore() used to be dominated by raw letter count, so "Vasagatan 4, Stockholm" (18
   // letters) beat "Fikahörnan" (10 letters) on every receipt where the name wasn't printed twice.
