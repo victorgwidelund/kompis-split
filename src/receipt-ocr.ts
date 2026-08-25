@@ -482,7 +482,21 @@ function receiptPassScore(pass: ReceiptPass) {
   const itemTotal = pass.suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
   const exact = total !== null && itemTotal === total;
   const coverage = total && itemTotal <= total ? itemTotal / total : 0;
-  return (exact ? 1_000_000 : 0) + pass.suggestion.items.length * 10_000 + Math.round(coverage * 1_000) + pass.confidence;
+  // items.length was uncapped and worth 10x more than a full 0-100 confidence swing, so a pass could
+  // win purely by finding MORE lines -- including OCR noise/fragments that aren't real items -- even
+  // against a pass with visibly higher per-image OCR confidence and cleaner text. Real example: a
+  // difficult-tier receipt where Tesseract's cleaner first pass (5 items, confidence 80) lost to its
+  // own noisier second pass (7 items, confidence 64, one item a garbled non-word, one a split-off
+  // fragment of another) purely on item count. Capping the item bonus at 3 items' worth preserves the
+  // existing balance for short receipts (where "found more lines" is still a strong, cheap signal --
+  // the AI-vs-Tesseract merge test below relies on exactly this) while removing the incentive to
+  // out-hallucinate a cleaner pass on longer, noisier receipts specifically. Confidence's weight was
+  // raised only enough to matter as a tie-breaker once the item-count bonus is capped out, not enough
+  // to override it outright -- AI passes carry a fixed per-method trust value here (70/85/92/94, not a
+  // real per-image signal the way Tesseract's is), so weighting confidence too aggressively made a
+  // 1-item AI pass beat a 2-item Tesseract pass regardless of coverage (caught by the existing "local AI
+  // receipt output is validated and merged by exact öre" test).
+  return (exact ? 1_000_000 : 0) + Math.min(pass.suggestion.items.length, 3) * 10_000 + Math.round(coverage * 1_000) + pass.confidence * 30;
 }
 
 export function combineReceiptPasses(passes: ReceiptPass[]) {
