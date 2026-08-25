@@ -10,6 +10,7 @@ import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
 import { EmailError, emailSettingsStatus, saveEmailSettings, sendMail } from "./email.js";
 import { closeReceiptOcr, maxReceiptInputPixels, normalizeReceiptImage, recognizeReceipt } from "./receipt-ocr.js";
+import { ocrBenchmarkAvailable, runOcrBenchmarkImage, runOcrBenchmarkParser, type OcrBenchmarkReport } from "./ocr-benchmark.js";
 import { allocateItemQuantities, calculateShares, simplifyDebts } from "./split.js";
 
 const scrypt = promisify(scryptCallback);
@@ -867,6 +868,12 @@ const bugReportAttempts = new Map<number, { count: number; resetAt: number }>();
 const forgotPasswordAttempts = new Map<string, { count: number; resetAt: number }>();
 const emailTestAttempts = new Map<number, { count: number; resetAt: number }>();
 const reminderAttempts = new Map<number, { count: number; resetAt: number }>();
+// A real image-mode run can take minutes (it calls the actual OCR/vision-model pipeline per fixture),
+// so it runs as a background job rather than blocking a request -- risking a reverse-proxy timeout for
+// no reason. Global, not per-admin: this is a shared diagnostic resource, and only one run needs to be
+// in flight at a time. Lost on restart, which is fine -- it's diagnostic output, not durable data.
+type OcrBenchmarkJob = { mode: "parser" | "image"; split: string; status: "running" | "done" | "error"; startedAt: number; completedAt?: number; progress: { completed: number; total: number }; report?: OcrBenchmarkReport; error?: string };
+let currentOcrBenchmarkJob: OcrBenchmarkJob | null = null;
 setInterval(() => {
   const now = Date.now();
   for (const [key, value] of attempts) if (value.resetAt < now) attempts.delete(key);
@@ -973,7 +980,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (user?.demo_mode && [
     /^\/api\/users\/search$/, /^\/api\/contacts$/, /^\/api\/admin$/, /^\/api\/admin\/users\/\d+$/,
     /^\/api\/admin\/quick-tabs\/\d+$/, /^\/api\/admin\/bug-reports(\/.*)?$/,
-    /^\/api\/admin\/email-settings(\/.*)?$/, /^\/api\/remind-unpaid$/,
+    /^\/api\/admin\/email-settings(\/.*)?$/, /^\/api\/admin\/ocr-benchmark(\/.*)?$/, /^\/api\/remind-unpaid$/,
     /^\/api\/friend-invitations$/, /^\/api\/trips\/\d+\/invitations$/, /^\/api\/quick-tabs\/\d+\/invitations$/,
   ].some((pattern) => pattern.test(url.pathname))) {
     throw new HttpError(403, "Den här funktionen är inte tillgänglig i demoläge");
@@ -1231,6 +1238,25 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       throw error;
     }
     return json(response, 200, { ok: true, recipient });
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/ocr-benchmark") {
+    requireAdmin(user);
+    return json(response, 200, { available: ocrBenchmarkAvailable(), job: currentOcrBenchmarkJob });
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/ocr-benchmark") {
+    requireAdmin(user);
+    if (!ocrBenchmarkAvailable()) throw new HttpError(503, "Benchmark-korpusen saknas i den här installationen (tests/ocr-benchmark/corpus).");
+    if (currentOcrBenchmarkJob?.status === "running") throw new HttpError(409, "En benchmark körs redan.");
+    const body = await readJson(request);
+    const mode = body.mode === "image" ? "image" as const : "parser" as const;
+    const split = (["dev", "holdout", "all"].includes(body.split) ? body.split : "all") as "dev" | "holdout" | "all";
+    const job: OcrBenchmarkJob = { mode, split, status: "running", startedAt: Date.now(), progress: { completed: 0, total: 0 } };
+    currentOcrBenchmarkJob = job;
+    await audit(user.id, null, "admin.ocr_benchmark.started", "ocr_benchmark", null, { mode, split });
+    void (mode === "parser" ? runOcrBenchmarkParser(split) : runOcrBenchmarkImage(split, (completed, total) => { job.progress = { completed, total }; }))
+      .then((report) => { job.report = report; job.status = "done"; job.completedAt = Date.now(); })
+      .catch((error) => { job.status = "error"; job.error = error instanceof Error ? error.message : "Okänt fel"; job.completedAt = Date.now(); });
+    return json(response, 202, { job });
   }
   if (request.method === "POST" && url.pathname === "/api/remind-unpaid") {
     // Available to any account, not just admins -- this only ever reaches people who owe money

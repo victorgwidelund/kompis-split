@@ -298,6 +298,34 @@ export interface EmailSettings {
   updatedAt: string | null;
 }
 
+export interface OcrBenchmarkAggregate {
+  receiptCount: number; merchantAccuracy: number; dateAccuracy: number; totalAccuracy: number;
+  itemPrecision: number; itemRecall: number; itemF1: number; nameSimilarity: number | null;
+  priceAccuracy: number | null; quantityAccuracy: number | null;
+  exactReconciliation: number; reconciledAfterKnownAdjustments: number; selfConsistencyRate: number;
+  falseMetadataItemsTotal: number; receiptsNeedingReview: number;
+  medianMs: number | null; p90Ms: number | null; p95Ms: number | null;
+}
+
+export interface OcrFixtureScore {
+  id: string; category: string; difficulty: string; split: string;
+  totalCorrect: boolean; financiallyReconciled: boolean;
+  unmatchedTruthNames: string[]; unmatchedPredNames: string[]; falseMetadataItems: string[];
+}
+
+export interface OcrBenchmarkReport {
+  mode: "parser" | "image"; split: string; fixtureCount: number; generatedAt: string;
+  overall: OcrBenchmarkAggregate | null; dev: OcrBenchmarkAggregate | null; holdout: OcrBenchmarkAggregate | null;
+  sources?: Record<string, number>;
+  scores: OcrFixtureScore[];
+}
+
+export interface OcrBenchmarkJob {
+  mode: "parser" | "image"; split: string; status: "running" | "done" | "error";
+  startedAt: number; completedAt?: number; progress: { completed: number; total: number };
+  report?: OcrBenchmarkReport; error?: string;
+}
+
 export interface ReminderResult {
   sent: number;
   total: number;

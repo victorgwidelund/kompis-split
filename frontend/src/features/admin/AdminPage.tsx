@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar } from "../../components/Avatar";
 import { DialogHeader, Modal } from "../../components/Modal";
 import { EmptyState } from "../../components/EmptyState";
-import type { AdminResponse, BugReport, EmailSettings } from "../../types/models";
+import type { AdminResponse, BugReport, EmailSettings, OcrBenchmarkJob } from "../../types/models";
 import { copyText } from "../../utils/browser";
 import { formatDate, formatMoney } from "../../utils/format";
 
@@ -71,6 +71,66 @@ function EmailSettingsPanel({ settings, onSave, onTest }: EmailSettingsPanelProp
   </section>;
 }
 
+interface OcrBenchmarkPanelProps {
+  onRun: (mode: "parser" | "image") => Promise<{ available: boolean; job: OcrBenchmarkJob }>;
+  onStatus: () => Promise<{ available: boolean; job: OcrBenchmarkJob | null }>;
+}
+
+function OcrBenchmarkPanel({ onRun, onStatus }: OcrBenchmarkPanelProps) {
+  const [available, setAvailable] = useState(true);
+  const [job, setJob] = useState<OcrBenchmarkJob | null>(null);
+  const [error, setError] = useState("");
+  const [starting, setStarting] = useState<"parser" | "image" | null>(null);
+
+  useEffect(() => { void onStatus().then((payload) => { setAvailable(payload.available); setJob(payload.job); }); }, [onStatus]);
+  useEffect(() => {
+    if (job?.status !== "running") return;
+    const timer = window.setInterval(() => { void onStatus().then((payload) => setJob(payload.job)); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [job?.status, onStatus]);
+
+  const run = async (mode: "parser" | "image") => {
+    setStarting(mode); setError("");
+    try { setJob((await onRun(mode)).job); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Kunde inte starta benchmark"); }
+    finally { setStarting(null); }
+  };
+
+  const pct = (value: number | null) => (value === null ? "–" : `${(value * 100).toFixed(0)} %`);
+  const ms = (value: number | null) => (value === null ? "–" : `${Math.round(value)} ms`);
+  const report = job?.report;
+  const failures = report?.scores.filter((score) => !score.financiallyReconciled) || [];
+
+  return <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Kvalitetskontroll</p><h2>OCR-benchmark</h2></div>{job && <span className={`role-badge ${job.status === "running" ? "muted-badge" : job.status === "error" ? "danger-badge" : "positive-badge"}`}>{job.status === "running" ? "Kör…" : job.status === "error" ? "Fel" : "Klar"}</span>}</div>
+    {!available ? <p className="muted">Benchmark-korpusen saknas i den här installationen (behöver köras från en image byggd efter v1.23.0).</p> : <>
+      <p className="muted">Kör den riktiga kvittoläsningen mot en fast uppsättning svenska testkvitton med facit. Snabb kontroll rör bara parsern, ingen OCR/GPU. Verklig pipeline anropar samma Tesseract/PaddleOCR-VL som riktiga kvitton — kan ta någon minut.</p>
+      <div className="email-settings-actions">
+        <button className="button ghost small-button" type="button" disabled={job?.status === "running" || starting !== null} onClick={() => void run("parser")}>{starting === "parser" ? "Startar…" : "Snabb kontroll"}</button>
+        <button className="button dark small-button" type="button" disabled={job?.status === "running" || starting !== null} onClick={() => void run("image")}>{starting === "image" ? "Startar…" : "Verklig OCR-pipeline"}</button>
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {job?.status === "running" && <small className="email-settings-status">{job.progress.total ? `${job.progress.completed}/${job.progress.total} kvitton bearbetade…` : "Startar…"}</small>}
+      {job?.status === "error" && <p className="form-error" role="alert">{job.error}</p>}
+      {report?.overall && <>
+        <small className="email-settings-status">{report.fixtureCount} kvitton · {report.mode === "image" ? "verklig pipeline" : "endast parser"}{report.sources && ` · ${Object.entries(report.sources).map(([source, count]) => `${source}: ${count}`).join(", ")}`} · klart {formatDate(report.generatedAt)}</small>
+        <table className="ocr-benchmark-table"><tbody>
+          <tr><th>Köpman</th><td>{pct(report.overall.merchantAccuracy)}</td></tr>
+          <tr><th>Datum</th><td>{pct(report.overall.dateAccuracy)}</td></tr>
+          <tr><th>Totalbelopp</th><td>{pct(report.overall.totalAccuracy)}</td></tr>
+          <tr><th>Artikel-F1</th><td>{pct(report.overall.itemF1)}</td></tr>
+          <tr><th>Prisnoggrannhet</th><td>{pct(report.overall.priceAccuracy)}</td></tr>
+          <tr><th>Antalsnoggrannhet</th><td>{pct(report.overall.quantityAccuracy)}</td></tr>
+          <tr><th>Exakt avstämning</th><td>{pct(report.overall.exactReconciliation)}</td></tr>
+          <tr><th>Falska metadata-rader</th><td>{report.overall.falseMetadataItemsTotal}</td></tr>
+          <tr><th>Behöver granskning</th><td>{report.overall.receiptsNeedingReview}/{report.overall.receiptCount}</td></tr>
+          {report.mode === "image" && <tr><th>Medianhastighet</th><td>{ms(report.overall.medianMs)} (P95 {ms(report.overall.p95Ms)})</td></tr>}
+        </tbody></table>
+        {failures.length > 0 && <details className="bug-report-context"><summary>{failures.length} kvitton med avvikelse</summary><ul className="bug-report-breadcrumbs">{failures.map((score) => <li key={score.id}>{score.id} ({score.category}/{score.difficulty}){score.unmatchedTruthNames.length ? ` · saknade: ${score.unmatchedTruthNames.join(", ")}` : ""}{score.falseMetadataItems.length ? ` · falska rader: ${score.falseMetadataItems.join(", ")}` : ""}</li>)}</ul></details>}
+      </>}
+    </>}
+  </section>;
+}
+
 interface Props {
   data: AdminResponse;
   currentUserId: number;
@@ -87,9 +147,11 @@ interface Props {
   onBugReportDelete: (id: number) => void;
   onEmailSettingsSave: (values: { tenantId: string; clientId: string; clientSecret: string; senderEmail: string }) => Promise<void>;
   onEmailSettingsTest: (recipientEmail: string) => Promise<string>;
+  onOcrBenchmarkRun: (mode: "parser" | "image") => Promise<{ available: boolean; job: OcrBenchmarkJob }>;
+  onOcrBenchmarkStatus: () => Promise<{ available: boolean; job: OcrBenchmarkJob | null }>;
 }
 
-export function AdminPage({ data, currentUserId, demoMode, onEnterDemo, onBack, onRefresh, onOpenTrip, onUserUpdate, onTripArchive, onTripRestore, onQuickTabDelete, onBugReportResolve, onBugReportDelete, onEmailSettingsSave, onEmailSettingsTest }: Props) {
+export function AdminPage({ data, currentUserId, demoMode, onEnterDemo, onBack, onRefresh, onOpenTrip, onUserUpdate, onTripArchive, onTripRestore, onQuickTabDelete, onBugReportResolve, onBugReportDelete, onEmailSettingsSave, onEmailSettingsTest, onOcrBenchmarkRun, onOcrBenchmarkStatus }: Props) {
   const [openReportId, setOpenReportId] = useState<number | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const openReport = data.bugReports.find((item) => item.id === openReportId) || null;
@@ -105,6 +167,7 @@ export function AdminPage({ data, currentUserId, demoMode, onEnterDemo, onBack, 
     <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Överblick</p><h2>Alla grupper</h2></div></div><div className="admin-list">{data.trips.length ? data.trips.map((trip, index) => <article className={`admin-row${trip.deletedAt ? " disabled-row" : ""}`} key={trip.id}><span className="trip-emoji">{["✦", "⌁", "◇", "◉"][index % 4]}</span><div className="admin-row-main"><strong>{trip.name} {trip.deletedAt ? <span className="role-badge danger-badge">Borttagen</span> : trip.archivedAt ? <span className="role-badge muted-badge">Arkiverad</span> : null}</strong><small>{trip.ownerName || "Okänd ägare"} · {trip.memberCount} medlemmar · {trip.expenseCount} utgifter · {formatMoney(trip.totalCents)}</small></div><div className="admin-actions">{trip.deletedAt ? <button className="button ghost small-button positive" onClick={() => confirm("Återställ gruppen från papperskorgen?") && onTripRestore(trip.id)}>Återställ</button> : <><button className="button ghost small-button" onClick={() => onOpenTrip(trip.id)}>Öppna</button><button className="button ghost small-button" onClick={() => confirm(trip.archivedAt ? "Återställ gruppen?" : "Arkivera gruppen? Alla ekonomiska poster bevaras.") && onTripArchive(trip.id, !trip.archivedAt)}>{trip.archivedAt ? "Återställ" : "Arkivera"}</button></>}</div></article>) : <EmptyState title="Inga grupper">Alla grupper visas här när de skapas.</EmptyState>}</div></section>
     <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Dela direkt</p><h2>Alla snabbnotor</h2></div></div><div className="admin-list">{data.quickTabs.length ? data.quickTabs.map((tab) => <article className="admin-row" key={tab.id}><span className="trip-emoji">●</span><div className="admin-row-main"><strong>{tab.name} {tab.closedAt && <span className="role-badge muted-badge">Avslutad</span>}</strong><small>{tab.ownerName || "Okänd ägare"} · {tab.merchant || "Ingen plats angiven"} · {tab.memberCount} deltagare · {formatMoney(tab.totalCents)}</small></div><div className="admin-actions"><button className="button ghost small-button danger" onClick={() => confirm(`Ta bort snabbnotan "${tab.name}" permanent? Detta kan inte ångras.`) && onQuickTabDelete(tab.id)}>Ta bort</button></div></article>) : <EmptyState title="Inga snabbnotor">Alla snabbnotor visas här när de skapas.</EmptyState>}</div></section>
     <EmailSettingsPanel key={data.emailSettings.updatedAt || "unset"} settings={data.emailSettings} onSave={onEmailSettingsSave} onTest={onEmailSettingsTest} />
+    <OcrBenchmarkPanel onRun={onOcrBenchmarkRun} onStatus={onOcrBenchmarkStatus} />
     <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Felsökning</p><h2>Buggrapporter</h2></div></div><div className="admin-list">{data.bugReports.length ? data.bugReports.map((report) => <article className={`admin-row${report.resolvedAt ? " disabled-row" : ""}`} key={report.id}><span className="trip-emoji">⚠</span><div className="admin-row-main"><strong>{report.description.slice(0, 80)}{report.description.length > 80 ? "…" : ""} {report.resolvedAt && <span className="role-badge positive-badge">Löst</span>}</strong><small>{report.reporterName || "Okänd"} · {formatDate(report.createdAt)}{report.hasScreenshot ? " · Skärmbild bifogad" : ""}</small></div><div className="admin-actions"><button className="button ghost small-button" onClick={() => setOpenReportId(report.id)}>Visa</button><button className={`button ghost small-button ${report.resolvedAt ? "" : "positive"}`} onClick={() => onBugReportResolve(report.id, !report.resolvedAt)}>{report.resolvedAt ? "Markera olöst" : "Markera löst"}</button><button className="button ghost small-button danger" onClick={() => confirm("Ta bort buggrapporten permanent?") && onBugReportDelete(report.id)}>Ta bort</button></div></article>) : <EmptyState title="Inga buggrapporter">Rapporter som skickas in via "Rapportera en bugg" visas här.</EmptyState>}</div></section>
     <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Spårbarhet</p><h2>Senaste aktivitet</h2></div></div><div className="admin-list">{data.activity.length ? data.activity.map((item) => <article className="activity-row" key={item.id}><span className="activity-dot" /><div><strong>{activityLabels[item.action] || item.action}</strong><small>{item.actorName || "Systemet"}{item.tripName ? ` · ${item.tripName}` : ""} · {formatDate(item.createdAt)}</small></div></article>) : <EmptyState title="Ingen aktivitet">Administrativa och ekonomiska händelser visas här.</EmptyState>}</div></section>
     <Modal open={Boolean(openReport)} onClose={() => { setOpenReportId(null); setCopyStatus(""); }}>{openReport && <><DialogHeader eyebrow={`${openReport.reporterName || "Okänd"} · ${formatDate(openReport.createdAt)}`} title="Buggrapport" onClose={() => setOpenReportId(null)} /><p>{openReport.description}</p>{openReport.hasScreenshot && <img className="receipt-view-image" src={`/api/admin/bug-reports/${openReport.id}/screenshot`} alt="Bifogad skärmbild" />}<details className="bug-report-context" open><summary>Teknisk information</summary><small>Sida: {openReport.pageUrl || "Okänd"}</small><small>Appversion: {openReport.appVersion || "Okänd"}</small><small>Webbläsare: {openReport.userAgent || "Okänd"}</small>{openReport.breadcrumbs.length > 0 && <ul className="bug-report-breadcrumbs">{openReport.breadcrumbs.map((entry, index) => <li key={index}>{entry}</li>)}</ul>}</details><div className="email-settings-actions"><button className="button dark wide" type="button" onClick={() => void copyReport(openReport)}>📋 Kopiera för utvecklare</button></div>{copyStatus && <small className="email-settings-status">{copyStatus}</small>}</>}</Modal>

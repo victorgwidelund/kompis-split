@@ -595,6 +595,29 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(capturedEmails[0].body.message.toRecipients[0].emailAddress.address, "victor@example.test");
     assert.match(capturedEmails[0].body.message.subject, /testmail/i);
 
+    // In-app OCR benchmark: admin-only (same pattern as email settings above), and a parser-mode run
+    // (deterministic, no OCR/GPU) actually completes and reports sane, real numbers against the
+    // committed corpus -- not just that the endpoint exists.
+    const memberCannotReadOcrBenchmark = await request("/api/admin/ocr-benchmark", { cookie: memberCookie });
+    assert.equal(memberCannotReadOcrBenchmark.response.status, 403);
+    const memberCannotRunOcrBenchmark = await request("/api/admin/ocr-benchmark", { method: "POST", cookie: memberCookie, body: { mode: "parser" } });
+    assert.equal(memberCannotRunOcrBenchmark.response.status, 403);
+    const ocrBenchmarkStatusBeforeRun = await request("/api/admin/ocr-benchmark", { cookie: ownerCookie });
+    assert.equal(ocrBenchmarkStatusBeforeRun.payload.available, true, "the benchmark corpus must be present in the test checkout");
+    const ocrBenchmarkStarted = await request("/api/admin/ocr-benchmark", { method: "POST", cookie: ownerCookie, body: { mode: "parser", split: "dev" } });
+    assert.equal(ocrBenchmarkStarted.response.status, 202, JSON.stringify(ocrBenchmarkStarted.payload));
+    assert.equal(ocrBenchmarkStarted.payload.job.status, "running");
+    let ocrBenchmarkFinished = null;
+    for (let attempt = 0; attempt < 20 && !ocrBenchmarkFinished; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const polled = await request("/api/admin/ocr-benchmark", { cookie: ownerCookie });
+      if (polled.payload.job?.status !== "running") ocrBenchmarkFinished = polled.payload.job;
+    }
+    assert.ok(ocrBenchmarkFinished, "the parser-mode benchmark should finish within 2 seconds");
+    assert.equal(ocrBenchmarkFinished.status, "done", JSON.stringify(ocrBenchmarkFinished.error));
+    assert.ok(ocrBenchmarkFinished.report.overall.itemF1 >= 0.95, `item F1 regressed: ${ocrBenchmarkFinished.report.overall.itemF1}`);
+    assert.equal(ocrBenchmarkFinished.report.overall.falseMetadataItemsTotal, 0);
+
     // Payment reminders: available to any account (not just admins), and strictly scoped to debts
     // owed to the calling user -- a dedicated small trip with one precisely known unpaid debt, so
     // the aggregation and the reminder email content can be checked without depending on this

@@ -55,6 +55,11 @@
   accuracy improvement without a benchmark number backing it, and revert a change that regresses the
   benchmark even if it fixed the one fixture that motivated it — see `OCR_BENCHMARK.md` for the full
   rationale and the "rejected experiments" this rule already prevented from shipping.
+- The scoring/matching logic lives once, in `src/ocr-benchmark.ts` (compiled to `dist/ocr-benchmark.js`).
+  Both the CLI tool (`tests/ocr-benchmark/scoring.mjs` re-exports from it) and the in-app admin
+  "OCR-benchmark" panel (`GET`/`POST /api/admin/ocr-benchmark`) use the same implementation — never fork
+  a second copy. The benchmark corpus (`tests/ocr-benchmark/corpus/`) is baked into the production Docker
+  image read-only; keep that `COPY` line in `Dockerfile` if the corpus path or layout ever changes.
 - Fix the earliest reliable layer (preprocessing/OCR/line-normalization/semantic-parsing/reconciliation),
   not the symptom. A metadata word that leaks into items is usually a missing `\b` word boundary, not a
   reason to blacklist the specific merchant/product name that exposed it.
