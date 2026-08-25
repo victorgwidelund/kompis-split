@@ -7,13 +7,18 @@ import { Toast } from "./components/Toast";
 import { AdminPage } from "./features/admin/AdminPage";
 import { AuthScreen, type AuthMode } from "./features/auth/AuthScreen";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
+import { FriendsPage } from "./features/friends/FriendsPage";
+import { GroupsPage } from "./features/groups/GroupsPage";
 import { GuidePage } from "./features/guide/GuidePage";
+import { MorePage } from "./features/more/MorePage";
 import { QuickTabDialog } from "./features/quick-tabs/QuickTabDialog";
 import { QuickTabPage } from "./features/quick-tabs/QuickTabPage";
+import { QuickTabsListPage } from "./features/quick-tabs/QuickTabsListPage";
 import { StatisticsPage } from "./features/statistics/StatisticsPage";
 import { ExpenseDialog } from "./features/trips/ExpenseDialog";
 import { CategoryDialog, InviteDialog, PaymentDialog, PersonDialog } from "./features/trips/TripDialogs";
 import { TripPage, type PaymentPreset, type TripDialog } from "./features/trips/TripPage";
+import { useIsMobile } from "./hooks/useIsMobile";
 import type { AdminResponse, Category, DashboardResponse, Expense, InvitationPreview, InvitationResult, OcrBenchmarkJob, QuickTab, QuickTabSummary, ReminderResult, SessionResponse, StatisticsResponse, Trip, User, View } from "./types/models";
 
 const guestUser: User = { id: 0, email: "", name: "Gäst", swishPhone: null, isAdmin: false };
@@ -21,7 +26,11 @@ const guestUser: User = { id: 0, email: "", name: "Gäst", swishPhone: null, isA
 function hashView(): View {
   const trip = location.hash.match(/^#trip-(\d+)$/); if (trip) return { page: "trip", id: Number(trip[1]) };
   const quick = location.hash.match(/^#quick-tab-(\d+)$/); if (quick) return { page: "quick-tab", id: Number(quick[1]) };
+  if (location.hash === "#groups") return { page: "groups" };
+  if (location.hash === "#quick-tabs") return { page: "quick-tabs" };
+  if (location.hash === "#friends") return { page: "friends" };
   if (location.hash === "#statistics") return { page: "statistics" };
+  if (location.hash === "#more") return { page: "more" };
   if (location.hash === "#admin") return { page: "admin" };
   if (location.hash === "#guide") return { page: "guide" };
   return { page: "dashboard" };
@@ -36,6 +45,7 @@ function resetPasswordToken(): string {
 }
 
 export default function App() {
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true); const [user, setUser] = useState<User | null>(null); const [guestMode, setGuestMode] = useState(false); const [needsSetup, setNeedsSetup] = useState(false); const [version, setVersion] = useState("dev"); const [token, setToken] = useState(inviteToken); const [invitation, setInvitation] = useState<InvitationPreview | null>(null); const [authMode, setAuthMode] = useState<AuthMode>("login"); const [demoMode, setDemoMode] = useState(false); const [resetToken, setResetToken] = useState(resetPasswordToken);
   const initialToken = useRef(token);
   const initialResetToken = useRef(resetToken);
@@ -109,10 +119,14 @@ export default function App() {
   <Shell user={shellUser} version={version} trips={dashboard?.trips || []} view={view} guestMode={guestMode} onNavigate={(next) => void navigate(next)} onNewTrip={() => setGlobalDialog("trip")} onNewQuickTab={() => setGlobalDialog("quick")} onLogout={() => void api("/api/logout", { method: "POST", body: {} }).then(() => location.reload())} onReportBug={() => setGlobalDialog("bug")}>
     {view.page === "dashboard" && user && dashboard && <DashboardPage user={user} dashboard={dashboard} quickTabs={quickTabs} categories={categories} onNavigate={(next) => void navigate(next)} onNewTrip={() => setGlobalDialog("trip")} onNewQuickTab={() => setGlobalDialog("quick")} onInviteFriend={() => setGlobalDialog("friend")} onRemindUnpaid={() => api<ReminderResult>("/api/remind-unpaid", { method: "POST", body: {} })} notify={notify} />}
     {view.page === "trip" && user && trip && <TripPage trip={trip} user={user} categories={categories} onBack={() => void navigate({ page: "dashboard" })} onRefresh={refreshTrip} onOpenDialog={openTripDialog} notify={notify} />}
+    {view.page === "groups" && dashboard && <GroupsPage trips={dashboard.trips} onNavigate={(next) => void navigate(next)} onNewTrip={() => setGlobalDialog("trip")} />}
     {view.page === "quick-tab" && quickTab && <QuickTabPage tab={quickTab} initialInvitation={quickInvitation} guestMode={guestMode} onBack={() => void navigate({ page: "dashboard" })} onRefresh={refreshQuick} onChanged={setQuickTab} notify={notify} />}
+    {view.page === "quick-tabs" && <QuickTabsListPage quickTabs={quickTabs} onNavigate={(next) => void navigate(next)} onNewQuickTab={() => setGlobalDialog("quick")} />}
+    {view.page === "friends" && dashboard && <FriendsPage contacts={dashboard.contacts} onBack={() => void navigate({ page: "more" })} onInviteFriend={() => setGlobalDialog("friend")} />}
     {view.page === "statistics" && statistics && <StatisticsPage data={statistics} onBack={() => void navigate({ page: "dashboard" })} onRefresh={() => void api<StatisticsResponse>("/api/statistics").then(setStatistics)} />}
-    {view.page === "guide" && user && <GuidePage isAdmin={user.isAdmin} onBack={() => void navigate({ page: "dashboard" })} />}
-    {view.page === "admin" && admin && user && <AdminPage data={admin} currentUserId={user.id} demoMode={demoMode} onEnterDemo={() => void enterDemo()} onBack={() => void navigate({ page: "dashboard" })} onRefresh={() => void reloadAdmin()} onOpenTrip={(id) => void navigate({ page: "trip", id })} onUserUpdate={(id, update) => void api(`/api/admin/users/${id}`, { method: "PATCH", body: update }).then(reloadAdmin).then(() => notify("Kontot uppdaterades"))} onTripArchive={(id, archived) => void api(`/api/trips/${id}/archive`, { method: "POST", body: { archived } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen uppdaterades"))} onTripRestore={(id) => void api(`/api/trips/${id}/trash`, { method: "POST", body: { deleted: false } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen återställdes"))} onQuickTabDelete={(id) => void api(`/api/admin/quick-tabs/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Snabbnotan togs bort"))} onBugReportResolve={(id, resolved) => void api(`/api/admin/bug-reports/${id}/resolve`, { method: "POST", body: { resolved } }).then(reloadAdmin).then(() => notify(resolved ? "Markerad som löst" : "Markerad som olöst"))} onBugReportDelete={(id) => void api(`/api/admin/bug-reports/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Buggrapporten togs bort"))} onEmailSettingsSave={(values) => api("/api/admin/email-settings", { method: "POST", body: values }).then(reloadAdmin).then(() => notify("E-postinställningarna sparades")) as Promise<void>} onEmailSettingsTest={(recipientEmail) => api<{ recipient: string }>("/api/admin/email-settings/test", { method: "POST", body: { recipientEmail } }).then((result) => `Testmail skickat till ${result.recipient}`)} onOcrBenchmarkRun={(mode) => api<{ available: boolean; job: OcrBenchmarkJob }>("/api/admin/ocr-benchmark", { method: "POST", body: { mode } })} onOcrBenchmarkStatus={() => api<{ available: boolean; job: OcrBenchmarkJob | null }>("/api/admin/ocr-benchmark")} />}
+    {view.page === "more" && user && <MorePage user={user} version={version} onNavigate={(next) => void navigate(next)} onReportBug={() => setGlobalDialog("bug")} onLogout={() => void api("/api/logout", { method: "POST", body: {} }).then(() => location.reload())} />}
+    {view.page === "guide" && user && <GuidePage isAdmin={user.isAdmin} onBack={() => void navigate(isMobile ? { page: "more" } : { page: "dashboard" })} />}
+    {view.page === "admin" && admin && user && <AdminPage data={admin} currentUserId={user.id} demoMode={demoMode} onEnterDemo={() => void enterDemo()} onBack={() => void navigate(isMobile ? { page: "more" } : { page: "dashboard" })} onRefresh={() => void reloadAdmin()} onOpenTrip={(id) => void navigate({ page: "trip", id })} onUserUpdate={(id, update) => void api(`/api/admin/users/${id}`, { method: "PATCH", body: update }).then(reloadAdmin).then(() => notify("Kontot uppdaterades"))} onTripArchive={(id, archived) => void api(`/api/trips/${id}/archive`, { method: "POST", body: { archived } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen uppdaterades"))} onTripRestore={(id) => void api(`/api/trips/${id}/trash`, { method: "POST", body: { deleted: false } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen återställdes"))} onQuickTabDelete={(id) => void api(`/api/admin/quick-tabs/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Snabbnotan togs bort"))} onBugReportResolve={(id, resolved) => void api(`/api/admin/bug-reports/${id}/resolve`, { method: "POST", body: { resolved } }).then(reloadAdmin).then(() => notify(resolved ? "Markerad som löst" : "Markerad som olöst"))} onBugReportDelete={(id) => void api(`/api/admin/bug-reports/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Buggrapporten togs bort"))} onEmailSettingsSave={(values) => api("/api/admin/email-settings", { method: "POST", body: values }).then(reloadAdmin).then(() => notify("E-postinställningarna sparades")) as Promise<void>} onEmailSettingsTest={(recipientEmail) => api<{ recipient: string }>("/api/admin/email-settings/test", { method: "POST", body: { recipientEmail } }).then((result) => `Testmail skickat till ${result.recipient}`)} onOcrBenchmarkRun={(mode) => api<{ available: boolean; job: OcrBenchmarkJob }>("/api/admin/ocr-benchmark", { method: "POST", body: { mode } })} onOcrBenchmarkStatus={() => api<{ available: boolean; job: OcrBenchmarkJob | null }>("/api/admin/ocr-benchmark")} />}
   </Shell>
   <NewTripDialog open={globalDialog === "trip"} onClose={() => setGlobalDialog(null)} onCreated={async (created) => { await refreshDashboard(); setTrip(created); setView({ page: "trip", id: created.id }); history.replaceState(null, "", `${location.pathname}#trip-${created.id}`); setTripDialog("invite"); notify("Gruppen skapades — bjud nu in gänget"); }} />
   <QuickTabDialog open={globalDialog === "quick"} onClose={() => setGlobalDialog(null)} notify={notify} onCreated={async (created, createdInvitation) => { setQuickTab(created); setQuickInvitation(createdInvitation); setView({ page: "quick-tab", id: created.id }); history.replaceState(null, "", `${location.pathname}#quick-tab-${created.id}`); await refreshDashboard(); notify("Snabbnotan är live – dela länken med gänget"); }} />

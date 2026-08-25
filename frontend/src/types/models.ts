@@ -335,7 +335,11 @@ export interface ReminderResult {
 export type View =
   | { page: "dashboard" }
   | { page: "trip"; id: number }
+  | { page: "groups" }
   | { page: "quick-tab"; id: number }
+  | { page: "quick-tabs" }
+  | { page: "friends" }
   | { page: "statistics" }
+  | { page: "more" }
   | { page: "admin" }
   | { page: "guide" };

@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import { Avatar } from "../../components/Avatar";
 import { EmptyState } from "../../components/EmptyState";
+import { GroupRow } from "../../components/GroupRow";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import type { Category, DashboardResponse, QuickTabSummary, ReminderResult, TripSummary, User, View } from "../../types/models";
 import { formatDate, formatMoney } from "../../utils/format";
 
@@ -25,6 +27,7 @@ function TripCard({ trip, index, onOpen }: { trip: TripSummary; index: number; o
 export function DashboardPage({ user, dashboard, quickTabs, categories, onNavigate, onNewTrip, onNewQuickTab, onInviteFriend, onRemindUnpaid, notify }: Props) {
   const panelRef = useRef<HTMLElement>(null);
   const [reminding, setReminding] = useState(false);
+  const isMobile = useIsMobile();
   const active = dashboard.trips.filter((trip) => !trip.archivedAt);
   const archived = dashboard.trips.filter((trip) => trip.archivedAt);
   const net = active.reduce((sum, trip) => sum + trip.myBalanceCents, 0);
@@ -40,11 +43,29 @@ export function DashboardPage({ user, dashboard, quickTabs, categories, onNaviga
     } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte skicka påminnelser"); }
     finally { setReminding(false); }
   };
+  const firstName = user.name.split(/\s+/)[0];
+  const balanceCard = <article className="hero-stat cobalt home-balance-card"><span className="stat-icon">↗</span><p>Ditt nettosaldo</p><strong className={net < 0 ? "negative" : ""}>{formatMoney(Math.abs(net))}</strong><small>{net > 0 ? "Du får tillbaka totalt" : net < 0 ? "Du är skyldig totalt" : "Du ligger jämnt"}</small>{net > 0 && <button type="button" className="stat-cta" disabled={reminding} onClick={() => void remindUnpaid()} title="Skicka en mailpåminnelse till alla som är skyldiga dig pengar">{reminding ? "Skickar…" : "🔔 Påminn om obetalt"}</button>}</article>;
+
+  if (isMobile) {
+    return <section className="home-dashboard mobile-home">
+      <h1 className="mobile-greeting">Hej, {firstName}!</h1>
+      {balanceCard}
+      <section className="home-section">
+        <div className="home-section-heading"><h2>Dina grupper</h2><button className="text-button" onClick={() => onNavigate({ page: "groups" })}>Visa alla →</button></div>
+        <div className="group-row-list">{active.length ? active.slice(0, 3).map((trip, index) => <GroupRow key={trip.id} trip={trip} index={index} onOpen={() => onNavigate({ page: "trip", id: trip.id })} />) : <EmptyState title="Dags för nästa grupp?">Skapa en grupp och bjud in gänget med en länk.</EmptyState>}</div>
+      </section>
+      {!!dashboard.recentExpenses.length && <section className="home-section">
+        <div className="home-section-heading"><h2>Senaste utgifterna</h2></div>
+        <div className="expense-list">{dashboard.recentExpenses.slice(0, 4).map((expense) => <button key={expense.id} className="expense-row dashboard-expense" onClick={() => onNavigate({ page: "trip", id: expense.tripId })}><span className="category-icon" title={category(expense.category).name}>{category(expense.category).emoji}</span><span className="expense-main"><strong>{expense.title}</strong><small>{expense.tripName} · {expense.payerName} · {formatDate(expense.expenseDate, "Inget datum")}</small></span><span className="expense-amount">{formatMoney(expense.amountCents)}</span></button>)}</div>
+      </section>}
+    </section>;
+  }
+
   return <section className="home-dashboard">
-    <header className="dashboard-heading"><div><p className="eyebrow">Din överblick</p><h1>Hej, {user.name.split(/\s+/)[0]}!</h1><p>Alla grupper, utgifter och saldon på ett ställe.</p></div><div className="dashboard-heading-actions"><button className="button primary" onClick={onNewTrip}>＋ Ny grupp</button><button className="button ghost" onClick={() => onNavigate({ page: "statistics" })}>📊 Statistik</button></div></header>
+    <header className="dashboard-heading"><div><p className="eyebrow">Din överblick</p><h1>Hej, {firstName}!</h1><p>Alla grupper, utgifter och saldon på ett ställe.</p></div><div className="dashboard-heading-actions"><button className="button primary" onClick={onNewTrip}>＋ Ny grupp</button><button className="button ghost" onClick={() => onNavigate({ page: "statistics" })}>📊 Statistik</button></div></header>
     <div className="summary-grid home-stats">
       <button className="hero-stat coral stat-link" type="button" onClick={scrollToTrips}><span className="stat-icon">✦</span><p>Aktiva grupper</p><strong>{active.length}</strong><small>Visa pågående och kommande →</small></button>
-      <article className="hero-stat cobalt"><span className="stat-icon">↗</span><p>Ditt nettosaldo</p><strong className={net < 0 ? "negative" : ""}>{formatMoney(Math.abs(net))}</strong><small>{net > 0 ? "Du får tillbaka totalt" : net < 0 ? "Du är skyldig totalt" : "Du ligger jämnt"}</small>{net > 0 && <button type="button" className="stat-cta" disabled={reminding} onClick={() => void remindUnpaid()} title="Skicka en mailpåminnelse till alla som är skyldiga dig pengar">{reminding ? "Skickar…" : "🔔 Påminn om obetalt"}</button>}</article>
+      {balanceCard}
       <article className="member-stat"><p>Totalt registrerat</p><strong>{formatMoney(spent)}</strong><small>i aktiva grupper</small></article>
     </div>
     <div className="dashboard-grid home-grid">

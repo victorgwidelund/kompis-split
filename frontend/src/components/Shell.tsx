@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { BottomNav } from "./BottomNav";
 import type { TripSummary, User, View } from "../types/models";
 import { shortVersion } from "../utils/format";
 
@@ -27,8 +28,6 @@ const hammarbyMessages = [
 
 export function Shell({ user, version, trips, view, guestMode, onNavigate, onNewTrip, onNewQuickTab, onLogout, onReportBug, children }: ShellProps) {
   const [easterEgg, setEasterEgg] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const brandClicks = useRef<number[]>([]);
   const handleBrandClick = () => {
     const now = Date.now();
@@ -40,16 +39,6 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
     }
     onNavigate({ page: "dashboard" });
   };
-  // Overflow menu (mobile header "Mer"): closes on an outside click or Escape, same expectations
-  // as any native menu -- it's the one bit of non-native interactive UI this shell introduces.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false); };
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => { document.removeEventListener("mousedown", closeOnOutsideClick); document.removeEventListener("keydown", closeOnEscape); };
-  }, [menuOpen]);
   if (guestMode) return <div className="app-shell guest-mode"><main className="main">{children}</main></div>;
   const active = trips.filter((trip) => !trip.archivedAt);
   const archived = trips.filter((trip) => trip.archivedAt);
@@ -59,11 +48,14 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
       <span><strong>{trip.name}</strong><small>{trip.participantCount} {trip.participantCount === 1 ? "person" : "personer"}</small></span>
     </button>
   );
-  const secondaryNav = (closeMenu: () => void) => <>
-    <button className="button ghost wide statistics-nav" onClick={() => { onNavigate({ page: "statistics" }); closeMenu(); }} title="Se trender och översikt"><span>📊</span> Statistik</button>
-    <button className="button ghost wide guide-nav" onClick={() => { onNavigate({ page: "guide" }); closeMenu(); }} title="Så här funkar appen"><span>？</span> Användarguide</button>
-    {user.isAdmin && <button className="button ghost wide admin-nav" onClick={() => { onNavigate({ page: "admin" }); closeMenu(); }} title="Hantera användare, grupper och buggrapporter"><span>⚙</span> Administration</button>}
-    <button className="button ghost wide bug-report-nav" onClick={() => { onReportBug(); closeMenu(); }}><span>⚠</span> Rapportera en bugg</button>
+  // Desktop-only: the sidebar still lists these directly (no "Mer" concept there). On mobile the
+  // identical set of destinations lives in MorePage instead, reached via the bottom nav -- keeping
+  // them here too would be the exact "duplicate navigation in both bars" the redesign avoids.
+  const secondaryNav = <>
+    <button className="button ghost wide statistics-nav" onClick={() => onNavigate({ page: "statistics" })} title="Se trender och översikt"><span>📊</span> Statistik</button>
+    <button className="button ghost wide guide-nav" onClick={() => onNavigate({ page: "guide" })} title="Så här funkar appen"><span>？</span> Användarguide</button>
+    {user.isAdmin && <button className="button ghost wide admin-nav" onClick={() => onNavigate({ page: "admin" })} title="Hantera användare, grupper och buggrapporter"><span>⚙</span> Administration</button>}
+    <button className="button ghost wide bug-report-nav" onClick={onReportBug}><span>⚠</span> Rapportera en bugg</button>
   </>;
   return (
     <div className="app-shell">
@@ -74,25 +66,17 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
         <div className="side-heading"><span>Aktiva grupper</span><span className="count">{active.length}</span></div>
         <nav className="trip-list" aria-label="Aktiva grupper">{active.length ? active.map(tripLink) : <small className="side-empty">Inga aktiva grupper</small>}</nav>
         {!!archived.length && <div className="archive-section"><div className="side-heading"><span>Arkiv</span><span className="count">{archived.length}</span></div><nav className="trip-list archive-list" aria-label="Arkiverade grupper">{archived.map(tripLink)}</nav></div>}
-        <div className="sidebar-secondary">{secondaryNav(() => {})}</div>
+        <div className="sidebar-secondary">{secondaryNav}</div>
         <div className="sidebar-footer"><div className="security-dot" /><div><strong>{user.name}</strong><small>{user.email}</small></div><button className="icon-button" aria-label="Logga ut" title="Logga ut" onClick={onLogout}>↗</button></div>
         <small className="app-version sidebar-version" title={`Installerad appversion: ${version}`}>Version {shortVersion(version)}</small>
       </aside>
       <main className="main">
         <header className="mobile-header">
           <button className="brand brand-button" onClick={handleBrandClick}><span className="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></button>
-          <div className="mobile-actions">
-            <small className="app-version mobile-version">{shortVersion(version)}</small>
-            <button className="icon-button coral-button" aria-label="Ny snabbnota" title="Ny snabbnota" onClick={onNewQuickTab}>⚡</button>
-            <button className="icon-button dark" aria-label="Ny grupp" title="Ny grupp" onClick={onNewTrip}>＋</button>
-            <div className="mobile-menu-wrap" ref={menuRef}>
-              <button className="icon-button" aria-label="Mer" title="Mer" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>⋯</button>
-              {menuOpen && <div className="mobile-menu" role="menu">{secondaryNav(() => setMenuOpen(false))}</div>}
-            </div>
-          </div>
         </header>
         {children}
       </main>
+      <BottomNav view={view} onNavigate={onNavigate} />
       {easterEgg && <div className="hammarby-toast" role="status">{easterEgg}</div>}
     </div>
   );
