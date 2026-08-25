@@ -193,8 +193,13 @@ this pass should paper over with more regexes.
 
 Per the task brief's own instruction: the corpus/harness was still fully built, deterministic parser
 fixes were still validated (39/39 backend + 6/6 frontend tests + the parser-only benchmark above), and no
-GPU numbers are invented. To run the exact same benchmark against the real PaddleOCR-VL vision model on
-the production GTX 1080 Ti:
+GPU numbers are invented.
+
+**Update, v1.23.0**: this benchmark is now also runnable directly from the app itself (Administration →
+Kvalitetskontroll → OCR-benchmark), which is the recommended way to get the real PaddleOCR-VL numbers on
+production hardware now — no SSH/CLI/Docker networking needed, since it runs inside the app container on
+the app's own already-configured `PADDLEOCR_URL`. The CLI path below still works and exposes more flags
+(category/difficulty filters, JSON diffing) if needed:
 
 ```sh
 # On the Unraid host, with the paddleocr Compose service already running:

@@ -3,7 +3,19 @@
 A repeatable benchmark for `src/receipt-ocr.ts`, built for this project's evidence-driven OCR accuracy
 work (see `OCR_BENCHMARK.md` at the repo root for the actual experiment log and results).
 
-## Running it
+## Running it in production (no SSH/CLI needed)
+
+As of v1.23.0, an admin can run this from the app itself: **Administration → Kvalitetskontroll →
+OCR-benchmark**. "Snabb kontroll" runs the parser-only path (instant); "Verklig OCR-pipeline" runs the
+real image pipeline as a background job (progress shown live, can take a minute) against this server's
+own `PADDLEOCR_URL` — so on a production Unraid deployment it exercises the real PaddleOCR-VL model, not
+just the Tesseract fallback. The result panel shows exactly which source (`tesseract` vs.
+`paddleocr+tesseract`) actually resolved each receipt, so it's never ambiguous what was tested. This
+calls the same `src/ocr-benchmark.ts` module documented below (`GET`/`POST /api/admin/ocr-benchmark`) --
+prefer it over the CLI unless you need the finer-grained flags (category/difficulty filters, JSON
+report diffing) below.
+
+## Running it from the CLI
 
 ```sh
 pnpm build:server                        # once, or after any src/ change
@@ -24,20 +36,24 @@ aggregates and a `scores` array of every individual fixture's result (see `scori
 
 ### Running the full pipeline (PaddleOCR-VL) on the Unraid GTX 1080 Ti
 
-`--mode=image` always exercises the real local Tesseract OCR (CPU-only, works anywhere Node runs), but
-only exercises the actual PaddleOCR-VL vision model if `PADDLEOCR_URL` points at a reachable instance --
-the same environment variable production reads. On the Unraid box, with the `paddleocr` Compose service
-already running:
+Prefer the in-app panel above -- it already runs inside the app container, on the app's own
+`PADDLEOCR_URL`, no Docker networking or source checkout needed. Fall back to the CLI only if you need
+its extra flags (category/difficulty filters, JSON report diffing, `--limit`). If so, `--mode=image`
+always exercises the real local Tesseract OCR (CPU-only, works anywhere Node runs), but only exercises
+the actual PaddleOCR-VL vision model if `PADDLEOCR_URL` points at a reachable instance. Requires a real
+source checkout (not just `compose.yaml`) on a host that can reach the `paddleocr` container -- e.g. a
+throwaway container on the same Docker network:
 
 ```sh
-PADDLEOCR_URL=http://localhost:8080 pnpm benchmark:ocr -- --mode=image --split=all --verbose
+docker run --rm -it --network <compose-project>_default \
+  -v /path/to/a/real/checkout:/app -w /app -e PADDLEOCR_URL=http://paddleocr:8080 \
+  node:24-alpine sh -c "npm install -g pnpm@11.16.0 && pnpm install --frozen-lockfile && pnpm build:server && node tests/ocr-benchmark/run-benchmark.mjs --mode=image --split=all --verbose"
 ```
 
-(swap the host/port for however `paddleocr`'s port is actually reachable from wherever you run this --
-it has no published host port in `compose.yaml` by default, so either run this from inside the Compose
-network or temporarily publish the port). The report's `sources` field and the printed "Sources used"
-line show whether `paddleocr+tesseract` was actually used, so it's never ambiguous which pipeline a
-given number reflects.
+(find `<compose-project>_default` with `docker inspect <paddleocr-container-name> --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}'`; note it's `paddleocr:8080`, the service's name on
+that network, not `localhost:8080`). The report's `sources` field and the printed "Sources used" line
+show whether `paddleocr+tesseract` was actually used, so it's never ambiguous which pipeline a given
+number reflects -- the in-app panel shows the same thing.
 
 ## Structure
 
@@ -45,7 +61,8 @@ given number reflects.
 tests/ocr-benchmark/
   README.md              this file
   SOURCES.md              where the corpus images come from (spoiler: synthetic; see SOURCES.md for why)
-  scoring.mjs             pure matching/aggregation functions, no I/O
+  scoring.mjs             re-exports the canonical scoring/matching logic from src/ocr-benchmark.ts
+                          (dist/ocr-benchmark.js) so this CLI and the in-app admin panel can't disagree
   run-benchmark.mjs       the CLI runner
   generator/
     data.mjs              venue templates, item pools, metadata pools
