@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { Avatar } from "../../components/Avatar";
 import { DialogHeader, Modal } from "../../components/Modal";
@@ -10,13 +10,14 @@ import type { PaymentPreset } from "./TripPage";
 export function InviteDialog({ open, tripId, onClose, notify }: { open: boolean; tripId: number; onClose: () => void; notify: (message: string) => void }) {
   const [invitation, setInvitation] = useState<InvitationResult | null>(null);
   const create = async () => { try { const payload = await api<{ invitation: InvitationResult }>(`/api/trips/${tripId}/invitations`, { method: "POST", body: {} }); setInvitation({ ...payload.invitation, path: new URL(payload.invitation.path, location.origin).href }); } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte skapa inbjudan"); } };
-  return <Modal open={open} onClose={onClose}><DialogHeader eyebrow="Dela gruppen" title="Bjud in till gruppen" onClose={onClose} /><p className="muted">Länken gäller i 14 dagar. Visa QR-koden för vännen bredvid dig eller skicka länken.</p><button className="button primary wide" type="button" onClick={() => void create()}>Skapa säker inbjudan</button>{invitation && <div className="invite-output"><div className="invite-qr"><img src={invitation.qrDataUrl} alt="QR-kod för gruppens inbjudan" /><strong>Skanna för att gå med</strong><small>Öppna mobilkameran och rikta den mot koden.</small></div><label>Inbjudningslänk<input readOnly value={invitation.path} /></label><button className="button dark wide" onClick={() => void copyText(invitation.path).then(() => notify("Inbjudningslänken kopierades"))}>Kopiera länk</button>{invitation.expiresAt && <p className="muted">Gäller till {formatDate(invitation.expiresAt)}.</p>}</div>}</Modal>;
+  return <Modal open={open} onClose={onClose}><DialogHeader eyebrow="Dela gruppen" title="Bjud in till gruppen" onClose={onClose} /><p className="muted">Samma länk och QR-kod fungerar för hela gänget – dela den fritt, det behövs inte en ny per person. Gäller i 14 dagar och för upp till 20 personer.</p><button className="button primary wide" type="button" onClick={() => void create()}>Skapa säker inbjudan</button>{invitation && <div className="invite-output"><div className="invite-qr"><img src={invitation.qrDataUrl} alt="QR-kod för gruppens inbjudan" /><strong>Skanna för att gå med</strong><small>Öppna mobilkameran och rikta den mot koden. Fungerar för alla ni bjuder in.</small></div><label>Inbjudningslänk<input readOnly value={invitation.path} /></label><button className="button dark wide" onClick={() => void copyText(invitation.path).then(() => notify("Inbjudningslänken kopierades"))}>Kopiera länk</button>{invitation.expiresAt && <p className="muted">Gäller till {formatDate(invitation.expiresAt)} eller tills 20 personer har gått med.</p>}</div>}</Modal>;
 }
 
 export function PersonDialog({ open, trip, onClose, onSaved, notify }: { open: boolean; trip: Trip; onClose: () => void; onSaved: () => Promise<void>; notify: (message: string) => void }) {
-  const [results, setResults] = useState<User[]>([]); const [heading, setHeading] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  const searchTimer = useRef(0); const searchRequestId = useRef(0);
-  useEffect(() => { if (!open) return; void api<{ contacts: User[] }>("/api/contacts").then((payload) => { setResults(payload.contacts); setHeading("Sparade kontakter"); }).catch((caught) => notify(caught instanceof Error ? caught.message : "Kunde inte läsa kontakter")); }, [open, notify]);
+  const [results, setResults] = useState<User[]>([]); const [heading, setHeading] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [addedCount, setAddedCount] = useState(0);
+  const searchTimer = useRef(0); const searchRequestId = useRef(0); const searchInputRef = useRef<HTMLInputElement>(null); const guestFormRef = useRef<HTMLFormElement>(null);
+  const loadContacts = useCallback(() => api<{ contacts: User[] }>("/api/contacts").then((payload) => { setResults(payload.contacts); setHeading("Sparade kontakter"); }).catch((caught) => notify(caught instanceof Error ? caught.message : "Kunde inte läsa kontakter")), [notify]);
+  useEffect(() => { if (!open) return; setAddedCount(0); void loadContacts(); }, [open, loadContacts]);
   const search = (query: string) => {
     window.clearTimeout(searchTimer.current);
     searchTimer.current = window.setTimeout(() => {
@@ -26,8 +27,21 @@ export function PersonDialog({ open, trip, onClose, onSaved, notify }: { open: b
     }, 250);
   };
   const added = new Set(trip.participants.map((participant) => participant.userId).filter(Boolean)); const available = results.filter((user) => !added.has(user.id));
-  const add = async (body: Record<string, unknown>, success: string) => { if (busy) return; setBusy(true); try { await api(`/api/trips/${trip.id}/participants`, { method: "POST", body }); await onSaved(); onClose(); notify(success); } catch (caught) { setError(caught instanceof Error ? caught.message : "Kunde inte lägga till personen"); } finally { setBusy(false); } };
-  return <Modal open={open} onClose={onClose}><DialogHeader eyebrow="Fyll på gänget" title="Lägg till en vän" onClose={onClose} /><label>Sök registrerad användare<input type="search" placeholder="Namn eller e-post" autoComplete="off" onChange={(event) => search(event.target.value)} /></label><div className="contact-results">{heading && <p className="result-heading">{heading}</p>}{available.length ? available.map((user, index) => <button className="contact-result" key={user.id} type="button" disabled={busy} onClick={() => void add({ userId: user.id }, "Vännen lades till och sparades som kontakt")}><Avatar name={user.name} index={index} /><span><strong>{user.name}</strong><small>{user.email}</small></span><b>＋</b></button>) : <small className="muted">Ingen tillgänglig användare hittades.</small>}</div><div className="form-divider"><span>eller lägg till som gäst</span></div><form className="nested-form" onSubmit={(event) => { event.preventDefault(); void add(Object.fromEntries(new FormData(event.currentTarget)), "Gästen lades till"); }}><label>Namn<input name="name" placeholder="Vännens namn" maxLength={60} required /></label><label>Swish-nummer<input name="swishPhone" inputMode="tel" placeholder="070 123 45 67" /><small>Valfritt. Behövs för förifylld Swish-betalning.</small></label><p className="form-error" role="alert">{error}</p><button className="button primary wide" type="submit" disabled={busy}>{busy ? "Lägger till…" : "Lägg till i gruppen"} <span>→</span></button></form></Modal>;
+  // Deliberately does not close after a successful add -- adding a whole group one person at a
+  // time used to mean reopening this dialog from scratch for every single friend. It now stays
+  // open so the next search or guest entry is ready immediately; the user closes it when done.
+  const add = async (body: Record<string, unknown>, success: string) => {
+    if (busy) return; setBusy(true); setError("");
+    try {
+      await api(`/api/trips/${trip.id}/participants`, { method: "POST", body });
+      await onSaved(); notify(success); setAddedCount((count) => count + 1);
+      guestFormRef.current?.reset();
+      if (searchInputRef.current) searchInputRef.current.value = "";
+      await loadContacts();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Kunde inte lägga till personen"); }
+    finally { setBusy(false); }
+  };
+  return <Modal open={open} onClose={onClose}><DialogHeader eyebrow="Fyll på gänget" title="Lägg till vänner" onClose={onClose} /><p className="muted">Lägg till så många ni vill – dialogen stannar öppen mellan varje. Stäng när ni är klara.{addedCount > 0 && ` ${addedCount} ${addedCount === 1 ? "person tillagd" : "personer tillagda"} hittills.`}</p><label>Sök registrerad användare<input ref={searchInputRef} type="search" placeholder="Namn eller e-post" autoComplete="off" onChange={(event) => search(event.target.value)} /></label><div className="contact-results">{heading && <p className="result-heading">{heading}</p>}{available.length ? available.map((user, index) => <button className="contact-result" key={user.id} type="button" disabled={busy} onClick={() => void add({ userId: user.id }, "Vännen lades till och sparades som kontakt")}><Avatar name={user.name} index={index} /><span><strong>{user.name}</strong><small>{user.email}</small></span><b>＋</b></button>) : <small className="muted">Ingen tillgänglig användare hittades.</small>}</div><div className="form-divider"><span>eller lägg till som gäst</span></div><form className="nested-form" ref={guestFormRef} onSubmit={(event) => { event.preventDefault(); void add(Object.fromEntries(new FormData(event.currentTarget)), "Gästen lades till"); }}><label>Namn<input name="name" placeholder="Vännens namn" maxLength={60} required /></label><label>Swish-nummer<input name="swishPhone" inputMode="tel" placeholder="070 123 45 67" /><small>Valfritt. Behövs för förifylld Swish-betalning.</small></label><p className="form-error" role="alert">{error}</p><button className="button primary wide" type="submit" disabled={busy}>{busy ? "Lägger till…" : "＋ Lägg till"}</button></form><button className="button ghost wide" type="button" onClick={onClose}>Klar</button></Modal>;
 }
 
 export function CategoryDialog({ open, categories, user, onClose, onChanged, notify }: { open: boolean; categories: Category[]; user: User; onClose: () => void; onChanged: (categories: Category[]) => void; notify: (message: string) => void }) {
