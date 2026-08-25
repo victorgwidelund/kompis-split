@@ -951,7 +951,14 @@ export async function recognizeReceipt(content: Buffer) {
   let verificationAttempt: AiAttempt | null = null;
   const accurateRetry = paddleOcrUrl ? process.env.PADDLEOCR_ACCURATE_RETRY : process.env.OLLAMA_ACCURATE_RETRY;
   if (!balancedPass(aiPass) && String(accurateRetry || "true").toLowerCase() !== "false") {
-    verificationAttempt = await recognizeWithDocumentAi(images.grayscale, true);
+    // Must be images.ai (the color image actually prepared for the vision model, wrapped correctly as
+    // real JPEG bytes), not images.grayscale (desaturated PNG prepared for Tesseract's own pass below,
+    // and mislabeled as image/jpeg if sent here regardless). The verification pass exists to re-ask the
+    // *same* well-prepared image with a different seed (see the seed: verification ? ... in
+    // paddleOcrReceiptRequest/ollamaReceiptRequest) as a self-consistency check -- sending it a
+    // materially different, worse-suited image instead defeats that, and a bad second answer can still
+    // win combineReceiptPasses()'s scoring and overwrite an otherwise-good first read.
+    verificationAttempt = await recognizeWithDocumentAi(images.ai, true);
     if (verificationAttempt.pass) aiPasses.push(verificationAttempt.pass);
   }
   const combined = combineReceiptPasses([...aiPasses, localPass]);
