@@ -105,6 +105,23 @@ OCR-tolerant `a` variant, for that one word.
   `pizzeria` (a clear, common, generic win) but stopped there — endless keyword lists don't generalize
   and the brief explicitly warns against hardcoding names; the position/street-suffix/comma/capped-letter
   signals already do the real work and apply to any business name, not just enumerated ones.
+- **(v1.24.3) Extending image rectification beyond Tesseract's last-resort fallback pass.** Real
+  production report (a user's own photo) plus corpus analysis found rectification succeeding on only
+  30/80 receipts, and 0/16 pathological-tier ones specifically — its own gates (Otsu threshold ≤205,
+  ≥55% of rows must show a strong bright/dark split) were rejecting exactly the low-frame-fill,
+  rotated photos it exists to help. Loosening those gates (≤245, ≥30%, evidence-based from the actual
+  per-image values across the corpus) raised success to 57/80 and 21/26 among receipts already flagged
+  as needing review — but wiring the rectified image into the AI vision-model image and Tesseract's
+  *primary* pass (not just the last-resort binary fallback, its original scope) measurably regressed
+  the benchmark: exact reconciliation 51.2%→41.3%, needing review 39→47/80, on both dev and holdout.
+  Isolated into two experiments to find the cause: threshold-loosening alone (old wiring) was roughly
+  neutral; wiring-extension alone (old strict thresholds, same 30 receipts as before) was *also* worse
+  (51.2%→45.0%) — confirming it's the technique, not the threshold. The per-row independent stretch
+  has no geometric consistency between adjacent rows, which is fine for a coarse last-resort crop but
+  distorts character shapes enough to cost more than the de-skew gains once it's not confined to a
+  rarely-hit fallback. Fully reverted, nothing shipped. A real corner-detection + single consistent
+  perspective transform (not independent per-row stretching) would avoid this specific failure mode,
+  but is a materially bigger undertaking than tuning the existing heuristic.
 
 ## Results
 

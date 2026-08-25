@@ -468,6 +468,55 @@ test("the winning pass's title is trusted instead of re-scoring every pass's nam
   assert.equal(combined.suggestion.title, "Strandbryggan");
 });
 
+test("a cleaner pass with fewer items beats a noisier pass that padded its item count", () => {
+  // Real production pattern (fastfood_difficult_dev1 in the OCR benchmark corpus, traced from an actual
+  // Tesseract double-pass run): the first pass (grayscale, confidence 80) read the receipt cleanly
+  // except for one digit lost to a 1/l OCR confusion. The second pass (binary fallback, confidence 64)
+  // additionally split one real item into two fragments and turned a garbled "Moms 12%" line into a
+  // phantom item -- two extra "items" that are pure OCR noise, not real purchases. receiptPassScore()
+  // used to weight raw item count so heavily (10,000 per item, no cap) that the noisier 7-item pass
+  // always beat the cleaner 5-item one regardless of confidence, even though the "extra" items were
+  // exactly the ones a human would immediately recognize as garbage. Item count above 3 no longer
+  // buys additional score, so a real confidence/coverage difference can decide it instead.
+  const cleanerPass = {
+    text: "", confidence: 80,
+    suggestion: {
+      title: "Burger Bar", amount: "463.35", expenseDate: "2025-04-29", category: "food",
+      items: [
+        { name: "Meny 1 Cheeseburgare", quantity: 1, amount: "106.34" },
+        { name: "Extra bacon", quantity: 1, amount: "18.47" },
+        { name: "Milkshake", quantity: 1, amount: "57.64" },
+        { name: "Pommes frites", quantity: 4, amount: "153.04" },
+        { name: "Meny 2 Dubbelburgare", quantity: 1, amount: "27.86" },
+      ],
+    },
+  };
+  const noisierPass = {
+    text: "", confidence: 64,
+    suggestion: {
+      title: "Burger Bar", amount: "463.35", expenseDate: "2025-04-29", category: "food",
+      items: [
+        { name: "ny 1 Cheeseburga", quantity: 1, amount: "106.34" },
+        { name: "Extra bacon", quantity: 1, amount: "18.47" },
+        { name: "Milkshake", quantity: 1, amount: "57.64" },
+        { name: "Pommes frites", quantity: 4, amount: "38.26" },
+        { name: "Meny 2 Dubbelbur", quantity: 1, amount: "153.04" },
+        { name: "garel", quantity: 1, amount: "27.86" },
+        { name: "Peer ere eeenanssos nn", quantity: 1, amount: "49.64" },
+      ],
+    },
+  };
+  const combined = combineReceiptPasses([cleanerPass, noisierPass]);
+  const pommesFrites = combined.suggestion.items.find((item) => item.name === "Pommes frites");
+  assert.equal(pommesFrites?.amount, "153.04", "should keep the cleaner pass's correct line total, not the noisier pass's mismatched one");
+  // Not asserted here: the merge loop can still pull in an unmatched item from the losing pass (e.g.
+  // "Peer ere eeenanssos nn" from a garbled Moms line) if its amount happens to arithmetically fit the
+  // remaining gap to the total, regardless of whether the name looks like real content. That's a real,
+  // separate gap in the merge loop itself, not the pass-selection scoring this test targets -- the
+  // benchmark's own falseMetadataItemsTotal stayed at 0 across all 80 corpus receipts both before and
+  // after this fix, so it isn't a proven common failure yet, just a risk this fixture happens to expose.
+});
+
 test("structured vision output keeps row totals, quantities and exact receipt total", () => {
   const ai = parseOllamaReceipt({
     merchant: "Restaurangen", date: "", total: 2400,
