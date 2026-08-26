@@ -329,6 +329,36 @@ test("missing OCR decimal separators are repaired without treating card IDs as p
   ]);
 });
 
+test("ambiguous OCR digit-one glyphs are repaired only when receipt arithmetic proves the reading", () => {
+  const shortSwedishName = parseReceiptText(`
+    KVÄLLSBAREN
+    ö1 84,31
+    IPA 96,89
+    TOTAL 181,20
+  `);
+  assert.deepEqual(shortSwedishName.items, [
+    { name: "öl", quantity: 1, amount: "84.31" },
+    { name: "IPA", quantity: 1, amount: "96.89" },
+  ]);
+
+  const fusedLeadingPriceDigit = parseReceiptText(`
+    BURGERBAREN
+    Extra bacon 18,47
+    Meny 2 Dubbelburgarel27,86
+    TOTAL 146,33
+  `);
+  assert.deepEqual(fusedLeadingPriceDigit.items, [
+    { name: "Extra bacon", quantity: 1, amount: "18.47" },
+    { name: "Meny 2 Dubbelburgare", quantity: 1, amount: "127.86" },
+  ]);
+
+  const legitimateCompactName = parseReceiptText("Öl27,86\nTOTAL 27,86");
+  assert.deepEqual(legitimateCompactName.items, [{ name: "Öl", quantity: 1, amount: "27.86" }]);
+
+  const discounted = parseReceiptText("Ö1 84,31\nRabatt -5,00\nTOTAL 79,31");
+  assert.deepEqual(discounted.items, [{ name: "Öl", quantity: 1, amount: "84.31" }]);
+});
+
 test("integer SEK totals, preferred order dates and unit prices repair a low-resolution restaurant receipt", () => {
   const first = parseReceiptText(`
     GÄSTNOTA
