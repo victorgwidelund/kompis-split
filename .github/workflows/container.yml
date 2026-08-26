@@ -45,14 +45,28 @@ jobs:
         run: docker build -f receipt-inference/Dockerfile -t kompis-split-receipt-inference:test .
       - name: Smoke-test receipt inference without Internet access
         run: |
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              docker logs receipt-inference-test || true
+            fi
+            docker rm --force receipt-inference-test >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup EXIT
           docker run --detach --name receipt-inference-test --network none kompis-split-receipt-inference:test
           docker cp tests/ocr-benchmark/corpus/dev/grocery_clean_dev1.jpg receipt-inference-test:/tmp/receipt.jpg
+          ready=false
           for attempt in $(seq 1 30); do
-            docker exec receipt-inference-test python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)" && break
+            if docker exec receipt-inference-test python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)"; then
+              ready=true
+              break
+            fi
+            [ "$(docker inspect --format '{{.State.Running}}' receipt-inference-test)" = true ]
             sleep 1
           done
+          [ "$ready" = true ]
           docker exec receipt-inference-test python -c "import pathlib,urllib.request,json; data=pathlib.Path('/tmp/receipt.jpg').read_bytes(); request=urllib.request.Request('http://127.0.0.1:8080/v1/ocr',data=data,headers={'Content-Type':'application/octet-stream'}); result=json.load(urllib.request.urlopen(request,timeout=20)); assert result['engine'].startswith('rapidocr-3.9.2/'); assert len(result['lines']) > 0"
-          docker rm --force receipt-inference-test
       - name: Validate Docker Compose
         env:
           APP_PASSWORD: compose-validation-password

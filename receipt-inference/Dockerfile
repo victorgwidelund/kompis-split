@@ -10,6 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OPENBLAS_NUM_THREADS=4
 
 WORKDIR /service
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 COPY receipt-inference/requirements.txt ./requirements.txt
 RUN python -m pip install --no-cache-dir --no-deps --requirement requirements.txt \
     && python -c "from pathlib import Path; import rapidocr; root=Path(rapidocr.__file__).resolve().parent/'models'; keep={'PP-OCRv6_det_small.onnx','latin_PP-OCRv5_rec_mobile.onnx','ch_ppocr_mobile_v2.0_cls_mobile.onnx'}; [path.unlink() for path in root.glob('*.onnx') if path.name not in keep]" \
