@@ -1,6 +1,6 @@
 {
   "name": "kompis-split",
-  "version": "1.24.3",
+  "version": "1.25.0",
   "private": true,
   "packageManager": "pnpm@11.16.0",
   "type": "module",
@@ -19,6 +19,9 @@
     "lint": "eslint src frontend/src frontend/vite.config.ts",
     "test": "pnpm build && node --test tests/*.test.mjs && vitest run --config frontend/vitest.config.ts",
     "benchmark:ocr:corpus": "node tests/ocr-benchmark/generator/generate-corpus.mjs",
+    "benchmark:ocr:corpus-v2": "node tests/ocr-benchmark/generator-v2/generate.mjs",
+    "benchmark:ocr:sealed": "node tests/ocr-benchmark/run-sealed.mjs",
+    "benchmark:ocr:dev-v2": "node tests/ocr-benchmark/run-v2-dev.mjs",
     "benchmark:ocr": "pnpm build:server && node tests/ocr-benchmark/run-benchmark.mjs"
   },
   "dependencies": {

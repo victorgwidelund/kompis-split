@@ -5,18 +5,14 @@
 //                   Fast (milliseconds/fixture), fully deterministic, no image processing or GPU --
 //                   this is what CI runs (see the "fast" npm script) and isolates pure PARSER accuracy
 //                   from OCR-engine accuracy.
-//   --mode=image   Runs the real image pipeline (prepareReceiptImages + recognizeReceipt) against the
-//                   actual JPEG fixture: real Tesseract OCR (CPU, no GPU needed) always, plus the real
-//                   PaddleOCR-VL vision model IF PADDLEOCR_URL is set and reachable (e.g. run on the
-//                   Unraid GTX 1080 Ti box) -- otherwise it degrades to the same Tesseract-only path
-//                   production itself falls back to, and the report says so explicitly rather than
-//                   pretending the vision model ran.
+//   --mode=image   Runs the real image pipeline against each JPEG. The internal RapidOCR service is
+//                   preferred; bundled Tesseract is the explicit outage fallback.
 //
 // --mode=both (default) runs both and reports them separately -- they are not comparable numbers and
 // must never be merged into one score.
 import { readFile, readdir, mkdir, writeFile } from "node:fs/promises";
-import { join, dirname, basename } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, dirname, basename, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseReceiptText, recognizeReceipt, closeReceiptOcr } from "../../dist/receipt-ocr.js";
 import { scoreFixture, aggregate, groupBy } from "./scoring.mjs";
 
@@ -24,11 +20,15 @@ const here = dirname(fileURLToPath(import.meta.url));
 const corpusRoot = join(here, "corpus");
 const reportsRoot = join(here, "reports");
 
-function parseArgs(argv) {
-  const args = { mode: "both", split: "all", verbose: false, limit: Infinity, category: null, difficulty: null, label: null, compare: null };
+const publicSplits = new Set(["dev", "legacy", "all-public"]);
+const modes = new Set(["parser", "image", "both"]);
+
+export function parseArgs(argv) {
+  const args = { mode: "both", split: "dev", detailed: false, limit: Infinity, category: null, difficulty: null, label: null, compare: null };
   for (const raw of argv) {
+    if (!raw.startsWith("--")) throw new Error(`Unexpected argument: ${raw}`);
     const [key, value] = raw.replace(/^--/, "").split("=");
-    if (key === "verbose") args.verbose = true;
+    if (key === "verbose" || key === "detailed") args.detailed = true;
     else if (key === "mode") args.mode = value;
     else if (key === "split") args.split = value;
     else if (key === "limit") args.limit = Number(value);
@@ -36,23 +36,27 @@ function parseArgs(argv) {
     else if (key === "difficulty") args.difficulty = value;
     else if (key === "label") args.label = value;
     else if (key === "compare") args.compare = value;
+    else throw new Error(`Unknown option: --${key}`);
   }
+  if (!modes.has(args.mode)) throw new Error(`Invalid --mode=${args.mode}. Expected parser, image, or both.`);
+  if (!publicSplits.has(args.split)) throw new Error(`Invalid --split=${args.split}. Expected dev, legacy, or all-public.`);
+  if (Number.isNaN(args.limit) || args.limit < 1) throw new Error("--limit must be a positive number.");
   return args;
 }
 
 async function loadCorpus(splitFilter) {
-  const splits = splitFilter === "all" ? ["dev", "holdout"] : [splitFilter];
+  const splits = splitFilter === "all-public" ? ["dev", "legacy"] : [splitFilter];
   const fixtures = [];
   for (const split of splits) {
-    const dir = join(corpusRoot, split);
+    const dir = join(corpusRoot, split === "legacy" ? "legacy_regression" : split);
     let files;
     try { files = await readdir(dir); } catch { continue; }
-    for (const file of files.filter((name) => name.endsWith(".json"))) {
+    for (const file of files.filter((name) => name.endsWith(".json")).sort((left, right) => left.localeCompare(right, "en"))) {
       const groundTruth = JSON.parse(await readFile(join(dir, file), "utf8"));
       fixtures.push({ groundTruth, imagePath: join(dir, file.replace(/\.json$/, ".jpg")) });
     }
   }
-  return fixtures;
+  return fixtures.sort((left, right) => left.groundTruth.id.localeCompare(right.groundTruth.id, "en"));
 }
 
 async function runParserMode(fixtures) {
@@ -65,7 +69,7 @@ async function runParserMode(fixtures) {
   return scores;
 }
 
-async function runImageMode(fixtures, verbose) {
+async function runImageMode(fixtures, detailed) {
   const scores = [];
   const sources = new Map();
   for (const { groundTruth, imagePath } of fixtures) {
@@ -75,7 +79,7 @@ async function runImageMode(fixtures, verbose) {
     const elapsed = performance.now() - started;
     sources.set(result.source, (sources.get(result.source) || 0) + 1);
     scores.push(scoreFixture(groundTruth, result.suggestion, elapsed));
-    if (verbose) console.log(`  ${groundTruth.id}: source=${result.source} needsReview=${result.needsReview} items=${result.suggestion.items.length}/${groundTruth.items.length}`);
+    if (detailed) console.log(`  ${groundTruth.id}: source=${result.source} needsReview=${result.needsReview} items=${result.suggestion.items.length}/${groundTruth.items.length}`);
   }
   await closeReceiptOcr();
   return { scores, sources };
@@ -133,31 +137,31 @@ async function main() {
   if (Number.isFinite(args.limit)) fixtures = fixtures.slice(0, args.limit);
   if (!fixtures.length) { console.error("No fixtures matched. Run `pnpm benchmark:ocr:corpus` first."); process.exitCode = 1; return; }
 
-  console.log(`Kompis Split OCR benchmark -- ${fixtures.length} fixture(s), mode=${args.mode}`);
+  console.log(`Kompis Split OCR benchmark -- ${fixtures.length} fixture(s), mode=${args.mode}, split=${args.split}${args.detailed ? ", detailed" : ""}`);
   const report = { generatedAt: new Date().toISOString(), label: args.label, fixtureCount: fixtures.length, args };
 
   if (args.mode === "parser" || args.mode === "both") {
     const parserScores = await runParserMode(fixtures);
-    report.parser = { scores: parserScores, overall: aggregate(parserScores), dev: aggregate(parserScores.filter((s) => s.split === "dev")), holdout: aggregate(parserScores.filter((s) => s.split === "holdout")) };
+    report.parser = { ...(args.detailed ? { scores: parserScores } : {}), overall: aggregate(parserScores), dev: aggregate(parserScores.filter((s) => s.split === "dev")), legacy: aggregate(parserScores.filter((s) => s.split === "legacy")) };
     console.log("\n=== Parser-only mode (deterministic, no OCR/GPU) ===");
     printSummary("Overall", report.parser.overall);
     printSummary("Dev", report.parser.dev);
-    printSummary("Holdout", report.parser.holdout);
-    if (args.verbose) { printBreakdown(parserScores, "category", "category"); printBreakdown(parserScores, "difficulty", "difficulty"); printFailures(parserScores); }
+    printSummary("Legacy regression", report.parser.legacy);
+    if (args.detailed) { printBreakdown(parserScores, "category", "category"); printBreakdown(parserScores, "difficulty", "difficulty"); printFailures(parserScores); }
   }
 
   if (args.mode === "image" || args.mode === "both") {
-    console.log("\n=== Real image pipeline mode (Tesseract always; PaddleOCR-VL only if PADDLEOCR_URL is reachable) ===");
-    const { scores: imageScores, sources } = await runImageMode(fixtures, args.verbose);
-    report.image = { scores: imageScores, overall: aggregate(imageScores), dev: aggregate(imageScores.filter((s) => s.split === "dev")), holdout: aggregate(imageScores.filter((s) => s.split === "holdout")), sources: Object.fromEntries(sources) };
+    console.log("\n=== Real image pipeline mode (internal RapidOCR service, bundled Tesseract fallback) ===");
+    const { scores: imageScores, sources } = await runImageMode(fixtures, args.detailed);
+    report.image = { ...(args.detailed ? { scores: imageScores } : {}), overall: aggregate(imageScores), dev: aggregate(imageScores.filter((s) => s.split === "dev")), legacy: aggregate(imageScores.filter((s) => s.split === "legacy")), sources: Object.fromEntries(sources) };
     console.log(`Sources used: ${JSON.stringify(Object.fromEntries(sources))}`);
-    if (!sources.has("paddleocr+tesseract") && !sources.has("ollama+tesseract")) {
-      console.log("NOTE: no vision-model backend was reachable (PADDLEOCR_URL/OLLAMA_URL unset or unreachable) -- these numbers are Tesseract+parser only, not the full production pipeline. Run on the Unraid/GTX 1080 Ti box for the full-pipeline benchmark.");
+    if (!sources.has("rapidocr")) {
+      console.log("NOTE: RECEIPT_INFERENCE_URL was not reachable; these numbers measure only the bundled Tesseract outage fallback.");
     }
     printSummary("Overall", report.image.overall);
     printSummary("Dev", report.image.dev);
-    printSummary("Holdout", report.image.holdout);
-    if (args.verbose) { printBreakdown(imageScores, "category", "category"); printBreakdown(imageScores, "difficulty", "difficulty"); printFailures(imageScores); }
+    printSummary("Legacy regression", report.image.legacy);
+    if (args.detailed) { printBreakdown(imageScores, "category", "category"); printBreakdown(imageScores, "difficulty", "difficulty"); printFailures(imageScores); }
   }
 
   await mkdir(reportsRoot, { recursive: true });
@@ -183,4 +187,6 @@ async function main() {
   }
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1; });
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
+}

@@ -8,6 +8,8 @@ data/
 node_modules/
 dist/
 frontend/dist/
+__pycache__/
+*.py[cod]
 .compose-validator/
 .DS_Store
 tests/ocr-benchmark/reports/

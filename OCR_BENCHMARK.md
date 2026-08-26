@@ -1,7 +1,14 @@
 # OCR accuracy benchmark — experiment log
 
+> 2026-08-26: Quick Scan was re-benchmarked and redesigned around a persistent CPU RapidOCR/ONNX
+> service. The old 32-image "holdout" is now correctly classified as inspected legacy regression data.
+> A new external sealed 48-image final corpus was evaluated aggregate-only once per candidate. See
+> `QUICK_SCAN_ARCHITECTURE.md` for the architecture comparison, final tables, runtime resources,
+> offline analysis and remaining weaknesses. Machine-readable aggregate evidence is committed at
+> `tests/ocr-benchmark/results/quick-scan-2026-08-26.json`.
+
 Date: 2026-08-17 · Version: 1.22.0 · Corpus: `tests/ocr-benchmark/corpus/` (80 synthetic Swedish receipts,
-48 dev / 32 holdout, see `tests/ocr-benchmark/README.md` and `SOURCES.md`)
+48 dev / 32 public legacy-regression fixtures, see `tests/ocr-benchmark/README.md` and `SOURCES.md`)
 
 ## Method
 
@@ -113,7 +120,7 @@ OCR-tolerant `a` variant, for that one word.
   per-image values across the corpus) raised success to 57/80 and 21/26 among receipts already flagged
   as needing review — but wiring the rectified image into the AI vision-model image and Tesseract's
   *primary* pass (not just the last-resort binary fallback, its original scope) measurably regressed
-  the benchmark: exact reconciliation 51.2%→41.3%, needing review 39→47/80, on both dev and holdout.
+  the benchmark: exact reconciliation 51.2%→41.3%, needing review 39→47/80, on both dev and legacy.
   Isolated into two experiments to find the cause: threshold-loosening alone (old wiring) was roughly
   neutral; wiring-extension alone (old strict thresholds, same 30 receipts as before) was *also* worse
   (51.2%→45.0%) — confirming it's the technique, not the threshold. The per-row independent stretch
@@ -145,9 +152,9 @@ app's existing, tested behavior (README: *"Skillnaden mellan kvittots total och 
 tydligt som ej fördelad"*). A separate metric that accounts for known discounts (`reconciledAfterKnownAdjustments`
 in `scoring.mjs`) confirms **100.0%** — the extraction itself is exact; the review flag is intentional.
 
-**Dev vs. holdout, after fixes** (both n as noted): merchant/date/total/item-F1/price/quantity are all
-100.0% on **both** splits independently. Exact reconciliation: dev 97.9% (1/48 review), holdout 93.8%
-(2/32 review) — both gaps are the same discount case, not a generalization gap. Dev and holdout improving
+**Dev vs. legacy regression, after fixes** (both n as noted): merchant/date/total/item-F1/price/quantity are all
+100.0% on **both** splits independently. Exact reconciliation: dev 97.9% (1/48 review), legacy 93.8%
+(2/32 review) — both gaps are the same discount case, not a generalization gap. Dev and legacy improving
 by comparable amounts on every metric is the actual evidence against overfitting here, since every fix
 was a structural rule change, not a per-fixture patch (see `tests/ocr-benchmark/README.md`).
 
@@ -169,12 +176,12 @@ bug), but weren't isolated with a dedicated before/after image-mode run given th
 parser-only before/after already proves those specific fixes in isolation with zero OCR-engine noise, and
 every parser fix necessarily also applies to real OCR output since it's the same code path.
 
-**Full corpus, current state (n=80, dev+holdout combined):**
+**Full public corpus, current state (n=80, dev+legacy combined):**
 
 ```
-Merchant accuracy:       82.5%   (dev 83.3% / holdout 81.3%)
-Date accuracy:           73.8%   (dev 72.9% / holdout 75.0%)
-Total accuracy:          81.3%   (dev 83.3% / holdout 78.1%)
+Merchant accuracy:       82.5%   (dev 83.3% / legacy 81.3%)
+Date accuracy:           73.8%   (dev 72.9% / legacy 75.0%)
+Total accuracy:          81.3%   (dev 83.3% / legacy 78.1%)
 Item precision/recall/F1: 78.9% / 74.6% / 76.7%
 Price accuracy:          67.6%
 Quantity accuracy:       73.1%
@@ -184,7 +191,7 @@ Receipts needing review: 39/80
 Median / P90 / P95 time: 871 / 1333 / 1429 ms
 ```
 
-Dev and holdout track each other reasonably closely (no metric differs by more than ~5pp), which is what
+Dev and legacy track each other reasonably closely (no metric differs by more than ~5pp), which is what
 you'd expect from a fix set that's structural rather than tuned to specific fixtures.
 
 **Reading these numbers correctly**: this is Tesseract-CPU-only performance — the exact fallback path
@@ -220,7 +227,7 @@ the app's own already-configured `PADDLEOCR_URL`. The CLI path below still works
 
 ```sh
 # On the Unraid host, with the paddleocr Compose service already running:
-PADDLEOCR_URL=http://localhost:8080 pnpm benchmark:ocr -- --mode=image --split=all --verbose
+PADDLEOCR_URL=http://localhost:8080 pnpm benchmark:ocr -- --mode=image --split=all-public --detailed
 ```
 
 (see `tests/ocr-benchmark/README.md` for the exact networking caveat — `paddleocr` has no published host

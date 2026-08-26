@@ -4,25 +4,42 @@ import { createWorker, OEM, PSM, type Worker } from "tesseract.js";
 
 const require = createRequire(import.meta.url);
 const swedishLanguage = require("@tesseract.js-data/swe") as { langPath: string; gzip: boolean };
+function isLocalServiceHost(hostname: string) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "::1" || !host.includes(".")) return true;
+  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return true;
+  const private172 = /^172\.(\d{1,2})\./.exec(host);
+  if (private172 && Number(private172[1]) >= 16 && Number(private172[1]) <= 31) return true;
+  return /^(?:fc|fd|fe8|fe9|fea|feb)[0-9a-f]*:/i.test(host);
+}
+function internalHttpUrl(value: string, allowedHosts: Set<string>) {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (parsed.protocol !== "http:" || !isLocalServiceHost(hostname) || !allowedHosts.has(hostname) || parsed.username || parsed.password) return null;
+    return parsed.href.replace(/\/$/, "");
+  } catch { return null; }
+}
+const receiptInferenceUrl = (() => {
+  const value = String(process.env.RECEIPT_INFERENCE_URL || "").trim();
+  const allowedHosts = new Set(String(process.env.RECEIPT_INFERENCE_ALLOWED_HOSTS || "receipt-inference,localhost,127.0.0.1,::1")
+    .split(",").map((host) => host.trim().toLowerCase()).filter(Boolean));
+  return internalHttpUrl(value, allowedHosts);
+})();
+const legacyLocalModelHosts = new Set(String(process.env.LEGACY_RECEIPT_MODEL_ALLOWED_HOSTS || "paddleocr,ollama,localhost,127.0.0.1,::1")
+  .split(",").map((host) => host.trim().toLowerCase()).filter(Boolean));
 const ollamaModel = String(process.env.OLLAMA_MODEL || "qwen3-vl:4b-instruct-q4_K_M").trim();
 const ollamaMaxTokens = Math.min(1_536, Math.max(256, Number(process.env.OLLAMA_OCR_MAX_TOKENS) || 768));
 const ollamaUrl = (() => {
   const value = String(process.env.OLLAMA_URL || "").trim();
-  if (!value) return null;
-  try {
-    const parsed = new URL(value);
-    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href.replace(/\/$/, "") : null;
-  } catch { return null; }
+  return internalHttpUrl(value, legacyLocalModelHosts);
 })();
 const paddleOcrModel = String(process.env.PADDLEOCR_MODEL || "PaddleOCR-VL-1.6").trim();
 const paddleOcrMaxTokens = Math.min(1_024, Math.max(256, Number(process.env.PADDLEOCR_MAX_TOKENS) || 512));
 const paddleOcrUrl = (() => {
   const value = String(process.env.PADDLEOCR_URL || "").trim();
-  if (!value) return null;
-  try {
-    const parsed = new URL(value);
-    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href.replace(/\/$/, "") : null;
-  } catch { return null; }
+  return internalHttpUrl(value, legacyLocalModelHosts);
 })();
 
 export type ReceiptSuggestion = {
@@ -56,7 +73,7 @@ const excludedTotalWords = /\bmoms\b|\bvat\b|\bväxel\b|\bchange\b|\brabatt\b|\b
 const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b|\btip\b|\bdricks\b|\bnetto(?:belopp)?\b|\bnet\s+amount\b|\bserveringsavgift\b|\bservice\b|\btelefon(?:nummer)?\b|\btel\b|\btelephone\b|\bphone\b/i;
 // Discounts/coupons reduce the total rather than describing something purchased; letting them
 // become an "item" both mislabels them and throws off the exact-total reconciliation.
-const nonItemAdjustmentWords = /\brabatt\b|\bkupong\b|\bcoupon\b/i;
+const nonItemAdjustmentWords = /rabatt|kupong|coupon|kampanjpris|medlemspris/i;
 
 // Terminal/register/POS identifiers (e.g. "XCL AT-150-E-18E #1") are all-caps codes with a dash — a
 // shape no real Swedish dish name has — so they must never become an item even when a nearby
@@ -73,6 +90,22 @@ function looksLikeSystemCode(line: string) {
 }
 
 type ReceiptPass = { text: string; confidence: number; suggestion: ReceiptSuggestion };
+
+export type ReceiptOcrEvidenceLine = {
+  box: [[number, number], [number, number], [number, number], [number, number]];
+  text: string;
+  confidence: number;
+};
+
+type ReceiptInferenceResponse = {
+  engine: string;
+  width: number;
+  height: number;
+  inferenceMs: number;
+  queueMs: number;
+  totalMs: number;
+  lines: ReceiptOcrEvidenceLine[];
+};
 
 function normalizeNumericGlyphs(line: string, previousLine?: string) {
   let result = line
@@ -128,6 +161,8 @@ function reuniteWrappedWords(lines: string[]) {
 
 function normalizedLines(text: string) {
   const cleaned = text.split(/\r?\n/).map((line) => line
+    .replace(/[×✕]/g, "x")
+    .replace(/(\p{L})(\d{1,2})\s*st\b/giu, "$1 $2 st")
     .replace(/\s*[|¦]\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim()).filter(Boolean);
@@ -377,7 +412,10 @@ function receiptItems(lines: string[]) {
     }
     const amounts = amountCandidates(line);
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
-    const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s+|\s*\*\s+)/;
+    // Swedish receipts commonly fuse the multiplier to the product ("2xNachos" or
+    // "3*Pant burk"). Requiring whitespace after x/* silently turned those into a
+    // quantity-one item and lost the printed unit price.
+    const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s*|\s*\*\s*)/;
     const quantityMatch = line.match(quantityPattern);
     if (!quantityMatch && amounts.length > 1 && /^\s*\d+[,.]\d{2}\b/.test(line)) continue;
     const quantity = Math.min(20, Math.max(1, Number(quantityMatch?.[1] || 1)));
@@ -431,6 +469,196 @@ export function parseReceiptText(text: string, now = new Date()): ReceiptSuggest
     category: suggestedCategory(text),
     items: receiptItems(lines),
   };
+}
+
+export type ReceiptItemUnit = "st" | "kg" | "g" | "l" | "ml" | "cl" | "m" | "other";
+export type ReceiptEvidence = { lineIndexes: number[]; rawLines: string[] };
+export type StructuredReceiptItem = {
+  rawName: string | null;
+  normalizedName: string | null;
+  kind: "product" | "pant" | "fee" | "discount" | "unknown";
+  quantity: number | null;
+  unit: ReceiptItemUnit | null;
+  unitPriceOre: number | null;
+  lineTotalOre: number | null;
+  weightGrams: number | null;
+  multipack: { count: number | null; unitSize: number | null; unit: ReceiptItemUnit | null } | null;
+  discountOre: number | null;
+  pantOre: number | null;
+  confidence: number;
+  evidence: ReceiptEvidence;
+};
+export type StructuredReceipt = {
+  merchant: string | null;
+  date: string | null;
+  time: string | null;
+  receiptNumber: string | null;
+  currency: string | null;
+  items: StructuredReceiptItem[];
+  subtotalOre: number | null;
+  discounts: Array<{ label: string | null; amountOre: number | null; evidence: ReceiptEvidence }>;
+  vat: Array<{ rateBasisPoints: number | null; netOre: number | null; vatOre: number | null; grossOre: number | null; evidence: ReceiptEvidence }>;
+  totalOre: number | null;
+  pantTotalOre: number | null;
+  payments: Array<{ method: string | null; amountOre: number | null; evidence: ReceiptEvidence }>;
+};
+export type ReceiptValidation = {
+  confidence: number;
+  needsReview: boolean;
+  arithmeticDeltaOre: number | null;
+  signals: Array<{ code: string; severity: "info" | "warning" | "error"; value?: number | string | null }>;
+};
+
+function explicitMoneyValuesOre(line: string) {
+  return [...line.matchAll(/(?<!\d)([-−]?\s*(?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2})(?!\d)/g)]
+    .flatMap((match) => {
+      const negative = /^[-−]/.test(match[1]!.trim());
+      const value = parseMoney(match[1]!.replace(/^[-−]\s*/, ""));
+      return value === null ? [] : [Math.round(value * 100) * (negative ? -1 : 1)];
+    });
+}
+
+function evidenceFor(lines: string[], index: number): ReceiptEvidence {
+  return { lineIndexes: [index], rawLines: [lines[index]!] };
+}
+
+function findEvidenceLine(lines: string[], item: ReceiptSuggestion["items"][number]) {
+  const normalizedName = normalizedItemName(item.name);
+  const amountOre = itemCents(item);
+  let best = -1;
+  let bestScore = -1;
+  lines.forEach((line, index) => {
+    const values = explicitMoneyValuesOre(line).map(Math.abs);
+    const lineName = normalizedItemName(line.replace(/[-−]?\s*\d[\d .]*[,.]\d{2}/g, " "));
+    const score = (values.includes(amountOre) ? 3 : 0) + (lineName.includes(normalizedName) || normalizedName.includes(lineName) ? 2 : 0);
+    if (score > bestScore) { best = index; bestScore = score; }
+  });
+  return bestScore >= 2 ? best : -1;
+}
+
+function firstMatchingLineAmount(lines: string[], pattern: RegExp) {
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!pattern.test(lines[index]!)) continue;
+    const amounts = explicitMoneyValuesOre(lines[index]!);
+    if (amounts.length) return { amountOre: Math.abs(amounts.at(-1)!), index };
+    const nextAmounts = explicitMoneyValuesOre(lines[index + 1] ?? "");
+    if (nextAmounts.length) return { amountOre: Math.abs(nextAmounts[0]!), index: index + 1 };
+  }
+  return null;
+}
+
+/** Receipt-specific semantic representation. Missing fields stay null and every extracted detail
+ * retains the source line that justified it. All monetary values are integer öre. */
+export function parseStructuredReceipt(text: string, ocrConfidence = 0, now = new Date()): { receipt: StructuredReceipt; validation: ReceiptValidation } {
+  const lines = normalizedLines(text);
+  const rawLines = text.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const suggestion = parseReceiptText(text, now);
+  const totalOre = amountCents(suggestion.amount);
+  const timePattern = /(?:^|\s)([01]?\d|2[0-3])[:.]([0-5]\d)(?=\s|$)/;
+  const timeLines = [
+    ...rawLines.filter((line) => /\b(?:datum|date)\b|\b20\d{2}[-/.]|\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b/i.test(line)),
+    ...rawLines.filter((line) => !/\b(?:datum|date)\b|\b20\d{2}[-/.]|\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b/i.test(line)),
+  ];
+  const time = timeLines.flatMap((line) => {
+    const match = timePattern.exec(line);
+    return match ? [`${match[1]!.padStart(2, "0")}:${match[2]}`] : [];
+  })[0] ?? null;
+  const receiptNumberMatch = rawLines.map((line) => /\b(?:kvitto|receipt|verifikat)(?:\s*nr|nummer|#)?\s*[:#]?\s*([A-Z0-9-]{3,30})\b/i.exec(line)).find(Boolean);
+  const subtotal = firstMatchingLineAmount(lines, /\b(?:subtotal|delsumma|summa\s+varor)\b/i);
+  const pantTotal = firstMatchingLineAmount(lines, /\b(?:pant|returpack)\s*(?:totalt|summa)?\b/i);
+
+  const discountLines = lines.flatMap((line, index) => {
+    if (!/(?:rabatt|kupong|coupon|kampanj|medlemspris)/i.test(line)) return [];
+    const values = explicitMoneyValuesOre(line);
+    if (!values.length) return [];
+    return [{ label: line.replace(/[-−]?\s*\d[\d .]*[,.]\d{2}.*/, "").trim() || null, amountOre: Math.abs(values.at(-1)!), evidence: evidenceFor(lines, index) }];
+  });
+
+  const structuredItems: StructuredReceiptItem[] = suggestion.items.map((item) => {
+    const index = findEvidenceLine(lines, item);
+    const rawLine = index >= 0 ? lines[index]! : item.name;
+    const explicitAmounts = explicitMoneyValuesOre(rawLine).map(Math.abs);
+    const quantityUnit = /(?<!\d)(\d+(?:[,.]\d+)?)\s*(kg|g|ml|cl|l|st)\b/i.exec(rawLine);
+    const unitPriceMatch = /(?:\bx\b|\*|à)\s*((?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2})/i.exec(rawLine);
+    const multipackMatch = /\b(\d{1,2})\s*[x*]\s*(\d+(?:[,.]\d+)?)\s*(kg|g|ml|cl|l)\b/i.exec(rawLine);
+    const unit = quantityUnit?.[2]?.toLowerCase() as ReceiptItemUnit | undefined;
+    const numericQuantity = quantityUnit ? Number(quantityUnit[1]!.replace(",", ".")) : item.quantity;
+    const isWeight = unit === "kg" || unit === "g";
+    const weightGrams = isWeight && Number.isFinite(numericQuantity) ? Math.round(numericQuantity * (unit === "kg" ? 1000 : 1)) : null;
+    const kind = /\b(?:pant|returpack)\b/i.test(item.name) ? "pant" : /\b(?:serviceavgift|serveringsavgift|avgift)\b/i.test(item.name) ? "fee" : "product";
+    const lineTotalOre = itemCents(item);
+    return {
+      rawName: item.name,
+      normalizedName: item.name.normalize("NFKC").replace(/\s+/g, " ").trim(),
+      kind,
+      quantity: Number.isFinite(numericQuantity) ? numericQuantity : null,
+      unit: unit ?? (item.quantity >= 1 ? "st" : null),
+      unitPriceOre: unitPriceMatch ? Math.abs(explicitMoneyValuesOre(unitPriceMatch[1]!).at(-1) ?? 0) || null
+        : explicitAmounts.length > 1 && item.quantity > 1 ? explicitAmounts.at(-2)! : null,
+      lineTotalOre,
+      weightGrams,
+      multipack: multipackMatch ? {
+        count: Number(multipackMatch[1]),
+        unitSize: Number(multipackMatch[2]!.replace(",", ".")),
+        unit: multipackMatch[3]!.toLowerCase() as ReceiptItemUnit,
+      } : null,
+      discountOre: null,
+      pantOre: kind === "pant" ? lineTotalOre : null,
+      confidence: index >= 0 ? Math.max(0, Math.min(100, ocrConfidence)) : Math.max(0, Math.min(100, ocrConfidence - 20)),
+      evidence: index >= 0 ? evidenceFor(lines, index) : { lineIndexes: [], rawLines: [] },
+    };
+  });
+
+  const vat = lines.flatMap((line, index) => {
+    if (!/\b(?:moms|vat)\b/i.test(line)) return [];
+    const rate = /\b(\d{1,2}(?:[,.]\d+)?)\s*%/.exec(line);
+    const amounts = explicitMoneyValuesOre(line).map(Math.abs);
+    if (!rate && !amounts.length) return [];
+    return [{
+      rateBasisPoints: rate ? Math.round(Number(rate[1]!.replace(",", ".")) * 100) : null,
+      netOre: amounts.length >= 3 ? amounts.at(-3)! : null,
+      vatOre: amounts.length >= 2 ? amounts.at(-2)! : amounts.length === 1 ? amounts[0]! : null,
+      grossOre: amounts.length >= 3 ? amounts.at(-1)! : null,
+      evidence: evidenceFor(lines, index),
+    }];
+  });
+  const payments = lines.flatMap((line, index) => {
+    const method = /\b(swish|visa|mastercard|kort|kontant|cash)\b/i.exec(line)?.[1];
+    if (!method) return [];
+    const amounts = explicitMoneyValuesOre(line).map(Math.abs);
+    return [{ method: method.toLocaleLowerCase("sv-SE"), amountOre: amounts.at(-1) ?? null, evidence: evidenceFor(lines, index) }];
+  });
+  const itemSum = structuredItems.reduce((sum, item) => sum + (item.lineTotalOre ?? 0), 0);
+  const discountSum = discountLines.reduce((sum, discount) => sum + (discount.amountOre ?? 0), 0);
+  const calculatedTotal = structuredItems.length && structuredItems.every((item) => item.lineTotalOre !== null) ? itemSum - discountSum : null;
+  const arithmeticDeltaOre = calculatedTotal !== null && totalOre !== null ? calculatedTotal - totalOre : null;
+  const duplicateCount = structuredItems.length - new Set(structuredItems.map((item) => `${normalizedItemName(item.normalizedName ?? "")}|${item.quantity}|${item.lineTotalOre}`)).size;
+  const signals: ReceiptValidation["signals"] = [];
+  if (totalOre === null) signals.push({ code: "missing_total", severity: "error" });
+  if (!structuredItems.length) signals.push({ code: "missing_items", severity: "error" });
+  if (ocrConfidence < 70) signals.push({ code: "low_ocr_confidence", severity: "warning", value: ocrConfidence });
+  if (duplicateCount) signals.push({ code: "duplicate_rows", severity: "warning", value: duplicateCount });
+  if (arithmeticDeltaOre !== null && Math.abs(arithmeticDeltaOre) > 1) signals.push({ code: "total_mismatch", severity: Math.abs(arithmeticDeltaOre) > 100 ? "error" : "warning", value: arithmeticDeltaOre });
+  if (arithmeticDeltaOre !== null && Math.abs(arithmeticDeltaOre) <= 1) signals.push({ code: "arithmetic_reconciled", severity: "info", value: arithmeticDeltaOre });
+  let confidence = Math.max(0, Math.min(100, ocrConfidence));
+  if (arithmeticDeltaOre !== null && Math.abs(arithmeticDeltaOre) <= 1) confidence = Math.min(100, confidence + 5);
+  for (const signal of signals) confidence -= signal.severity === "error" ? 25 : signal.severity === "warning" ? 10 : 0;
+  confidence = Math.max(0, Math.round(confidence));
+  const receipt: StructuredReceipt = {
+    merchant: suggestion.title,
+    date: suggestion.expenseDate,
+    time,
+    receiptNumber: receiptNumberMatch?.[1] ?? null,
+    currency: /\bSEK\b|\bkr\b/i.test(text) ? "SEK" : null,
+    items: structuredItems,
+    subtotalOre: subtotal?.amountOre ?? null,
+    discounts: discountLines,
+    vat,
+    totalOre,
+    pantTotalOre: pantTotal?.amountOre ?? (structuredItems.some((item) => item.kind === "pant") ? structuredItems.reduce((sum, item) => sum + (item.pantOre ?? 0), 0) : null),
+    payments,
+  };
+  return { receipt, validation: { confidence, needsReview: signals.some((signal) => signal.severity !== "info"), arithmeticDeltaOre, signals } };
 }
 
 function amountCents(value: string | null) {
@@ -619,20 +847,139 @@ function balancedPass(pass: ReceiptPass) {
   return total !== null && pass.suggestion.items.length > 0 && itemTotal === total;
 }
 
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function geometryRows(lines: ReceiptOcrEvidenceLine[], rowFactor = 0.45) {
+  if (!lines.length) return [] as ReceiptOcrEvidenceLine[][];
+  const angles = lines.map(({ box }) => {
+    const horizontal: [number, number] = [box[1][0] - box[0][0], box[1][1] - box[0][1]];
+    const vertical: [number, number] = [box[3][0] - box[0][0], box[3][1] - box[0][1]];
+    const edge = Math.hypot(...horizontal) >= Math.hypot(...vertical) ? horizontal : vertical;
+    let angle = Math.atan2(edge[1], edge[0]);
+    while (angle >= Math.PI / 2) angle -= Math.PI;
+    while (angle < -Math.PI / 2) angle += Math.PI;
+    return angle;
+  });
+  const angle = median(angles);
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const projected = lines.map((line) => {
+    const points = line.box.map(([x, y]) => [x * cosine + y * sine, -x * sine + y * cosine]);
+    const xs = points.map(([x]) => x!);
+    const ys = points.map(([, y]) => y!);
+    return { line, x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2, height: Math.max(...ys) - Math.min(...ys) };
+  });
+  const typicalHeight = Math.max(1, median(projected.map(({ height }) => height)));
+  const groups: Array<{ y: number; height: number; lines: typeof projected }> = [];
+  for (const line of projected.sort((left, right) => left.y - right.y || left.x - right.x)) {
+    let best: typeof groups[number] | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const group of groups) {
+      const distance = Math.abs(line.y - group.y);
+      if (distance <= rowFactor * Math.max(typicalHeight, line.height, group.height) && distance < bestDistance) {
+        best = group;
+        bestDistance = distance;
+      }
+    }
+    if (!best) groups.push({ y: line.y, height: line.height, lines: [line] });
+    else {
+      best.lines.push(line);
+      best.y = best.lines.reduce((sum, entry) => sum + entry.y, 0) / best.lines.length;
+      best.height = median(best.lines.map((entry) => entry.height));
+    }
+  }
+  return groups.sort((left, right) => left.y - right.y)
+    .map((group) => group.lines.sort((left, right) => left.x - right.x).map(({ line }) => line));
+}
+
+function evidenceCandidateScore(text: string) {
+  const suggestion = parseReceiptText(text);
+  const total = amountCents(suggestion.amount);
+  const itemTotal = suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
+  const normalized = text.split("\n").map((line) => line.toLocaleLowerCase("sv-SE"));
+  const totalIndex = normalized.findIndex((line) => /\b(total|summa|att betala)\b/.test(line));
+  const paymentIndex = normalized.findIndex((line) => /\b(visa|mastercard|swish|betalt|kort|kontant)\b/.test(line));
+  let score = Math.min(suggestion.items.length, 16) * 20;
+  if (total !== null) score += 100;
+  if (total !== null && suggestion.items.length && total === itemTotal) score += 2_000;
+  if (suggestion.expenseDate) score += 80;
+  if (suggestion.title) score += 40;
+  if (totalIndex >= Math.floor(normalized.length * 0.4)) score += 120;
+  if (paymentIndex > totalIndex && totalIndex >= 0) score += 40;
+  return score;
+}
+
+/** Converts OCR boxes to reading order while considering 180°/upside-down evidence. */
+export function rapidOcrEvidenceText(lines: ReceiptOcrEvidenceLine[]) {
+  const rows = geometryRows(lines);
+  const forward = rows.map((row) => row.map((line) => line.text).join(" ")).join("\n");
+  const reverse = [...rows].reverse().map((row) => [...row].reverse().map((line) => line.text).join(" ")).join("\n");
+  return [forward, reverse].sort((left, right) => evidenceCandidateScore(right) - evidenceCandidateScore(left))[0] ?? "";
+}
+
+type ReceiptInferenceAttempt = { response: ReceiptInferenceResponse | null; status: string; durationMs: number };
+
+async function recognizeWithReceiptInference(content: Buffer, cancelled?: AbortSignal): Promise<ReceiptInferenceAttempt> {
+  const startedAt = Date.now();
+  if (!receiptInferenceUrl) return { response: null, status: "disabled", durationMs: 0 };
+  try {
+    const timeout = Math.min(60_000, Math.max(1_000, Number(process.env.RECEIPT_INFERENCE_TIMEOUT_MS) || 15_000));
+    const response = await fetch(`${receiptInferenceUrl}/v1/ocr`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "Content-Length": String(content.length) },
+      body: new Uint8Array(content),
+      signal: cancelled ? AbortSignal.any([AbortSignal.timeout(timeout), cancelled]) : AbortSignal.timeout(timeout),
+    });
+    if (!response.ok) return { response: null, status: `http_${response.status}`, durationMs: Date.now() - startedAt };
+    const payload = await response.json() as Partial<ReceiptInferenceResponse>;
+    if (!Array.isArray(payload.lines) || typeof payload.engine !== "string") {
+      return { response: null, status: "invalid_response", durationMs: Date.now() - startedAt };
+    }
+    const lines = payload.lines.filter((line): line is ReceiptOcrEvidenceLine =>
+      Boolean(line && typeof line.text === "string" && typeof line.confidence === "number" && Array.isArray(line.box) && line.box.length === 4));
+    return {
+      response: {
+        engine: payload.engine,
+        width: Number(payload.width) || 0,
+        height: Number(payload.height) || 0,
+        inferenceMs: Number(payload.inferenceMs) || 0,
+        queueMs: Number(payload.queueMs) || 0,
+        totalMs: Number(payload.totalMs) || Date.now() - startedAt,
+        lines,
+      },
+      status: "ok",
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    return { response: null, status: cancelled?.aborted ? "cancelled" : timeout ? "timeout" : "connection_error", durationMs: Date.now() - startedAt };
+  }
+}
+
+export async function receiptInferenceReady() {
+  if (!receiptInferenceUrl) return { configured: false, ready: false, status: "disabled" } as const;
+  try {
+    const response = await fetch(`${receiptInferenceUrl}/ready`, { signal: AbortSignal.timeout(1_500) });
+    return { configured: true, ready: response.ok, status: response.ok ? "ready" : `http_${response.status}` } as const;
+  } catch {
+    return { configured: true, ready: false, status: "unreachable" } as const;
+  }
+}
+
 type AiAttempt = { pass: ReceiptPass | null; status: string; durationMs: number; httpStatus?: number };
 
 function logOcr(event: Record<string, string | number | boolean | null | undefined>) {
   console.info(`[receipt-ocr] ${JSON.stringify(event)}`);
 }
 
-// Off by default: every prior version of this file has kept receipt content out of the logs on
-// purpose. Set RECEIPT_OCR_DEBUG_LOG=true (server-side only, never sent to the client) to include a
-// truncated raw-text snippet in the "ai"/"ai_verify" log lines when actively diagnosing a bad scan.
-const receiptOcrDebugLog = String(process.env.RECEIPT_OCR_DEBUG_LOG || "").toLowerCase() === "true";
-function logSnippet(text: string) {
-  if (!receiptOcrDebugLog) return undefined;
-  return text.length > 1500 ? `${text.slice(0, 1500)}…` : text;
-}
+// Never log OCR text, even under a debug flag: receipt contents may contain payment metadata and are
+// more sensitive than ordinary diagnostics. Aggregate counts/timings are sufficient for operations.
+function logSnippet(_text: string) { return undefined; }
 
 export function ollamaReceiptRequest(content: Buffer, verification = false) {
   return {
@@ -769,6 +1116,9 @@ async function recognizeWithOllama(content: Buffer, verification = false, cancel
 }
 
 function recognizeWithDocumentAi(content: Buffer, verification = false, cancelled?: AbortSignal) {
+  // The production schema-v2 path is the dedicated self-hosted OCR service. If it is configured but
+  // temporarily unavailable, degrade to bundled Tesseract without starting a second speculative model.
+  if (receiptInferenceUrl) return Promise.resolve({ pass: null, status: "replaced_by_receipt_inference", durationMs: 0 } satisfies AiAttempt);
   return paddleOcrUrl ? recognizeWithPaddleOcr(content, verification, cancelled) : recognizeWithOllama(content, verification, cancelled);
 }
 
@@ -919,6 +1269,26 @@ export async function prepareReceiptImages(content: Buffer) {
   return { ai, grayscale, binary, crop, rectified: Boolean(rectified) };
 }
 
+async function prepareEvidenceFallbackImage(content: Buffer) {
+  return sharp(content, { limitInputPixels: maxReceiptInputPixels, failOn: "error" })
+    .rotate().flatten({ background: "#ffffff" })
+    .resize({ width: 3000, height: 3000, fit: "inside", withoutEnlargement: false })
+    .grayscale().normalize({ lower: 1, upper: 99 }).sharpen({ sigma: 0.55 })
+    .jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toBuffer();
+}
+
+function interpretedEvidence(response: ReceiptInferenceResponse) {
+  const text = rapidOcrEvidenceText(response.lines);
+  const suggestion = parseReceiptText(text);
+  const confidence = response.lines.length
+    ? Math.round(response.lines.reduce((sum, line) => sum + line.confidence, 0) / response.lines.length * 100)
+    : 0;
+  const structured = parseStructuredReceipt(text, confidence);
+  const errorCount = structured.validation.signals.filter((signal) => signal.severity === "error").length;
+  const warningCount = structured.validation.signals.filter((signal) => signal.severity === "warning").length;
+  return { text, suggestion, confidence, structured, score: evidenceCandidateScore(text) + confidence * 3 - errorCount * 1_000 - warningCount * 100 };
+}
+
 async function recognizePass(worker: Worker, content: Buffer, pageMode: PSM, rotateAuto: boolean): Promise<ReceiptPass> {
   await worker.setParameters({
     tessedit_pageseg_mode: pageMode,
@@ -945,9 +1315,72 @@ async function recognizeReceiptLocally(images: Awaited<ReturnType<typeof prepare
   return job;
 }
 
-export async function recognizeReceipt(content: Buffer) {
+export async function recognizeReceipt(content: Buffer, cancelled?: AbortSignal) {
   const scanId = `${Date.now().toString(36)}-${(++nextScanId).toString(36)}`;
   const startedAt = Date.now();
+  const inferenceAttempts = [await recognizeWithReceiptInference(content, cancelled)];
+  let selectedResponse = inferenceAttempts[0]!.response;
+  let interpreted = selectedResponse ? interpretedEvidence(selectedResponse) : null;
+  let fallbackPreparationMs = 0;
+  // Disabled by default: controlled dev-v2 measurement found that the normalized second pass reduced
+  // item F1 (91.3% -> 89.9%) and raised P95 latency (~1.41s -> ~4.10s). It remains an explicit
+  // diagnostic switch, not hidden production work.
+  const retryForEvidence = receiptInferenceUrl && String(process.env.RECEIPT_NORMALIZED_FALLBACK || "false").toLowerCase() === "true" && (
+    inferenceAttempts[0]!.status === "http_422"
+    || Boolean(interpreted && (interpreted.structured.validation.needsReview || interpreted.confidence < 70 || interpreted.suggestion.items.length === 0))
+  );
+  if (retryForEvidence && !cancelled?.aborted) {
+    try {
+      const preparationStarted = performance.now();
+      const normalized = await prepareEvidenceFallbackImage(content);
+      fallbackPreparationMs = performance.now() - preparationStarted;
+      const retry = await recognizeWithReceiptInference(normalized, cancelled);
+      inferenceAttempts.push(retry);
+      if (retry.response) {
+        const retryInterpreted = interpretedEvidence(retry.response);
+        if (!interpreted || retryInterpreted.score > interpreted.score) {
+          interpreted = retryInterpreted;
+          selectedResponse = retry.response;
+        }
+      }
+    } catch { /* Original evidence or bundled Tesseract remains available. */ }
+  }
+  if (selectedResponse && interpreted) {
+    const { suggestion, confidence, structured } = interpreted;
+    const total = amountCents(suggestion.amount);
+    const itemTotal = suggestion.items.reduce((sum, item) => sum + itemCents(item), 0);
+    const needsReview = structured.validation.needsReview;
+    const successfulResponses = inferenceAttempts.flatMap((attempt) => attempt.response ? [attempt.response] : []);
+    const result = {
+      confidence,
+      suggestion,
+      receipt: structured.receipt,
+      validation: structured.validation,
+      passes: successfulResponses.length,
+      source: "rapidocr" as const,
+      cropped: false,
+      rectified: false,
+      ai: {
+        model: selectedResponse.engine,
+        status: "ok",
+        durationMs: Date.now() - startedAt,
+        used: true,
+        retried: inferenceAttempts.length > 1,
+      },
+      needsReview,
+      timings: {
+        preprocessingMs: fallbackPreparationMs + successfulResponses.reduce((sum, response) => sum + Math.max(0, response.totalMs - response.inferenceMs - response.queueMs), 0),
+        ocrMs: successfulResponses.reduce((sum, response) => sum + response.inferenceMs, 0),
+        queueMs: successfulResponses.reduce((sum, response) => sum + response.queueMs, 0),
+        parsingAndValidationMs: Math.max(0, Date.now() - startedAt - successfulResponses.reduce((sum, response) => sum + response.totalMs, 0) - fallbackPreparationMs),
+        totalMs: Date.now() - startedAt,
+      },
+    };
+    logOcr({ scanId, stage: "complete", source: result.source, ocrStatus: "ok", durationMs: result.timings.totalMs, inferenceMs: result.timings.ocrMs, queueMs: result.timings.queueMs, items: suggestion.items.length, balanced: total !== null && total === itemTotal, confidence, retried: result.ai.retried });
+    return result;
+  }
+  if (receiptInferenceUrl) logOcr({ scanId, stage: "inference", source: "rapidocr", status: inferenceAttempts.at(-1)!.status, durationMs: Date.now() - startedAt, retried: inferenceAttempts.length > 1 });
+  if (cancelled?.aborted) throw new Error("Receipt scan cancelled");
   const images = await prepareReceiptImages(content);
   const aiCancellation = new AbortController();
   const aiModel = paddleOcrUrl ? paddleOcrModel : ollamaModel;

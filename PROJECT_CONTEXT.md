@@ -1,7 +1,7 @@
 # Kompis Split – levande projektkontext
 
-Senast uppdaterad: 2026-08-25  
-Appversion: 1.24.3
+Senast uppdaterad: 2026-08-26
+Appversion: 1.25.0
 Databasschema: migration 10
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
@@ -25,7 +25,7 @@ Swish är ännu inte integrerat. Endast dokumenterade Swish-funktioner får inf�
 - Databas: PostgreSQL 17, endast tillgänglig inne i Compose-nätverket.
 - Databasåtkomst: `pg` med frågeadapter i `src/database.ts`.
 - Migreringar: ordnade, framåtriktade migreringar i `src/migrations.ts`, registrerade i `schema_migrations`.
-- OCR: lokal PaddleOCR-VL 1.6 GGUF via en intern pinnad llama.cpp CUDA-server, kompletterad med automatisk beskärning, perspektivuträtning och uppskalning i Sharp samt Tesseract.js med svensk språkmodell som oberoende reserv. AI startas parallellt men avbryts när den snabba lokala tolkningen redan summerar exakt. Matematiskt inkonsekventa AI-resultat får en adaptiv andra kontroll.
+- OCR: en persistent CPU-tjänst med RapidOCR 3.9.2/ONNX Runtime, PP-OCRv6-small-detektor och PP-OCRv5 Latin-mobile-igenkännare. Bounding boxes och OCR-säkerhet går till en svensk kvittoparser med typat nullable schema, heltalsöre, källevidens och deterministisk avstämning. Tesseract.js är lokal driftreserv; ingen VLM eller extern tjänst ingår i produktionsvägen.
 - Realtid: Server-Sent Events för snabbnota.
 - Pakethanterare: pnpm 11.16.0.
 - Produktion: Docker Compose på Unraid och publicerad image i GitHub Container Registry.
@@ -35,7 +35,9 @@ Bevara denna arkitektur om inte en större förändring uttryckligen har godkän
 
 ## Produktionstopologi och betrott proxy-läge
 
-Produktionstrafik går Cloudflare → Nginx Proxy Manager → appcontainern. Se
+Quick Scan ska nås via LAN/VPN eller DNS-only → Nginx Proxy Manager → appcontainern. En
+Cloudflare-proxied/CDN-väg tar emot requestkroppen och får därför inte användas när kvittot ska
+stanna på egen infrastruktur. Se
 `DEPLOYMENT.md` för den fullständiga topologin och de operativa flödena
 (uppdatering, backup, återställning, rollback).
 
@@ -58,7 +60,7 @@ Produktionstrafik går Cloudflare → Nginx Proxy Manager → appcontainern. Se
 - PostgreSQL: `postgres:17.10-alpine3.22`, utan publicerad host-port.
 - Beständig databas: `/mnt/user/kompis_split/postgres`.
 - Automatiska dump-backuper: `/mnt/user/kompis_split/backups`, normalt 14 dagars retention.
-- Lokala PaddleOCR-modeller: `/mnt/user/kompis_split/paddleocr`; llama.cpp-tjänsten har ingen publicerad host-port och använder GTX 1080 Ti via Nvidia-runtime.
+- Lokal inference: `ghcr.io/victorgwidelund/kompis-split-receipt-inference:latest`, utan hostport, på ett `internal: true`-nät. Modellerna är 17,6 MiB, ligger checksummekontrollerade i imagen och kräver ingen GPU eller persistent modellvolym.
 - Appcontainern är read-only, saknar Linux capabilities och använder `/tmp` som begränsad tmpfs.
 - Produktionsåtkomst ska gå via HTTPS-reverse proxy. `COOKIE_SECURE=true` och `TRUST_PROXY=true` används när proxyn är korrekt konfigurerad.
 - Hemligheter sätts i Unraid Compose Manager eller ignorerad `.env`, aldrig i Git.
@@ -103,7 +105,7 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 - Utgifter och betalningar är huvudboken. Saldon beräknas från den och lagras inte som separat sanning.
 - Finansiella poster mjukraderas eller reverseras så att historiken bevaras.
 - Resor kan arkiveras och mjukraderas. Kvittofiler kopplade till en borttagen resa tas bort enligt appens nuvarande dataskyddsbeteende.
-- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot. PaddleOCR-VL och Tesseract jämförs, radsummor valideras mot totalen och avvikelser markeras för extra kontroll.
+- OCR-resultat är redigerbara förslag, aldrig en auktoritativ tolkning av kvittot. RapidOCR ger lokal text/geometri/säkerhet, parsern bevarar källevidens och radsummor/rabatter valideras i heltalsöre mot totalen. Avvikelser och svag evidens markeras för extra kontroll; okända fält lämnas null.
 
 ## Databasmigreringar
 
@@ -148,6 +150,7 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.25.0 ersätter Quick Scans GPU-/VLM-beroende produktionsväg med en helt lokal, persistent CPU-tjänst: RapidOCR 3.9.2 och ONNX Runtime med PP-OCRv6-small-detektor samt PP-OCRv5 Latin-mobile-igenkännare. Tjänsten är read-only/non-root, saknar hostport, har checksummerade modeller, bounded queue, tidsgräns, hälsa/readiness och innehållsfria metrics. Node-flödet skickar råa bytes endast till en explicit tillåten intern värd, propagerar avbrott, behåller Tesseract som lokal driftreserv och returnerar ett typat kvitto med null för okända värden, heltalsöre, källevidens och aritmetiska granskningssignaler. Blind normaliseringsretry är av efter mätt regression. Frontend avbryter gamla skanningar och ignorerar sena svar. Den gamla inspekterade "holdout" är omklassad till legacy; ett nytt externt, förseglat schema-v2-facit kördes aggregerat exakt en gång per kandidat. På 48 orörda slutbilder förbättrades artikel-F1 58,5%→91,7%, totalprecision 58,3%→89,6%, artikelhallucinationer 47→2 och medianlatens 1 119→846 ms. Komplett beslut, utvecklingsresultat, holdout, resurser, offline-/integritetsgräns och svagheter finns i `QUICK_SCAN_ARCHITECTURE.md`; maskinläsbara aggregat finns i `tests/ocr-benchmark/results/quick-scan-2026-08-26.json`.
 - Version 1.24.3 rättar en verklig, mätt förbättring i hur `combineReceiptPasses()` väljer mellan flera OCR-pass, hittad genom att följa upp användarens fråga om varför "Meny 1"/"Meny 2"-rader ofta saknades på fastfood-kvitton i den riktiga OCR-pipelinen. Undersökningen visade två separata trådar — en avvisad, en skickad.
   - **Avvisad**: att göra bildrätningen (`rectifiedPaperImage`, se `OCR_BENCHMARK.md`s "Rejected experiments") tillgänglig för fler pass regregade hela benchmarken (exakt avstämning 51,2 % → 41,3 %) trots en välgrundad diagnos — mätningen motbevisade hypotesen, så inget skickades.
   - **Skickad, mätt förbättring**: spårning av ett verkligt "Meny 1"/"Meny 2"-fall (fastfood_difficult_dev1 i benchmark-korpusen) ner till Tesseracts faktiska rå-OCR-text visade att `parseReceiptText()` redan hanterar mönstret korrekt (bekräftat mot både facit-text och den riktiga rå-texten från båda Tesseract-passen) — bristen låg i `receiptPassScore()`, som avgör vilket OCR-pass som "vinner" och blir grunden för den slutgiltiga kvittotolkningen. `items.length * 10 000` var obegränsat och vägde 10 gånger mer än en hel 0–100-poängs säkerhetsskillnad, så ett pass kunde vinna enbart genom att hitta FLER rader — inklusive OCR-brus/fragment som inte är riktiga artiklar. Verkligt exempel: Tesseracts renare första pass (5 artiklar, säkerhet 80) förlorade mot sitt eget brusigare andra pass (7 "artiklar", säkerhet 64 — en av dem en osammanhängande textrad från en feltolkad momsrad, en annan ett avbrutet fragment av en annan artikel) enbart på antal rader. Fixat genom att begränsa artikelantalets bidrag till högst 3 artiklars värde (bevarar den redan testade balansen för korta kvitton, där "hittade fler rader" fortfarande är en stark, billig signal) och måttligt höja säkerhetens vikt (`*30`, inte mer — AI-pass bär ett fast metodberoende förtroendevärde här, 70/85/92/94, inte en riktig per-bild-signal som Tesseracts, så en för aggressiv höjning fick ett AI-pass med bara 1 artikel att alltid slå ett Tesseract-pass med 2 artiklar oavsett täckning — fångat av det befintliga testet "local AI receipt output is validated and merged by exact öre"). Nytt regressionstest med det verkliga fastfood-fallet. Verifierat mot hela 80-kvittos benchmarken (bild-läge, både dev och holdout): ingen regression på någon mätpunkt, flera reella förbättringar — exakt avstämning 51,2 % → 55,0 % totalt (dev 50,0 %→54,2 %, holdout 53,1 %→56,3 %), behöver granskning 39/80 → 36/80, artikel-F1 76,7 %→77,6 %, prisnoggrannhet 67,6 %→68,9 %, falska metadata-rader oförändrat 0.

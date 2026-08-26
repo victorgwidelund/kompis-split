@@ -1,0 +1,58 @@
+{
+  "id": "cafe_pathological_legacy1",
+  "category": "cafe",
+  "difficulty": "pathological",
+  "split": "legacy",
+  "merchant": "Kafé Linnéa",
+  "date": "2025-08-13",
+  "totalOre": 27644,
+  "items": [
+    {
+      "name": "Wienerbröd",
+      "quantity": 1,
+      "totalOre": 3613
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 3207
+    },
+    {
+      "name": "Latte",
+      "quantity": 1,
+      "totalOre": 4399
+    },
+    {
+      "name": "Chokladboll",
+      "quantity": 1,
+      "totalOre": 2260
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 7892
+    },
+    {
+      "name": "Smör och ost macka",
+      "quantity": 1,
+      "totalOre": 6273
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Kafé Linnéa\nNygatan 9, Lund\n13/08/2025\nWienerbröd 36,13\nKaffe 32,07\nLatte 43,99\nChokladboll 22,60\nSmörgås skinka och ost 78,92\nSmör och ost macka 62,73\nMoms 12% 29,62\nAtt betala 276,44\nSwish",
+  "photo": {
+    "rotationDeg": -9.1,
+    "shear": -0.09,
+    "frameFill": 0.4,
+    "blurSigma": 0.87,
+    "jpegQuality": 46,
+    "backgroundTone": "light",
+    "canvasWidth": 1384,
+    "canvasHeight": 1504
+  },
+  "layout": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "width": 420
+  }
+}

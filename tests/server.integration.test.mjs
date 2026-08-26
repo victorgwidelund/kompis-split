@@ -604,9 +604,14 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(memberCannotRunOcrBenchmark.response.status, 403);
     const ocrBenchmarkStatusBeforeRun = await request("/api/admin/ocr-benchmark", { cookie: ownerCookie });
     assert.equal(ocrBenchmarkStatusBeforeRun.payload.available, true, "the benchmark corpus must be present in the test checkout");
-    const ocrBenchmarkStarted = await request("/api/admin/ocr-benchmark", { method: "POST", cookie: ownerCookie, body: { mode: "parser", split: "dev" } });
+    const finalBenchmarkRejected = await request("/api/admin/ocr-benchmark", { method: "POST", cookie: ownerCookie, body: { mode: "parser", split: "final" } });
+    assert.equal(finalBenchmarkRejected.response.status, 400, "the admin API must never expose sealed final-evaluation truth");
+    const arbitraryBenchmarkRejected = await request("/api/admin/ocr-benchmark", { method: "POST", cookie: ownerCookie, body: { mode: "parser", split: "../../private" } });
+    assert.equal(arbitraryBenchmarkRejected.response.status, 400, "the admin API must reject arbitrary corpus paths");
+    const ocrBenchmarkStarted = await request("/api/admin/ocr-benchmark", { method: "POST", cookie: ownerCookie, body: { mode: "parser" } });
     assert.equal(ocrBenchmarkStarted.response.status, 202, JSON.stringify(ocrBenchmarkStarted.payload));
     assert.equal(ocrBenchmarkStarted.payload.job.status, "running");
+    assert.equal(ocrBenchmarkStarted.payload.job.split, "dev", "admin benchmark runs must default to development data only");
     let ocrBenchmarkFinished = null;
     for (let attempt = 0; attempt < 20 && !ocrBenchmarkFinished; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));

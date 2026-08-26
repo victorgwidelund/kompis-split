@@ -9,10 +9,10 @@ const tableBackgrounds = {
   dark: [{ r: 58, g: 46, b: 38 }, { r: 40, g: 40, b: 44 }, { r: 30, g: 26, b: 24 }],
 };
 
-async function noiseLayer(width, height, amount) {
+async function noiseLayer(width, height, amount, rng) {
   const buffer = Buffer.alloc(width * height * 4);
   for (let index = 0; index < width * height; index += 1) {
-    const value = Math.round(128 + (Math.random() - 0.5) * 255 * amount);
+    const value = Math.round(128 + (rng.float() - 0.5) * 255 * amount);
     buffer[index * 4] = value; buffer[index * 4 + 1] = value; buffer[index * 4 + 2] = value;
     buffer[index * 4 + 3] = Math.round(255 * Math.min(1, amount * 1.4));
   }
@@ -59,7 +59,7 @@ export async function photograph(cleanPng, rng, tier, options = {}) {
   }
   composites.push({ input: rotatedBuffer, left: Math.max(0, offsetX), top: Math.max(0, offsetY) });
   if (profile.noise > 0) {
-    const noise = await noiseLayer(canvasWidth, canvasHeight, profile.noise);
+    const noise = await noiseLayer(canvasWidth, canvasHeight, profile.noise, rng);
     composites.push({ input: noise, left: 0, top: 0, blend: "overlay" });
   }
 

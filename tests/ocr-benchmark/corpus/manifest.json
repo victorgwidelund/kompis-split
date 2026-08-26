@@ -1,7 +1,7 @@
 {
   "total": 80,
   "dev": 48,
-  "holdout": 32,
+  "legacy": 32,
   "byCategory": {
     "restaurant": 10,
     "bar": 10,

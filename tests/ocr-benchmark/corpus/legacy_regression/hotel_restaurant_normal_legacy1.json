@@ -1,0 +1,51 @@
+{
+  "id": "hotel_restaurant_normal_legacy1",
+  "category": "hotel_restaurant",
+  "difficulty": "normal",
+  "split": "legacy",
+  "merchant": "Hotell Kajutan Frukost",
+  "date": "2026-01-28",
+  "totalOre": 166217,
+  "items": [
+    {
+      "name": "Frukostbuffé",
+      "quantity": 4,
+      "totalOre": 73644
+    },
+    {
+      "name": "Mineralvatten",
+      "quantity": 4,
+      "totalOre": 17164
+    },
+    {
+      "name": "Dagens lunch",
+      "quantity": 4,
+      "totalOre": 68332
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 7077
+    }
+  ],
+  "rejectedMetadata": [
+    "Beställning 742",
+    "Kvitto 12395"
+  ],
+  "discountOre": 0,
+  "idealText": "Hotell Kajutan Frukost\nEsplanaden 6, Malmö\nBeställning 742\n28/01/2026\nFrukostbuffé 4 st 736,44\n4 x Mineralvatten 42,91 171,64\n4x Dagens lunch 683,32\nRumsservice tillägg 70,77\nMoms 12% 178,09\nKvitto 12395\nTOTAL 1662,17\nMastercard",
+  "photo": {
+    "rotationDeg": -4,
+    "shear": 0.02,
+    "frameFill": 0.69,
+    "blurSigma": 0.31,
+    "jpegQuality": 90,
+    "backgroundTone": "dark",
+    "canvasWidth": 681,
+    "canvasHeight": 829
+  },
+  "layout": {
+    "fontFamily": "Consolas, monospace",
+    "width": 420
+  }
+}

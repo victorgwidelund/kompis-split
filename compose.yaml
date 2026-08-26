@@ -1,68 +1,33 @@
 services:
-  paddleocr-model:
-    image: alpine:3.23.3
-    container_name: kompis-split-paddleocr-model
-    restart: "no"
-    volumes:
-      - /mnt/user/kompis_split/paddleocr:/models
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        apk add --no-cache ca-certificates wget
-        base="https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/resolve/511b09642bb324401f15f97cc23bc67e8f0a291d"
-        download() {
-          file="$$1"
-          checksum="$$2"
-          if [ ! -s "/models/$$file" ] || ! echo "$$checksum  /models/$$file" | sha256sum -c -; then
-            wget -O "/models/$$file.part" "$$base/$$file"
-            echo "$$checksum  /models/$$file.part" | sha256sum -c -
-            mv "/models/$$file.part" "/models/$$file"
-          fi
-        }
-        download PaddleOCR-VL-1.6-GGUF.gguf f3ae46ec885050acf4b3d31944431e1fd90d50664fb09126af4a3c050ba14ee8
-        download PaddleOCR-VL-1.6-GGUF-mmproj.gguf 204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a
-    security_opt:
-      - no-new-privileges:true
-
-  paddleocr:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b9570
-    container_name: kompis-split-paddleocr
+  receipt-inference:
+    image: ghcr.io/victorgwidelund/kompis-split-receipt-inference:latest
+    container_name: kompis-split-receipt-inference
     restart: unless-stopped
-    runtime: nvidia
-    depends_on:
-      paddleocr-model:
-        condition: service_completed_successfully
+    pull_policy: missing
     environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    volumes:
-      - /mnt/user/kompis_split/paddleocr:/models:ro
-    command:
-      - --model
-      - /models/PaddleOCR-VL-1.6-GGUF.gguf
-      - --mmproj
-      - /models/PaddleOCR-VL-1.6-GGUF-mmproj.gguf
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - --temp
-      - "0"
-      - --ctx-size
-      - "8192"
-      - --n-gpu-layers
-      - "99"
-      - --parallel
-      - "${PADDLEOCR_PARALLEL:-2}"
-      - --cont-batching
+      OCR_INTRA_OP_THREADS: "${OCR_INTRA_OP_THREADS:-8}"
+      OCR_QUEUE_CAPACITY: "${OCR_QUEUE_CAPACITY:-4}"
+      ORT_DISABLE_TELEMETRY: "1"
+      OMP_NUM_THREADS: "${OCR_INTRA_OP_THREADS:-8}"
+      OPENBLAS_NUM_THREADS: "${OCR_INTRA_OP_THREADS:-8}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)"]
       interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 60s
+      timeout: 3s
+      retries: 8
+      start_period: 20s
+    networks:
+      - receipt-private
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: "${OCR_MEMORY_LIMIT:-1g}"
+    cpus: "${OCR_CPU_LIMIT:-8}"
+    stop_grace_period: 20s
 
   postgres:
     image: postgres:17.10-alpine3.22
@@ -88,10 +53,12 @@ services:
     image: ghcr.io/victorgwidelund/kompis-split:latest
     container_name: kompis-split
     restart: unless-stopped
-    pull_policy: always
+    pull_policy: missing
     init: true
     depends_on:
       postgres:
+        condition: service_healthy
+      receipt-inference:
         condition: service_healthy
     ports:
       - "8787:8787"
@@ -107,12 +74,14 @@ services:
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       TRUST_PROXY: "${TRUST_PROXY:-false}"
       SESSION_DAYS: "${SESSION_DAYS:-30}"
-      PADDLEOCR_URL: http://paddleocr:8080
-      PADDLEOCR_MODEL: PaddleOCR-VL-1.6
-      PADDLEOCR_TIMEOUT_MS: "${PADDLEOCR_TIMEOUT_MS:-60000}"
-      PADDLEOCR_MAX_TOKENS: "${PADDLEOCR_MAX_TOKENS:-512}"
-      PADDLEOCR_ACCURATE_RETRY: "${PADDLEOCR_ACCURATE_RETRY:-true}"
-      RECEIPT_OCR_WORKERS: "${RECEIPT_OCR_WORKERS:-2}"
+      RECEIPT_INFERENCE_URL: http://receipt-inference:8080
+      RECEIPT_INFERENCE_ALLOWED_HOSTS: receipt-inference
+      RECEIPT_INFERENCE_TIMEOUT_MS: "${RECEIPT_INFERENCE_TIMEOUT_MS:-15000}"
+      RECEIPT_NORMALIZED_FALLBACK: "false"
+      RECEIPT_OCR_WORKERS: "${RECEIPT_OCR_WORKERS:-1}"
+    networks:
+      - default
+      - receipt-private
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
@@ -152,3 +121,7 @@ services:
         done
     security_opt:
       - no-new-privileges:true
+
+networks:
+  receipt-private:
+    internal: true

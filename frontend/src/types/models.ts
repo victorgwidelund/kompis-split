@@ -213,6 +213,13 @@ export interface OcrResponse {
   confidence?: number;
   needsReview?: boolean;
   ai?: OcrAiStatus;
+  receipt?: {
+    merchant: string | null; date: string | null; time: string | null; receiptNumber: string | null;
+    currency: string | null; subtotalOre: number | null; totalOre: number | null; pantTotalOre: number | null;
+    discounts: Array<{ label: string | null; amountOre: number | null }>;
+    items: Array<{ rawName: string | null; normalizedName: string | null; quantity: number | null; unit: string | null; unitPriceOre: number | null; lineTotalOre: number | null; weightGrams: number | null; discountOre: number | null; pantOre: number | null; confidence: number }>;
+  };
+  validation?: { confidence: number; needsReview: boolean; arithmeticDeltaOre: number | null; signals: Array<{ code: string; severity: "info" | "warning" | "error"; value?: number | string | null }> };
 }
 
 export interface StatisticsResponse {
@@ -315,9 +322,9 @@ export interface OcrFixtureScore {
 
 export interface OcrBenchmarkReport {
   mode: "parser" | "image"; split: string; fixtureCount: number; generatedAt: string;
-  overall: OcrBenchmarkAggregate | null; dev: OcrBenchmarkAggregate | null; holdout: OcrBenchmarkAggregate | null;
+  overall: OcrBenchmarkAggregate | null; dev: OcrBenchmarkAggregate | null; legacy: OcrBenchmarkAggregate | null;
   sources?: Record<string, number>;
-  scores: OcrFixtureScore[];
+  scores?: OcrFixtureScore[];
 }
 
 export interface OcrBenchmarkJob {

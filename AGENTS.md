@@ -38,7 +38,7 @@
 - Real configuration belongs in Compose Manager or an ignored `.env`; `.env.example` contains names and safe placeholders only.
 - Use only documented Swish functionality. Swish Commerce certificates and credentials stay server-side. Opening Swish is never proof of payment.
 - Retain security headers, origin protection, rate limiting, secure cookies behind HTTPS, input validation, and generic internal-error responses.
-- Production sits behind Cloudflare then Nginx Proxy Manager. When `TRUST_PROXY` is enabled, derive client IP for rate limiting from `CF-Connecting-IP` (set authoritatively by Cloudflare's edge, not spoofable by the client) — never from the first entry of `X-Forwarded-For`, which every hop appends to and a client can still prepend arbitrary values onto. See `DEPLOYMENT.md` for the full trust model.
+- Production Quick Scan must keep receipt bodies on owned infrastructure. Use LAN/VPN or DNS-only → Nginx Proxy Manager → app; a CDN/proxied DNS path receives the upload and violates that privacy boundary. If `TRUST_PROXY` is enabled, the trusted edge must overwrite `CF-Connecting-IP`; never trust the first `X-Forwarded-For` value. See `DEPLOYMENT.md`.
 
 ## UX and design
 
@@ -51,15 +51,19 @@
 ## Receipt OCR
 
 - Measure before changing `src/receipt-ocr.ts`: run `pnpm benchmark:ocr` (see `tests/ocr-benchmark/README.md`)
-  before and after any parsing/preprocessing change, on both `dev` and `holdout`. Never claim an OCR
-  accuracy improvement without a benchmark number backing it, and revert a change that regresses the
-  benchmark even if it fixed the one fixture that motivated it — see `OCR_BENCHMARK.md` for the full
-  rationale and the "rejected experiments" this rule already prevented from shipping.
+  before and after any parsing/preprocessing change on `dev`; the public `legacy` regression split may
+  also be checked but is not independent because it has already been inspected and tuned against. Never
+  claim an OCR accuracy improvement without a benchmark number backing it, and revert a change that
+  regresses the benchmark even if it fixed the one fixture that motivated it — see `OCR_BENCHMARK.md`
+  for the full rationale and the "rejected experiments" this rule already prevented from shipping.
+  Sealed final-evaluation data uses its dedicated aggregate-only workflow: run it once for the frozen
+  baseline and once after development, and never inspect or tune against individual final fixtures.
 - The scoring/matching logic lives once, in `src/ocr-benchmark.ts` (compiled to `dist/ocr-benchmark.js`).
   Both the CLI tool (`tests/ocr-benchmark/scoring.mjs` re-exports from it) and the in-app admin
   "OCR-benchmark" panel (`GET`/`POST /api/admin/ocr-benchmark`) use the same implementation — never fork
-  a second copy. The benchmark corpus (`tests/ocr-benchmark/corpus/`) is baked into the production Docker
-  image read-only; keep that `COPY` line in `Dockerfile` if the corpus path or layout ever changes.
+  a second copy. Only the public development corpus (`tests/ocr-benchmark/corpus/dev`) is baked into the
+  production Docker image for the admin panel. Never include legacy-regression or sealed final truth in
+  a production image or expose final fixture details through the application API.
 - Fix the earliest reliable layer (preprocessing/OCR/line-normalization/semantic-parsing/reconciliation),
   not the symptom. A metadata word that leaks into items is usually a missing `\b` word boundary, not a
   reason to blacklist the specific merchant/product name that exposed it.

@@ -1,0 +1,61 @@
+{
+  "id": "cafe_difficult_legacy1",
+  "category": "cafe",
+  "difficulty": "difficult",
+  "split": "legacy",
+  "merchant": "Café Blomman",
+  "date": "2025-04-21",
+  "totalOre": 39766,
+  "items": [
+    {
+      "name": "Semla",
+      "quantity": 1,
+      "totalOre": 5296
+    },
+    {
+      "name": "Smörgås skinka och ost",
+      "quantity": 1,
+      "totalOre": 7822
+    },
+    {
+      "name": "Smör och ost macka",
+      "quantity": 1,
+      "totalOre": 5828
+    },
+    {
+      "name": "Latte",
+      "quantity": 1,
+      "totalOre": 4214
+    },
+    {
+      "name": "Chokladboll",
+      "quantity": 2,
+      "totalOre": 5338
+    },
+    {
+      "name": "Kanelbulle",
+      "quantity": 3,
+      "totalOre": 11268
+    }
+  ],
+  "rejectedMetadata": [
+    "Org.nr 558628-2680",
+    "Terminal 08"
+  ],
+  "discountOre": 0,
+  "idealText": "Café Blomman\nNygatan 9, Lund\nOrg.nr 558628-2680\n21 apr 2025\nSemla 52,96\nSmörgås skinka och ost 78,22\nSmör och ost macka 58,28\nLatte 42,14\n2 x Chokladboll 53,38\nKanelbulle 3 st 112,68\nMoms 12% 42,61\nTerminal 08\nTOTALT 397,66\nKort",
+  "photo": {
+    "rotationDeg": 10.6,
+    "shear": 0.05,
+    "frameFill": 0.62,
+    "blurSigma": 0.97,
+    "jpegQuality": 66,
+    "backgroundTone": "dark",
+    "canvasWidth": 1137,
+    "canvasHeight": 1164
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 560
+  }
+}

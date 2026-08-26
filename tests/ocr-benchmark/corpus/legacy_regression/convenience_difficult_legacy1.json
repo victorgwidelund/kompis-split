@@ -1,0 +1,70 @@
+{
+  "id": "convenience_difficult_legacy1",
+  "category": "convenience",
+  "difficulty": "difficult",
+  "split": "legacy",
+  "merchant": "Narvesen Station",
+  "date": "2025-04-20",
+  "totalOre": 30326,
+  "items": [
+    {
+      "name": "Choklad",
+      "quantity": 1,
+      "totalOre": 2896
+    },
+    {
+      "name": "Chips",
+      "quantity": 1,
+      "totalOre": 3343
+    },
+    {
+      "name": "Korv med bröd",
+      "quantity": 1,
+      "totalOre": 4495
+    },
+    {
+      "name": "Tidning",
+      "quantity": 1,
+      "totalOre": 6330
+    },
+    {
+      "name": "Kaffe",
+      "quantity": 1,
+      "totalOre": 3402
+    },
+    {
+      "name": "Godispåse",
+      "quantity": 1,
+      "totalOre": 4819
+    },
+    {
+      "name": "Energidryck",
+      "quantity": 1,
+      "totalOre": 2720
+    },
+    {
+      "name": "Läsk 33cl",
+      "quantity": 1,
+      "totalOre": 2321
+    }
+  ],
+  "rejectedMetadata": [
+    "Beställning 821"
+  ],
+  "discountOre": 0,
+  "idealText": "Narvesen Station\nJärnvägstorget 1, Göteborg\nBeställning 821\n20-04-2025\n1x Choklad\n1x Chips\n1x Korv med bröd\n1x Tidning\n1x Kaffe\n1x Godispåse\n1x Energidryck\n1x Läsk 33cl\n28,96\n33,43\n44,95\n63,30\n34,02\n48,19\n27,20\n23,21\nMoms 12% 32,49\nTOTALT 303,26\nVisa",
+  "photo": {
+    "rotationDeg": -11,
+    "shear": 0.05,
+    "frameFill": 0.46,
+    "blurSigma": 0.99,
+    "jpegQuality": 66,
+    "backgroundTone": "light",
+    "canvasWidth": 1323,
+    "canvasHeight": 1863
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 420
+  }
+}

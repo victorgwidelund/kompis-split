@@ -1,0 +1,64 @@
+{
+  "id": "hotel_restaurant_pathological_legacy1",
+  "category": "hotel_restaurant",
+  "difficulty": "pathological",
+  "split": "legacy",
+  "merchant": "Grand Hotellets Matsal",
+  "date": "2025-05-07",
+  "totalOre": 166852,
+  "items": [
+    {
+      "name": "Vinpaket 3 glas",
+      "quantity": 1,
+      "totalOre": 34713
+    },
+    {
+      "name": "Rumsservice tillägg",
+      "quantity": 1,
+      "totalOre": 5855
+    },
+    {
+      "name": "Mineralvatten",
+      "quantity": 4,
+      "totalOre": 16064
+    },
+    {
+      "name": "Frukostbuffé",
+      "quantity": 2,
+      "totalOre": 35040
+    },
+    {
+      "name": "Dagens lunch",
+      "quantity": 1,
+      "totalOre": 16687
+    },
+    {
+      "name": "Trerätters meny",
+      "quantity": 1,
+      "totalOre": 58493
+    }
+  ],
+  "rejectedMetadata": [
+    "Kvitto 63419",
+    "Kassör Sara",
+    "Antal gäster 4",
+    "Referens 97031",
+    "Kassa 3"
+  ],
+  "discountOre": 0,
+  "idealText": "Grand Hotellets Matsal\nHotellgatan 1, Stockholm\nKvitto 63419\nKassör Sara\nAntal gäster 4\n2025-05-07\n1.00 Vinpaket 3 gl\nas\n347,13\nRumsservice tillägg 58,55\n4x Mineralvatten 160,64\n2x Frukostbuffé 350,40\nDagens lunch 166,87\nTrerätters meny 584,93\nMoms 12% 178,77\nReferens 97031\nKassa 3\nAtt betala 1668,52\nGodkänt",
+  "photo": {
+    "rotationDeg": -9.8,
+    "shear": 0.09,
+    "frameFill": 0.41,
+    "blurSigma": 0.86,
+    "jpegQuality": 63,
+    "backgroundTone": "dark",
+    "canvasWidth": 1312,
+    "canvasHeight": 1824
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 360
+  }
+}

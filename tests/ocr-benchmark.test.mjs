@@ -12,19 +12,19 @@ test("the benchmark corpus is available at the path src/ocr-benchmark.ts resolve
   assert.equal(ocrBenchmarkAvailable(), true);
 });
 
-test("the corpus loads a substantial, stratified dev and holdout set", async () => {
+test("the corpus loads a substantial dev set and the historical regression set", async () => {
   const dev = await loadOcrBenchmarkCorpus("dev");
-  const holdout = await loadOcrBenchmarkCorpus("holdout");
+  const legacy = await loadOcrBenchmarkCorpus("legacy");
   assert.ok(dev.length >= 40, `expected a real dev set, got ${dev.length}`);
-  assert.ok(holdout.length >= 20, `expected a real holdout set, got ${holdout.length}`);
+  assert.ok(legacy.length >= 20, `expected a real legacy set, got ${legacy.length}`);
   assert.ok(dev.every((fixture) => fixture.groundTruth.split === "dev"));
-  assert.ok(holdout.every((fixture) => fixture.groundTruth.split === "holdout"));
+  assert.ok(legacy.every((fixture) => fixture.groundTruth.split === "legacy"));
 });
 
-test("the parser-only benchmark scores near-perfectly against ideal OCR text on both splits", async () => {
+test("the parser-only benchmark scores near-perfectly against ideal OCR text on public fixtures", async () => {
   // Not pinned to exactly 100% -- this guards against a real regression in receipt-ocr.ts or in this
   // module's own scoring, not against the corpus being regenerated slightly differently later.
-  const report = await runOcrBenchmarkParser("all");
+  const report = await runOcrBenchmarkParser("all-public");
   assert.equal(report.mode, "parser");
   assert.ok(report.overall, "expected an overall aggregate for a non-empty corpus");
   assert.ok(report.overall.merchantAccuracy >= 0.95, `merchant accuracy regressed: ${report.overall.merchantAccuracy}`);
@@ -35,5 +35,5 @@ test("the parser-only benchmark scores near-perfectly against ideal OCR text on 
   // A real discount receipt legitimately fails exact reconciliation by design (see OCR_BENCHMARK.md) --
   // reconciledAfterKnownAdjustments is the metric that should still be exact.
   assert.ok(report.dev && report.dev.reconciledAfterKnownAdjustments === 1, "dev split should fully reconcile once known discounts are accounted for");
-  assert.ok(report.holdout && report.holdout.reconciledAfterKnownAdjustments === 1, "holdout split should fully reconcile once known discounts are accounted for");
+  assert.ok(report.legacy && report.legacy.reconciledAfterKnownAdjustments === 1, "legacy split should fully reconcile once known discounts are accounted for");
 });
