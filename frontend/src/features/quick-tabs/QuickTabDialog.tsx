@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, upload } from "../../api/client";
 import { DialogHeader, Modal } from "../../components/Modal";
 import type { InvitationResult, OcrResponse, QuickTab, OcrSuggestionItem } from "../../types/models";
@@ -17,25 +17,41 @@ export function QuickTabDialog({ open, onClose, onCreated, notify }: { open: boo
   const [values, setValues] = useState({ name: "", merchant: "", receiptDate: "", total: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const scanController = useRef<AbortController | null>(null);
+  const scanGeneration = useRef(0);
   const patchValue = (name: keyof typeof values, value: string) => setValues((current) => ({ ...current, [name]: value }));
   const reset = () => { setItems([emptyItem()]); setReceipt(null); setStatus("Inget kvitto valt ännu."); setStatusClass(""); setValues({ name: "", merchant: "", receiptDate: "", total: "" }); setError(""); setBusy(false); };
-  const close = () => { reset(); onClose(); };
+  const close = () => { scanController.current?.abort(); scanGeneration.current += 1; reset(); onClose(); };
   const analyze = async (file?: File) => {
     if (!file) return; const validation = validateReceiptImage(file);
     if (validation) { setStatus(validation); setStatusClass("warning"); return; }
+    scanController.current?.abort();
+    const controller = new AbortController();
+    scanController.current = controller;
+    const generation = ++scanGeneration.current;
     setStatusClass("reading"); setStatus("Förbereder bild…");
-    const prepared = await prepareReceiptFile(file, (message) => setStatus(message));
-    setReceipt(prepared); setStatusClass("reading"); setStatus("AI:n läser och kontrollerar kvittoraderna … Det tar normalt några sekunder.");
+    let prepared: File;
     try {
-      const payload = await upload<OcrResponse>("/api/quick-tabs/analyze", prepared); const suggestion = payload.suggestion || {}; const suggested = suggestion.items || [];
+      prepared = await prepareReceiptFile(file, (message) => { if (!controller.signal.aborted && generation === scanGeneration.current) setStatus(message); });
+    } catch (caught) {
+      if (!controller.signal.aborted && generation === scanGeneration.current) { setStatusClass("warning"); setStatus(caught instanceof Error ? caught.message : "Kunde inte förbereda kvittobilden."); }
+      return;
+    }
+    if (controller.signal.aborted || generation !== scanGeneration.current) return;
+    setReceipt(prepared); setStatusClass("reading"); setStatus("Den lokala OCR-tjänsten läser och kontrollerar kvittoraderna …");
+    try {
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
+      const payload = await upload<OcrResponse>("/api/quick-tabs/analyze", prepared, {}, signal);
+      if (generation !== scanGeneration.current) return;
+      const suggestion = payload.suggestion || {}; const suggested = suggestion.items || [];
       const rows = suggested.map((item: OcrSuggestionItem) => ({ key: crypto.randomUUID(), name: item.name || "", quantity: String(item.quantity || 1), amount: String(item.amount || "") }));
       if (rows.length) setItems(rows);
       const itemTotal = suggested.reduce((sum, item) => sum + kronorToOre(item.amount || 0), 0); const total = suggestion.amount || (itemTotal ? (itemTotal / 100).toFixed(2).replace(".", ",") : "");
       setValues((current) => ({ ...current, name: suggestion.title ? `Nota på ${suggestion.title}` : current.name, merchant: suggestion.title || current.merchant, receiptDate: suggestion.expenseDate || current.receiptDate, total: total || current.total }));
-      const engine = payload.source !== "tesseract" ? "lokal AI + OCR" : "lokal OCR";
+      const engine = payload.source === "rapidocr" ? "lokal dokument-OCR" : "lokal reserv-OCR";
       setStatusClass(payload.needsReview ? "warning" : "success");
       setStatus(rows.length ? `${rows.length} kvittorader hittades med ${engine}.${receiptAiStatus(payload.ai)}${payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}` : "Inga säkra rader hittades. Lägg till rätterna manuellt.");
-    } catch (caught) { setStatusClass("warning"); setStatus(`${caught instanceof Error ? caught.message : "Kunde inte läsa kvittot"} Du kan fortfarande fylla i raderna manuellt.`); }
+    } catch (caught) { if (controller.signal.aborted || generation !== scanGeneration.current) return; setStatusClass("warning"); setStatus(`${caught instanceof Error && caught.name !== "TimeoutError" ? caught.message : "Kvittoanalysen tog för lång tid"} Du kan fortfarande fylla i raderna manuellt.`); }
   };
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (busy) return; setError(""); setBusy(true);

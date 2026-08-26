@@ -1,0 +1,56 @@
+{
+  "id": "restaurant_normal_legacy1",
+  "category": "restaurant",
+  "difficulty": "normal",
+  "split": "legacy",
+  "merchant": "Restaurang Solgläntan",
+  "date": "2026-03-11",
+  "totalOre": 75745,
+  "items": [
+    {
+      "name": "Biff Rydberg",
+      "quantity": 1,
+      "totalOre": 23274
+    },
+    {
+      "name": "Bryggkaffe",
+      "quantity": 4,
+      "totalOre": 12860
+    },
+    {
+      "name": "Hasselnötskräm",
+      "quantity": 1,
+      "totalOre": 9894
+    },
+    {
+      "name": "Kycklingsallad",
+      "quantity": 1,
+      "totalOre": 14534
+    },
+    {
+      "name": "Pytt i panna",
+      "quantity": 1,
+      "totalOre": 15183
+    }
+  ],
+  "rejectedMetadata": [
+    "Antal gäster 5",
+    "Beställning 190"
+  ],
+  "discountOre": 0,
+  "idealText": "Restaurang Solgläntan\nDrottninggatan 8, Uppsala\nAntal gäster 5\n11 mar 2026\nBiff Rydberg 232,74\nBryggkaffe 4 st 128,60\nHasselnötskräm 98,94\nKycklingsallad 145,34\nPytt i panna 151,83\nMoms 12% 81,16\nBeställning 190\nAtt betala 757,45\nVisa",
+  "photo": {
+    "rotationDeg": 2.5,
+    "shear": 0.02,
+    "frameFill": 0.66,
+    "blurSigma": 0.45,
+    "jpegQuality": 89,
+    "backgroundTone": "light",
+    "canvasWidth": 594,
+    "canvasHeight": 839
+  },
+  "layout": {
+    "fontFamily": "Verdana, sans-serif",
+    "width": 360
+  }
+}

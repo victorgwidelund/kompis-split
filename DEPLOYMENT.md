@@ -8,39 +8,40 @@ sin reverse proxy, och de operativa procedurerna för uppdatering, backup,
 ## Topologi
 
 ```
-Internet
-  │
-  ▼
-Cloudflare (DNS-proxy/CDN, TLS mot klienten)
+Klient via LAN/VPN eller publik DNS utan innehållsproxy
   │  HTTPS
   ▼
-Nginx Proxy Manager (på Unraid, terminerar/vidarebefordrar HTTPS)
+Nginx Proxy Manager (på Unraid, terminerar HTTPS)
   │  HTTP, internt nätverk
   ▼
 kompis-split-appcontainern (port 8787)
   │
   ├──▶ PostgreSQL (internt Compose-nätverk, ingen publicerad host-port)
-  └──▶ paddleocr / paddleocr-model (internt Compose-nätverk, ingen publicerad host-port)
+  └──▶ receipt-inference (RapidOCR/ONNX, isolerat internt nätverk)
 ```
 
 Två separata interna anrop, båda utan publik exponering:
 
 ```
 kompis-split  ──▶  PostgreSQL       (databas, aldrig publik port)
-kompis-split  ──▶  paddleocr (llama.cpp)  (lokal AI-OCR, aldrig publik port)
+kompis-split  ──▶  receipt-inference (lokal OCR, aldrig publik port)
 ```
 
-**Får aldrig exponeras direkt mot internet:** PostgreSQL, `paddleocr`/`paddleocr-model`.
+**Får aldrig exponeras direkt mot internet:** PostgreSQL och `receipt-inference`.
 Endast appcontainerns port 8787 ska nås — och det ska ske via Nginx Proxy
-Manager, inte direkt.
+Manager, inte direkt. För den strikta kvittointegriteten ska klienten nå Nginx
+direkt via LAN/VPN eller DNS-only. En CDN/innehållsproxy som Cloudflare
+proxied/orange-cloud tar emot requestkroppen och innebär därför att kvittobilden
+lämnar den egna infrastrukturen, även om ingen extern OCR-tjänst används.
 
 ## Betrott proxy-läge (`TRUST_PROXY`)
 
 Appen litar bara på klient-IP-headrar när `TRUST_PROXY=true`, och gör det på
-ett sätt som är medvetet om att det står två hopp (Cloudflare, sedan Nginx
-Proxy Manager) mellan klienten och Node-processen:
+ett sätt som är medvetet om betrodda proxyhopp. För rekommenderad LAN/VPN- eller
+DNS-only-drift är det Nginx Proxy Manager som är det enda hoppet:
 
-- **Klient-IP för rate limiting** (`CF-Connecting-IP`): Cloudflare sätter den
+- **Klient-IP för rate limiting** (`CF-Connecting-IP`): i en äldre Cloudflare-proxied
+  driftsättning sätter Cloudflare den
   här headern utifrån den faktiska TCP-anslutningen och skriver alltid över
   ett klientskickat värde med samma namn — den går inte att förfalska så
   länge trafiken faktiskt går via Cloudflare. Appen använder **bara** den här
@@ -65,7 +66,7 @@ Sessionscookien är `SameSite=Strict`, vilket är det huvudsakliga CSRF-skyddet
 oavsett proxy-inställning — Origin-kontrollen är ett extra lager, inte den
 enda spärren.
 
-## Secure cookies genom Cloudflare + Nginx
+## Secure cookies genom Nginx
 
 Sätt båda dessa när HTTPS termineras korrekt hela vägen till klienten:
 
@@ -77,7 +78,7 @@ TRUST_PROXY=true
 `COOKIE_SECURE=true` gör sessionscookien `Secure` (skickas bara över HTTPS).
 Om du sätter `COOKIE_SECURE=true` men trafiken faktiskt går över HTTP mellan
 Nginx och appcontainern (vanligt internt), spelar det ingen roll — det är
-protokollet mellan *klient och Cloudflare/Nginx* som avgör om webbläsaren
+protokollet mellan *klient och Nginx* som avgör om webbläsaren
 respekterar `Secure`, inte det interna hoppet.
 
 ## Kvittouppladdning och request-storlek genom proxyn
@@ -102,11 +103,10 @@ originalfilen upp till 50 MB genom validering innan uppladdning; appens
   client_max_body_size 20m;
   ```
 
-- **Cloudflare**: gratis/pro-planer tillåter normalt betydligt mer än 20 MB
-  per request (ofta 100 MB), så det är sällan en begränsande faktor här —
-  men kontrollera din plans gräns om stora kvitton börjar avvisas utan att
-  appens egna felmeddelande visas (det tyder på att Cloudflare eller Nginx
-  stoppade requesten innan den nådde appen).
+- **Extern innehållsproxy/CDN**: använd inte en sådan på Quick Scan-vägen om
+  kvittobilden måste stanna på egen infrastruktur. DNS hos en extern leverantör
+  är förenligt med kravet när DNS-posten är oproxyad; requestkroppen går då
+  direkt till den egna Nginx-instansen.
 
 ## Server-Sent Events (Snabbnota)
 
@@ -200,19 +200,22 @@ direkt kopplade till proxytopologin:
   via ditt vanliga Unraid-backupflöde — en lokal dump på samma fysiska disk
   som produktionsdatabasen skyddar inte mot diskfel.
 
-## OCR-tjänsten (PaddleOCR / llama.cpp)
+## OCR-tjänsten (RapidOCR / ONNX Runtime)
 
-- Modellfilerna hämtas en gång till `/mnt/user/kompis_split/paddleocr` och
-  checksummeras (`sha256sum`) innan de används — en trasig eller ofullständig
-  nedladdning läses aldrig som klar. De laddas **inte** om vid varje
-  omstart så länge filerna redan finns och matchar checksumman.
-- `paddleocr`-tjänsten publicerar ingen host-port; den nås bara från
-  `kompis-split` via det interna Compose-nätverket (`PADDLEOCR_URL=http://paddleocr:8080`).
-- Kräver Unraids Nvidia Driver-plugin och att GTX 1080 Ti är synlig för
-  Docker (`runtime: nvidia`).
-- Om GPU:n eller `paddleocr`-tjänsten är otillgänglig faller appen
-  automatiskt tillbaka till Tesseract — det påverkar inte appens
-  tillgänglighet, bara OCR-kvaliteten.
+- Tjänsten laddar en gång vid processstart PP-OCRv6-small-detektor,
+  PP-OCRv5-Latin-mobile-igenkännare och riktningsklassificerare genom ONNX
+  Runtime. Modellfilerna är versions- och SHA-256-kontrollerade i imagen.
+- `receipt-inference` publicerar ingen hostport och ansluts bara till det
+  `internal: true`-märkta nätet `receipt-private`. Appen tillåter endast den
+  explicit konfigurerade interna värden.
+- Ingen GPU krävs. Standardgränsen är 8 CPU-kärnor, 1 GiB RAM, en samtidig
+  inference och högst fyra väntande jobb. Full kö ger 429; appen har 15 s
+  timeout och går då över till sin lokala Tesseract-reserv.
+- `/health` visar processstatus, `/ready` kräver laddad och verifierad modell,
+  och `/metrics` ger aggregerade räknare/tider utan OCR-text eller kvittodata.
+- Efter `docker compose pull` kan båda app-images startas och skanna med
+  internet avstängt. Inga modellregister, telemetritjänster eller externa API:er
+  kontaktas under skanning.
 
 ## Manuell kontroll efter en säkerhetsuppdatering
 

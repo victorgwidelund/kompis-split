@@ -17,12 +17,12 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --prod --frozen-lockfile && pnpm store prune
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/frontend/dist ./public
-# Static fixtures for the in-app admin OCR benchmark panel (src/ocr-benchmark.ts) -- images and ground
-# truth only, no build step needed, so copied directly from the build context rather than the build stage.
-COPY tests/ocr-benchmark/corpus ./tests/ocr-benchmark/corpus
+# The in-app admin benchmark is deliberately limited to public development fixtures. Legacy-regression
+# data and sealed final-evaluation truth are never included in the production image.
+COPY tests/ocr-benchmark/corpus/dev ./tests/ocr-benchmark/corpus/dev
 RUN chown -R node:node /app
 USER node
 EXPOSE 8787
 STOPSIGNAL SIGTERM
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD node -e "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD node -e "fetch('http://127.0.0.1:8787/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "dist/server.js"]

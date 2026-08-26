@@ -69,7 +69,8 @@ Two supported, deliberately separate paths:
 
 1. **Public/licensed data**: use `scripts/fetch-public-datasets.sh` (documents the manual steps for
    SROIE/CORD above — it does not silently download anything) and add a small, clearly-labeled subset
-   under `corpus/holdout/external/` with a `LICENSE` note per file/batch. Re-verify the license at
+   in a separately licensed public-development directory, never in the sealed final corpus. Add a
+   `LICENSE` note per file/batch and re-verify the license at
    fetch time; terms and portals change.
 2. **Your own receipts**: photograph and manually redact (crop out) any personal payment details, then
    add them the same way. Never add a real Kompis Split user's uploaded receipt — those are never

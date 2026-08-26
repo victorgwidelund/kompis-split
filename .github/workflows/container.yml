@@ -40,7 +40,33 @@ jobs:
       - run: pnpm run lint
       - run: pnpm test
       - name: Build application container
-        run: docker build --build-arg APP_VERSION=1.13 -t kompis-split:test .
+        run: docker build --build-arg APP_VERSION=1.25.0 -t kompis-split:test .
+      - name: Build receipt inference container
+        run: docker build -f receipt-inference/Dockerfile -t kompis-split-receipt-inference:test .
+      - name: Smoke-test receipt inference without Internet access
+        run: |
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              docker logs receipt-inference-test || true
+            fi
+            docker rm --force receipt-inference-test >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          docker run --detach --name receipt-inference-test --network none kompis-split-receipt-inference:test
+          docker cp tests/ocr-benchmark/corpus/dev/grocery_clean_dev1.jpg receipt-inference-test:/tmp/receipt.jpg
+          ready=false
+          for attempt in $(seq 1 30); do
+            if docker exec receipt-inference-test python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)"; then
+              ready=true
+              break
+            fi
+            [ "$(docker inspect --format '{{.State.Running}}' receipt-inference-test)" = true ]
+            sleep 1
+          done
+          [ "$ready" = true ]
+          docker exec receipt-inference-test python -c "import pathlib,urllib.request,json; data=pathlib.Path('/tmp/receipt.jpg').read_bytes(); request=urllib.request.Request('http://127.0.0.1:8080/v1/ocr',data=data,headers={'Content-Type':'application/octet-stream'}); result=json.load(urllib.request.urlopen(request,timeout=20)); assert result['engine'].startswith('rapidocr-3.9.2/'); assert len(result['lines']) > 0"
       - name: Validate Docker Compose
         env:
           APP_PASSWORD: compose-validation-password
@@ -76,6 +102,13 @@ jobs:
           tags: |
             type=raw,value=latest
             type=sha,prefix=sha-
+      - uses: docker/metadata-action@v5
+        id: inference-meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/kompis-split-receipt-inference
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -87,3 +120,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: receipt-inference/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.inference-meta.outputs.tags }}
+          labels: ${{ steps.inference-meta.outputs.labels }}
+          cache-from: type=gha,scope=receipt-inference
+          cache-to: type=gha,mode=max,scope=receipt-inference

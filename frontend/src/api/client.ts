@@ -41,6 +41,6 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   return payload as T;
 }
 
-export function upload<T>(path: string, file: File, headers: HeadersInit = {}): Promise<T> {
-  return api<T>(path, { method: "POST", headers: { "Content-Type": file.type, ...headers }, body: file });
+export function upload<T>(path: string, file: File, headers: HeadersInit = {}, signal?: AbortSignal): Promise<T> {
+  return api<T>(path, { method: "POST", headers: { "Content-Type": file.type, ...headers }, body: file, signal });
 }

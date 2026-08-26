@@ -99,11 +99,11 @@ function OcrBenchmarkPanel({ onRun, onStatus }: OcrBenchmarkPanelProps) {
   const pct = (value: number | null) => (value === null ? "–" : `${(value * 100).toFixed(0)} %`);
   const ms = (value: number | null) => (value === null ? "–" : `${Math.round(value)} ms`);
   const report = job?.report;
-  const failures = report?.scores.filter((score) => !score.financiallyReconciled) || [];
+  const failures = report?.scores?.filter((score) => !score.financiallyReconciled) || [];
 
   return <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Kvalitetskontroll</p><h2>OCR-benchmark</h2></div>{job && <span className={`role-badge ${job.status === "running" ? "muted-badge" : job.status === "error" ? "danger-badge" : "positive-badge"}`}>{job.status === "running" ? "Kör…" : job.status === "error" ? "Fel" : "Klar"}</span>}</div>
     {!available ? <p className="muted">Benchmark-korpusen saknas i den här installationen (behöver köras från en image byggd efter v1.23.0).</p> : <>
-      <p className="muted">Kör den riktiga kvittoläsningen mot en fast uppsättning svenska testkvitton med facit. Snabb kontroll rör bara parsern, ingen OCR/GPU. Verklig pipeline anropar samma Tesseract/PaddleOCR-VL som riktiga kvitton — kan ta någon minut.</p>
+      <p className="muted">Kör den riktiga kvittoläsningen mot den offentliga utvecklingskorpusen med svenska testkvitton och facit. Snabb kontroll rör bara parsern, ingen OCR/GPU. Verklig pipeline anropar samma lokala OCR som riktiga kvitton — kan ta någon minut.</p>
       <div className="email-settings-actions">
         <button className="button ghost small-button" type="button" disabled={job?.status === "running" || starting !== null} onClick={() => void run("parser")}>{starting === "parser" ? "Startar…" : "Snabb kontroll"}</button>
         <button className="button dark small-button" type="button" disabled={job?.status === "running" || starting !== null} onClick={() => void run("image")}>{starting === "image" ? "Startar…" : "Verklig OCR-pipeline"}</button>

@@ -28,8 +28,8 @@ export function GuidePage({ isAdmin, onBack }: Props) {
     <section className="panel guide-panel">
       <div className="panel-title"><div><p className="eyebrow">Steg för steg</p><h2>Snabbnota</h2></div></div>
       <ul className="guide-steps">
-        <li><strong>Skanna kvittot</strong> via "＋ Skanna nota". Ta ett foto eller välj en bild — lokal AI läser av rader och totalsumma automatiskt (tar några sekunder).</li>
-        <li><strong>Kontrollera raderna</strong> innan ni skapar notan. AI:n är bra men inte perfekt — dubbelkolla särskilt namn, antal och ovanliga rader.</li>
+        <li><strong>Skanna kvittot</strong> via "＋ Skanna nota". Ta ett foto eller välj en bild — lokal OCR läser av rader och totalsumma automatiskt.</li>
+        <li><strong>Kontrollera raderna</strong> innan ni skapar notan. OCR är inte perfekt — dubbelkolla särskilt namn, antal och ovanliga rader.</li>
         <li><strong>Dela länken</strong> — den skapas automatiskt när notan skapas. "Bjud in" skapar fler giltiga länkar vid behov utan att de gamla slutar fungera.</li>
         <li><strong>Alla bockar av sitt eget</strong> — ingen inloggning krävs för gäster, bara namn och (valfritt) Swish-nummer.</li>
         <li><strong>Betala</strong> — den som inte är ägare ser en Swish-knapp för sin del av notan.</li>
@@ -40,7 +40,7 @@ export function GuidePage({ isAdmin, onBack }: Props) {
 
     <section className="panel guide-panel">
       <div className="panel-title"><div><p className="eyebrow">Tips</p><h2>Kvitton och foto-avläsning</h2></div></div>
-      <p>Fota kvittot rakt uppifrån mot en mörk eller enfärgad bakgrund om möjligt — det gör det lättare för AI:n att hitta kanterna. Se till att hela kvittot, inklusive totalsumman längst ner, syns i bilden.</p>
+      <p>Fota kvittot rakt uppifrån mot en mörk eller enfärgad bakgrund om möjligt. Se till att hela kvittot, inklusive totalsumman längst ner, syns i bilden.</p>
       <p>Om en rad blir fel går det alltid att redigera namn, antal och belopp för hand innan ni skapar notan eller lägger till utgiften.</p>
     </section>
 

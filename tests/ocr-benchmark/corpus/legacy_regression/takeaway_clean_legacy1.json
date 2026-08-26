@@ -1,0 +1,48 @@
+{
+  "id": "takeaway_clean_legacy1",
+  "category": "takeaway",
+  "difficulty": "clean",
+  "split": "legacy",
+  "merchant": "Sushi Express",
+  "date": "2026-03-01",
+  "totalOre": 43961,
+  "items": [
+    {
+      "name": "Vårrullar",
+      "quantity": 1,
+      "totalOre": 5789
+    },
+    {
+      "name": "Pizza nr 12 Capricciosa",
+      "quantity": 1,
+      "totalOre": 13137
+    },
+    {
+      "name": "Coca-Cola 33cl",
+      "quantity": 4,
+      "totalOre": 11156
+    },
+    {
+      "name": "Kebabtallrik",
+      "quantity": 1,
+      "totalOre": 13879
+    }
+  ],
+  "rejectedMetadata": [],
+  "discountOre": 0,
+  "idealText": "Sushi Express\nTake Away-gatan 3, Stockholm\n01/03/2026\nVårrullar 57,89\nPizza nr 12 Capricciosa 131,37\nCoca-Cola 33cl 4 st 111,56\nKebabtallrik 138,79\nMoms 12% 47,10\nAtt betala 439,61\nBetalt",
+  "photo": {
+    "rotationDeg": 0.5,
+    "shear": 0,
+    "frameFill": 0.9,
+    "blurSigma": 0.01,
+    "jpegQuality": 95,
+    "backgroundTone": "dark",
+    "canvasWidth": 536,
+    "canvasHeight": 560
+  },
+  "layout": {
+    "fontFamily": "Arial, sans-serif",
+    "width": 480
+  }
+}

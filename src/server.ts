@@ -9,7 +9,7 @@ import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
 import { EmailError, emailSettingsStatus, saveEmailSettings, sendMail } from "./email.js";
-import { closeReceiptOcr, maxReceiptInputPixels, normalizeReceiptImage, recognizeReceipt } from "./receipt-ocr.js";
+import { closeReceiptOcr, maxReceiptInputPixels, normalizeReceiptImage, receiptInferenceReady, recognizeReceipt } from "./receipt-ocr.js";
 import { ocrBenchmarkAvailable, runOcrBenchmarkImage, runOcrBenchmarkParser, type OcrBenchmarkReport } from "./ocr-benchmark.js";
 import { allocateItemQuantities, calculateShares, simplifyDebts } from "./split.js";
 
@@ -170,6 +170,18 @@ async function readBytes(request: IncomingMessage, maximumBytes: number): Promis
   }
   if (!size) throw new Error("Kvittofilen är tom");
   return Buffer.concat(chunks);
+}
+
+async function recognizeReceiptForRequest(request: IncomingMessage, response: ServerResponse, content: Buffer) {
+  const controller = new AbortController();
+  const abort = () => { if (!response.writableEnded) controller.abort(); };
+  request.once("aborted", abort);
+  response.once("close", abort);
+  try { return await recognizeReceipt(content, controller.signal); }
+  finally {
+    request.off("aborted", abort);
+    response.off("close", abort);
+  }
 }
 
 function receiptContentMatches(mimeType: string, content: Buffer) {
@@ -1249,7 +1261,10 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     if (currentOcrBenchmarkJob?.status === "running") throw new HttpError(409, "En benchmark körs redan.");
     const body = await readJson(request);
     const mode = body.mode === "image" ? "image" as const : "parser" as const;
-    const split = (["dev", "holdout", "all"].includes(body.split) ? body.split : "all") as "dev" | "holdout" | "all";
+    if (body.split !== undefined && body.split !== "dev") {
+      throw new HttpError(400, "Administrationspanelen får endast köra utvecklingskorpusen.");
+    }
+    const split = "dev" as const;
     const job: OcrBenchmarkJob = { mode, split, status: "running", startedAt: Date.now(), progress: { completed: 0, total: 0 } };
     currentOcrBenchmarkJob = job;
     await audit(user.id, null, "admin.ocr_benchmark.started", "ocr_benchmark", null, { mode, split });
@@ -1328,7 +1343,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const content = await readBytes(request, receiptMaximumBytes);
     if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda bildformatet");
     safeReceiptImageDimensions(mimeType, content);
-    return json(response, 200, await recognizeReceipt(content));
+    return json(response, 200, await recognizeReceiptForRequest(request, response, content));
   }
   if (request.method === "POST" && url.pathname === "/api/quick-tabs") {
     const body = await readJson(request);
@@ -1708,7 +1723,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const content = await readBytes(request, receiptMaximumBytes);
     if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda bildformatet");
     safeReceiptImageDimensions(mimeType, content);
-    const result = await recognizeReceipt(content);
+    const result = await recognizeReceiptForRequest(request, response, content);
     return json(response, 200, result);
   }
   match = url.pathname.match(/^\/api\/expenses\/(\d+)\/receipts$/);
@@ -1863,7 +1878,13 @@ const server = createServer(async (request, response) => {
   try {
     if (url.pathname === "/health") {
       if (!await databaseReady()) throw new Error("Databasen är inte tillgänglig");
-      return json(response, 200, { ok: true, version: appVersion });
+      return json(response, 200, { ok: true, version: appVersion, receiptInference: await receiptInferenceReady() });
+    }
+    if (url.pathname === "/ready") {
+      if (!await databaseReady()) return json(response, 503, { ok: false, database: false });
+      const receiptInference = await receiptInferenceReady();
+      if (receiptInference.configured && !receiptInference.ready) return json(response, 503, { ok: false, database: true, receiptInference });
+      return json(response, 200, { ok: true, database: true, receiptInference });
     }
     if (url.pathname.startsWith("/api/")) return await handleApi(request, response, url);
     if (!["GET", "HEAD"].includes(request.method || "GET")) return json(response, 405, { error: "Metoden stöds inte" });
