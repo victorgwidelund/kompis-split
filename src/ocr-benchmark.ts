@@ -1022,7 +1022,10 @@ export function aggregateOcrScores(scores: OcrFixtureScore[]): OcrBenchmarkAggre
     reconciledAfterKnownAdjustments: sum((s) => (s.reconciledAfterKnownAdjustments ? 1 : 0)) / scores.length,
     selfConsistencyRate: sum((s) => (s.selfConsistent ? 1 : 0)) / scores.length,
     falseMetadataItemsTotal: sum((s) => s.falseMetadataItemCount),
-    receiptsNeedingReview: sum((s) => (s.financiallyReconciled ? 0 : 1)),
+    // A valid discount makes the raw item sum differ from the paid total by design. Calling that an
+    // OCR review case made the admin panel flag a correctly interpreted discount receipt even though
+    // the scorer already proves it reconciles after known adjustments.
+    receiptsNeedingReview: sum((s) => (s.reconciledAfterKnownAdjustments ? 0 : 1)),
     medianMs: percentile(0.5), p90Ms: percentile(0.9), p95Ms: percentile(0.95),
   };
 }

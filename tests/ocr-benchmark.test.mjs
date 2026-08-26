@@ -36,4 +36,5 @@ test("the parser-only benchmark scores near-perfectly against ideal OCR text on 
   // reconciledAfterKnownAdjustments is the metric that should still be exact.
   assert.ok(report.dev && report.dev.reconciledAfterKnownAdjustments === 1, "dev split should fully reconcile once known discounts are accounted for");
   assert.ok(report.legacy && report.legacy.reconciledAfterKnownAdjustments === 1, "legacy split should fully reconcile once known discounts are accounted for");
+  assert.equal(report.overall.receiptsNeedingReview, 0, "known discounts must not be reported as OCR review failures");
 });

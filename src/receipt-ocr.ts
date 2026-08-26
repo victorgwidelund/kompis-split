@@ -451,6 +451,47 @@ function receiptItems(lines: string[]) {
   return items;
 }
 
+function repairedAmbiguousItemLines(lines: string[]) {
+  return lines.map((line) => {
+    // PP-OCRv5 consistently confuses the lowercase l in very short Swedish words with the digit 1
+    // (for example a two-letter word beginning with Ö). Keep this character-level rather than
+    // product-specific, and only offer it as a candidate here; arithmetic validation below decides
+    // whether the candidate is allowed to affect the returned receipt.
+    let repaired = line.replace(
+      /(^|[^\p{L}\p{N}])([\u00c5\u00c4\u00d6\u00e5\u00e4\u00f6])1(?=\s+\d{1,6}[,.]\d{2}\s*(?:kr|sek)?\s*$)/gu,
+      "$1$2l",
+    );
+
+    // A leading price digit can likewise be fused to the final letter of a long item name and read
+    // as l/I/| ("...burgarel27,86" instead of "...burgare 127,86"). Requiring a substantial name
+    // prefix avoids treating legitimate compact names such as "Öl27,86" as 127,86. This remains only
+    // a candidate until the complete receipt total proves it is the better interpretation.
+    const fusedPrice = /^(.*\p{L})([lI|])(\d{2,3}[,.]\d{2}\s*(?:kr|sek)?\s*)$/u.exec(repaired);
+    if (fusedPrice && (fusedPrice[1]!.match(/\p{L}/gu) || []).length >= 5) {
+      repaired = `${fusedPrice[1]} 1${fusedPrice[3]}`;
+    }
+    return repaired;
+  });
+}
+
+function receiptItemsWithArithmeticRepair(lines: string[], total: number | null) {
+  const original = receiptItems(lines);
+  if (total === null) return original;
+  const repairedLines = repairedAmbiguousItemLines(lines);
+  if (repairedLines.every((line, index) => line === lines[index])) return original;
+  const repaired = receiptItems(repairedLines);
+  const discountOre = lines
+    .filter((line) => nonItemAdjustmentWords.test(line))
+    .reduce((sum, line) => sum + Math.round((amountCandidates(line).at(-1) ?? 0) * 100), 0);
+  const totalOre = Math.round(total * 100);
+  const expectedItemTotalsOre = [totalOre, totalOre + discountOre];
+  const deltaOre = (items: ReturnType<typeof receiptItems>) => Math.min(...expectedItemTotalsOre.map((expected) =>
+    Math.abs(items.reduce((sum, item) => sum + Math.round(Number(item.amount) * 100), 0) - expected)));
+  const originalDeltaOre = deltaOre(original);
+  const repairedDeltaOre = deltaOre(repaired);
+  return repairedDeltaOre <= 1 && repairedDeltaOre < originalDeltaOre ? repaired : original;
+}
+
 function suggestedCategory(text: string): ReceiptSuggestion["category"] {
   if (/restaurang|restaurant|café|cafe|espresso|pizza|burger|sushi|mat|livs|ica|coop|willys|hemköp|chips|mandel|heineken|öl|beer|lager|vin|drink|bar\b/i.test(text)) return "food";
   if (/hotell|hotel|hostel|vandrarhem|boende/i.test(text)) return "stay";
@@ -467,7 +508,7 @@ export function parseReceiptText(text: string, now = new Date()): ReceiptSuggest
     amount: total === null ? null : total.toFixed(2),
     expenseDate: receiptDate(lines, now),
     category: suggestedCategory(text),
-    items: receiptItems(lines),
+    items: receiptItemsWithArithmeticRepair(lines, total),
   };
 }
 

@@ -99,7 +99,7 @@ function OcrBenchmarkPanel({ onRun, onStatus }: OcrBenchmarkPanelProps) {
   const pct = (value: number | null) => (value === null ? "–" : `${(value * 100).toFixed(0)} %`);
   const ms = (value: number | null) => (value === null ? "–" : `${Math.round(value)} ms`);
   const report = job?.report;
-  const failures = report?.scores?.filter((score) => !score.financiallyReconciled) || [];
+  const failures = report?.scores?.filter((score) => !score.reconciledAfterKnownAdjustments) || [];
 
   return <section className="panel admin-panel"><div className="panel-title"><div><p className="eyebrow">Kvalitetskontroll</p><h2>OCR-benchmark</h2></div>{job && <span className={`role-badge ${job.status === "running" ? "muted-badge" : job.status === "error" ? "danger-badge" : "positive-badge"}`}>{job.status === "running" ? "Kör…" : job.status === "error" ? "Fel" : "Klar"}</span>}</div>
     {!available ? <p className="muted">Benchmark-korpusen saknas i den här installationen (behöver köras från en image byggd efter v1.23.0).</p> : <>
@@ -121,6 +121,7 @@ function OcrBenchmarkPanel({ onRun, onStatus }: OcrBenchmarkPanelProps) {
           <tr><th>Prisnoggrannhet</th><td>{pct(report.overall.priceAccuracy)}</td></tr>
           <tr><th>Antalsnoggrannhet</th><td>{pct(report.overall.quantityAccuracy)}</td></tr>
           <tr><th>Exakt avstämning</th><td>{pct(report.overall.exactReconciliation)}</td></tr>
+          <tr><th>Avstämning efter rabatter</th><td>{pct(report.overall.reconciledAfterKnownAdjustments)}</td></tr>
           <tr><th>Falska metadata-rader</th><td>{report.overall.falseMetadataItemsTotal}</td></tr>
           <tr><th>Behöver granskning</th><td>{report.overall.receiptsNeedingReview}/{report.overall.receiptCount}</td></tr>
           {report.mode === "image" && <tr><th>Medianhastighet</th><td>{ms(report.overall.medianMs)} (P95 {ms(report.overall.p95Ms)})</td></tr>}

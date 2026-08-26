@@ -117,7 +117,7 @@ function printBreakdown(scores, key, label) {
 }
 
 function printFailures(scores) {
-  const failures = scores.filter((score) => !score.totalCorrect || !score.financiallyReconciled || score.falseMetadataItemCount > 0 || score.unmatchedTruthNames.length || score.unmatchedPredNames.length);
+  const failures = scores.filter((score) => !score.totalCorrect || !score.reconciledAfterKnownAdjustments || score.falseMetadataItemCount > 0 || score.unmatchedTruthNames.length || score.unmatchedPredNames.length);
   if (!failures.length) { console.log("\nNo fixture failures."); return; }
   console.log(`\n-- ${failures.length} fixture(s) with at least one issue --`);
   for (const score of failures) {

@@ -316,7 +316,7 @@ export interface OcrBenchmarkAggregate {
 
 export interface OcrFixtureScore {
   id: string; category: string; difficulty: string; split: string;
-  totalCorrect: boolean; financiallyReconciled: boolean;
+  totalCorrect: boolean; financiallyReconciled: boolean; reconciledAfterKnownAdjustments: boolean;
   unmatchedTruthNames: string[]; unmatchedPredNames: string[]; falseMetadataItems: string[];
 }
 
