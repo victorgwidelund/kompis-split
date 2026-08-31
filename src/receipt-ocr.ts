@@ -1493,6 +1493,23 @@ export async function normalizeReceiptImage(content: Buffer): Promise<{ content:
   }
 }
 
+// Not receipt-specific -- this is where the app's one Sharp dependency already lives, so a profile
+// picture is normalized here too rather than adding a second import site. Center-cropped to a small
+// square (Sharp's "attention" strategy finds the busiest/most detailed region without real face
+// detection) since avatars only ever render small and circular.
+export async function normalizeAvatarImage(content: Buffer): Promise<{ content: Buffer; mimeType: string }> {
+  try {
+    const normalized = await sharp(content, { limitInputPixels: maxReceiptInputPixels, failOn: "error" })
+      .rotate()
+      .resize({ width: 320, height: 320, fit: "cover", position: "attention" })
+      .jpeg({ quality: 88, chromaSubsampling: "4:4:4" })
+      .toBuffer();
+    return { content: normalized, mimeType: "image/jpeg" };
+  } catch {
+    throw new Error("Bilden kunde inte bearbetas. Prova ett annat foto.");
+  }
+}
+
 export async function closeReceiptOcr() {
   const workers = await Promise.all(workerPromises.map((worker) => worker?.catch(() => null) || null));
   workerPromises.fill(undefined);

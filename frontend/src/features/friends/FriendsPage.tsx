@@ -19,7 +19,7 @@ export function FriendsPage({ contacts, onBack, onInviteFriend }: Props) {
         {contacts.length
           ? contacts.map((friend, index) => (
             <article className="friend-card" key={friend.id}>
-              <Avatar name={friend.name} index={index} />
+              <Avatar name={friend.name} index={index} userId={friend.id} />
               <span><strong>{friend.name}</strong><small>{friend.email}</small><small>{friend.swishPhone ? `Swish ${friend.swishPhone}` : "Inget Swish-nummer"}</small></span>
             </article>
           ))
