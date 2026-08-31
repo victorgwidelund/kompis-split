@@ -114,7 +114,11 @@ async function invitationPayload(request: IncomingMessage, token: string, expire
 
 function securityHeaders() {
   return {
-    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+    // font-src/style-src carve out Google Fonts specifically for the Manrope brand typeface --
+    // no other external origin is allowed anywhere in this policy. This only ever fetches public,
+    // unauthenticated font files; no receipt/user data ever leaves the server (see OCR/self-hosting
+    // notes in QUICK_SCAN_ARCHITECTURE.md for the actual privacy-sensitive boundary).
+    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' https://fonts.gstatic.com; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": "camera=(self), geolocation=(), microphone=()",
