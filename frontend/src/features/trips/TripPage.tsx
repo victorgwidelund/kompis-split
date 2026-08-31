@@ -24,6 +24,10 @@ interface Props {
 
 export function TripPage({ trip, user, categories, onBack, onRefresh, onOpenDialog, notify }: Props) {
   const [tab, setTab] = useState<"overview" | "expenses" | "settle" | "people">("overview");
+  const [expandedExpenseId, setExpandedExpenseId] = useState<number | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [uploadingReceiptFor, setUploadingReceiptFor] = useState<number | null>(null);
   const receiptInput = useRef<HTMLInputElement>(null);
   const receiptExpense = useRef<number | null>(null);
   const isMobile = useIsMobile();
@@ -59,18 +63,41 @@ export function TripPage({ trip, user, categories, onBack, onRefresh, onOpenDial
     if (isHeicFile(file)) return notify("HEIC-bilder stöds inte direkt. Byt kamerans bildformat till \"Mest kompatibelt\" eller spara bilden som JPEG först.");
     if (file.type === "application/pdf") {
       if (file.size > 8 * 1024 * 1024) return notify("PDF-kvitton får vara högst 8 MB");
-      await mutate(() => upload(`/api/expenses/${expenseId}/receipts`, file, { "X-File-Name": encodeURIComponent(file.name) }), "Kvittot laddades upp");
+      setUploadingReceiptFor(expenseId);
+      try {
+        notify("Laddar upp kvittot…");
+        await mutate(() => upload(`/api/expenses/${expenseId}/receipts`, file, { "X-File-Name": encodeURIComponent(file.name) }), "Kvittot sparades");
+      } finally { setUploadingReceiptFor(null); }
       return;
     }
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return notify("Välj en JPG-, PNG-, WebP- eller PDF-fil");
     if (file.size > maxOriginalReceiptBytes) return notify(`Bilden är för stor (max ${Math.round(maxOriginalReceiptBytes / 1024 / 1024)} MB)`);
-    notify("Förbereder bild…");
-    const prepared = await prepareReceiptFile(file);
-    await mutate(() => upload(`/api/expenses/${expenseId}/receipts`, prepared, { "X-File-Name": encodeURIComponent(prepared.name) }), "Kvittot laddades upp");
+    setUploadingReceiptFor(expenseId);
+    try {
+      notify("Förbereder bild…");
+      const prepared = await prepareReceiptFile(file);
+      notify("Laddar upp kvittot…");
+      await mutate(() => upload(`/api/expenses/${expenseId}/receipts`, prepared, { "X-File-Name": encodeURIComponent(prepared.name) }), "Kvittot sparades");
+    } finally { setUploadingReceiptFor(null); }
+  };
+  const toggleExpanded = (expenseId: number) => { setExpandedExpenseId((current) => current === expenseId ? null : expenseId); setCommentDraft(""); };
+  const addComment = async (expenseId: number) => {
+    const body = commentDraft.trim(); if (!body || commentBusy) return;
+    setCommentBusy(true);
+    try { await api(`/api/expenses/${expenseId}/comments`, { method: "POST", body: { body } }); await onRefresh(); setCommentDraft(""); }
+    catch (error) { notify(error instanceof Error ? error.message : "Kunde inte spara kommentaren"); }
+    finally { setCommentBusy(false); }
+  };
+  const deleteComment = async (commentId: number) => {
+    if (!confirm("Ta bort kommentaren?")) return;
+    try { await api(`/api/comments/${commentId}`, { method: "DELETE", body: {} }); await onRefresh(); }
+    catch (error) { notify(error instanceof Error ? error.message : "Kunde inte ta bort kommentaren"); }
   };
   const expenseRow = (expense: Expense, allowAction = true) => {
     const receipts = expense.receipts || [];
-    return <article className="expense-entry" key={expense.id}><div className="expense-row"><span className="category-icon" title={category(expense.category).name}>{category(expense.category).emoji}</span><div className="expense-main"><strong>{expense.title}</strong><small>{person(expense.payerId)?.name || "Okänd"} betalade · {formatDate(expense.expenseDate, "Inget datum")} · delat mellan {expense.shares.length}</small></div><div className="expense-amount">{formatMoney(expense.amountCents)}</div>{allowAction && canVoid(expense.createdBy) && !archived && <div className="expense-actions"><button className="edit-button" onClick={() => onOpenDialog("expense", expense)}>Redigera</button><button className="delete-button" aria-label={`Ta bort ${expense.title} från beräkningen`} onClick={() => confirm("Ta bort utgiften från beräkningen? Originalposten sparas i historiken.") && void mutate(() => api(`/api/expenses/${expense.id}`, { method: "DELETE", body: {} }), "Utgiften togs bort från beräkningen")}>×</button></div>}</div><div className="receipt-list">{receipts.map((receipt) => <span className="receipt-chip" key={receipt.id}><a href={`/api/receipts/${receipt.id}`} target="_blank" rel="noopener">{receipt.mimeType === "application/pdf" ? "PDF" : "Kvitto"} · {receipt.fileName} <small>{formatBytes(receipt.byteSize)}</small></a>{allowAction && canVoid(receipt.createdBy) && !archived && <button type="button" aria-label={`Ta bort ${receipt.fileName}`} onClick={() => confirm("Ta bort kvittot permanent? Själva utgiften påverkas inte.") && void mutate(() => api(`/api/receipts/${receipt.id}`, { method: "DELETE", body: {} }), "Kvittot togs bort")}>×</button>}</span>)}{allowAction && !archived && receipts.length < 5 && <button className="receipt-upload" type="button" onClick={() => { receiptExpense.current = expense.id; receiptInput.current?.click(); }}>＋ Lägg till kvitto</button>}</div></article>;
+    const comments = expense.comments || [];
+    const expanded = expandedExpenseId === expense.id;
+    return <article className="expense-entry" key={expense.id}><div className="expense-row"><span className="category-icon" title={category(expense.category).name}>{category(expense.category).emoji}</span><div className="expense-main"><strong>{expense.title}</strong><small>{person(expense.payerId)?.name || "Okänd"} betalade · {formatDate(expense.expenseDate, "Inget datum")} · delat mellan {expense.shares.length}</small></div><div className="expense-amount">{formatMoney(expense.amountCents)}</div>{allowAction && <div className="expense-actions"><button type="button" className="text-button" onClick={() => toggleExpanded(expense.id)}>{expanded ? "Dölj" : comments.length ? `Visa (${comments.length})` : "Visa"}</button>{canVoid(expense.createdBy) && !archived && <><button className="edit-button" onClick={() => onOpenDialog("expense", expense)}>Redigera</button><button className="delete-button" aria-label={`Ta bort ${expense.title} från beräkningen`} onClick={() => confirm("Ta bort utgiften från beräkningen? Originalposten sparas i historiken.") && void mutate(() => api(`/api/expenses/${expense.id}`, { method: "DELETE", body: {} }), "Utgiften togs bort från beräkningen")}>×</button></>}</div>}</div>{expanded && <div className="expense-share-breakdown">{expense.shares.map((share) => <div className="expense-share-row" key={share.participantId}><span>{person(share.participantId)?.name || "Okänd"}</span><b>{formatMoney(share.amountCents)}</b></div>)}</div>}{expanded && <div className="expense-comments"><div className="expense-comment-list">{comments.length ? comments.map((comment) => <div className="expense-comment" key={comment.id}><div className="expense-comment-head"><strong>{comment.authorName}</strong><small>{formatDate(comment.createdAt)}</small>{(manager || comment.createdBy === user.id) && !archived && <button type="button" className="expense-comment-delete" aria-label="Ta bort kommentaren" onClick={() => void deleteComment(comment.id)}>×</button>}</div><p>{comment.body}</p></div>) : <p className="expense-comment-empty">Inga kommentarer ännu.</p>}</div>{!archived && <div className="expense-comment-form"><input type="text" placeholder="Skriv en kommentar…" maxLength={500} value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addComment(expense.id); } }} /><button type="button" className="button ghost small-button" disabled={commentBusy || !commentDraft.trim()} onClick={() => void addComment(expense.id)}>Skicka</button></div>}</div>}<div className="receipt-list">{receipts.map((receipt) => <span className="receipt-chip" key={receipt.id}><a href={`/api/receipts/${receipt.id}`} target="_blank" rel="noopener">{receipt.mimeType === "application/pdf" ? "PDF" : "Kvitto"} · {receipt.fileName} <small>{formatBytes(receipt.byteSize)}</small></a>{allowAction && canVoid(receipt.createdBy) && !archived && <button type="button" aria-label={`Ta bort ${receipt.fileName}`} onClick={() => confirm("Ta bort kvittot permanent? Själva utgiften påverkas inte.") && void mutate(() => api(`/api/receipts/${receipt.id}`, { method: "DELETE", body: {} }), "Kvittot togs bort")}>×</button>}</span>)}{allowAction && !archived && receipts.length < 5 && <button className={`receipt-upload${uploadingReceiptFor === expense.id ? " busy" : ""}`} type="button" disabled={uploadingReceiptFor === expense.id} onClick={() => { receiptExpense.current = expense.id; receiptInput.current?.click(); }}>{uploadingReceiptFor === expense.id ? "Laddar upp…" : "＋ Lägg till kvitto"}</button>}</div></article>;
   };
   const settlementCard = (item: Settlement) => { const from = person(item.fromId); const to = person(item.toId); if (!from || !to) return null; const swish = to.swishPhone ? swishPaymentUrl(to.swishPhone, item.amountCents, trip.name) : ""; const details = `${from.name} betalar ${to.name} ${formatMoney(item.amountCents)} — ${trip.name}`; return <article className="settlement-card" key={`${item.fromId}-${item.toId}`}><div className="settlement-route"><div><Avatar name={from.name} index={item.fromId} /><strong>{from.name}</strong></div><span className="route-arrow">→</span><div><Avatar name={to.name} index={item.toId} /><strong>{to.name}</strong></div></div><div className="settlement-amount"><small>ska betala</small><strong>{formatMoney(item.amountCents)}</strong></div><div className="settlement-actions"><button className={`button ${swish ? "primary" : "ghost"}`} onClick={() => { if (swish) { location.href = swish; setTimeout(() => void copyText(details), 700); } else void copyText(details).then(() => notify("Betalningsdetaljer kopierade")); }}>{swish ? "Öppna Swish" : "Kopiera detaljer"}</button><button className="button ghost" disabled={archived} onClick={() => onOpenDialog("payment", undefined, { fromId: item.fromId, toId: item.toId, amountCents: item.amountCents })}>Markera betald</button></div></article>; };
   const openAmount = trip.settlements.reduce((sum, item) => sum + item.amountCents, 0);

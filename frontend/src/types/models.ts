@@ -82,6 +82,14 @@ export interface ExpenseShare {
   amountCents: number;
 }
 
+export interface ExpenseComment {
+  id: number;
+  body: string;
+  authorName: string;
+  createdBy: number;
+  createdAt: string;
+}
+
 export interface Expense {
   id: number;
   payerId: number;
@@ -93,6 +101,7 @@ export interface Expense {
   createdBy: number;
   shares: ExpenseShare[];
   receipts: Receipt[];
+  comments: ExpenseComment[];
 }
 
 export interface Payment {
