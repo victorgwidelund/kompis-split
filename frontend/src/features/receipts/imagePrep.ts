@@ -12,6 +12,18 @@ export const maxUploadReceiptBytes = 20 * 1024 * 1024;
 const targetLongEdgePx = 3200;
 const proactiveRecompressBytes = 4 * 1024 * 1024;
 const jpegQuality = 0.85;
+// canvas.toBlob is a documented stall point on some mobile WebViews under memory pressure with
+// large images — it can simply never invoke its callback. Everything downstream (the actual
+// upload) already has a timeout guard; this gives the client-side compression step the same
+// fallback-to-original-file safety net instead of hanging the whole dialog.
+const compressionTimeoutMs = 8_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | "timeout"> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve("timeout"), ms);
+    promise.then((value) => { clearTimeout(timer); resolve(value); }, () => { clearTimeout(timer); resolve("timeout"); });
+  });
+}
 
 export function isHeicFile(file: File): boolean {
   const type = file.type.toLowerCase();
@@ -57,8 +69,8 @@ export async function prepareReceiptFile(file: File, onStatus?: (status: string)
     const context = canvas.getContext("2d");
     if (!context) return file;
     context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", jpegQuality));
-    if (!blob || blob.size >= file.size) return file;
+    const blob = await withTimeout(new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", jpegQuality)), compressionTimeoutMs);
+    if (blob === "timeout" || !blob || blob.size >= file.size) return file;
     return new File([blob], `${file.name.replace(/\.\w+$/, "")}.jpg`, { type: "image/jpeg" });
   } catch {
     return file;

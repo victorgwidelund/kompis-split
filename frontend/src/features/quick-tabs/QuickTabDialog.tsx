@@ -57,7 +57,7 @@ export function QuickTabDialog({ open, onClose, onCreated, notify }: { open: boo
     event.preventDefault(); if (busy) return; setError(""); setBusy(true);
     try {
       const payload = await api<{ quickTab: QuickTab; invitation: InvitationResult }>("/api/quick-tabs", { method: "POST", body: { ...values, items: items.map(({ name, quantity, amount }) => ({ name, quantity: Math.min(20, Math.max(1, Number(quantity) || 1)), amount })) } });
-      if (receipt) { try { await upload(`/api/quick-tabs/${payload.quickTab.id}/receipt`, receipt); payload.quickTab.hasReceipt = true; } catch { notify("Snabbnotan skapades, men kvittobilden kunde inte sparas"); } }
+      if (receipt) { setStatusClass("reading"); setStatus("Laddar upp kvittot…"); try { await upload(`/api/quick-tabs/${payload.quickTab.id}/receipt`, receipt); payload.quickTab.hasReceipt = true; setStatusClass("success"); setStatus("Kvittot sparades."); } catch { notify("Snabbnotan skapades, men kvittobilden kunde inte sparas"); } }
       await onCreated(payload.quickTab, payload.invitation); close();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Kunde inte skapa snabbnotan"); setBusy(false); }
   };

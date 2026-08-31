@@ -359,10 +359,15 @@ async function loadTrip(id: number, userId: number) {
   const receiptRows = expenseRows.length
     ? await db.prepare(`SELECT id, expense_id, file_name, mime_type, byte_size, created_by, created_at FROM expense_receipts WHERE expense_id = ANY(?) ORDER BY expense_id, id`).all<any>(expenseRows.map((expense) => expense.id))
     : [];
+  const commentRows = expenseRows.length
+    ? await db.prepare(`SELECT c.id, c.expense_id, c.body, c.created_by, c.created_at, u.display_name author_name FROM expense_comments c JOIN users u ON u.id = c.created_by WHERE c.expense_id = ANY(?) ORDER BY c.expense_id, c.id`).all<any>(expenseRows.map((expense) => expense.id))
+    : [];
   const sharesByExpense = new Map<number, any[]>();
   for (const share of shareRows) { const list = sharesByExpense.get(share.expense_id) || []; list.push(share); sharesByExpense.set(share.expense_id, list); }
   const receiptsByExpense = new Map<number, any[]>();
   for (const receipt of receiptRows) { const list = receiptsByExpense.get(receipt.expense_id) || []; list.push(receipt); receiptsByExpense.set(receipt.expense_id, list); }
+  const commentsByExpense = new Map<number, any[]>();
+  for (const comment of commentRows) { const list = commentsByExpense.get(comment.expense_id) || []; list.push(comment); commentsByExpense.set(comment.expense_id, list); }
   const expenses = expenseRows.map((expense) => ({
     id: expense.id, payerId: expense.payer_id, title: expense.title, amountCents: expense.amount_cents,
     expenseDate: expense.expense_date, category: expense.category, splitMode: expense.split_mode,
@@ -371,6 +376,10 @@ async function loadTrip(id: number, userId: number) {
     receipts: (receiptsByExpense.get(expense.id) || []).map((receipt) => ({
       id: receipt.id, fileName: receipt.file_name, mimeType: receipt.mime_type, byteSize: receipt.byte_size,
       createdBy: receipt.created_by, createdAt: receipt.created_at,
+    })),
+    comments: (commentsByExpense.get(expense.id) || []).map((comment) => ({
+      id: comment.id, body: comment.body, authorName: comment.author_name,
+      createdBy: comment.created_by, createdAt: comment.created_at,
     })),
   }));
   const paymentRows = await db.prepare("SELECT * FROM payments WHERE trip_id = ? AND voided_at IS NULL ORDER BY paid_at DESC, id DESC").all<any>(id);
@@ -1790,6 +1799,31 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       await db.prepare("DELETE FROM expense_receipts WHERE id = ?").run(receipt.id);
     });
     return json(response, 200, { ok: true });
+  }
+  match = url.pathname.match(/^\/api\/expenses\/(\d+)\/comments$/);
+  if (request.method === "POST" && match) {
+    const expense = await db.prepare("SELECT * FROM expenses WHERE id = ? AND voided_at IS NULL").get<any>(Number(match[1]));
+    if (!expense) return json(response, 404, { error: "Utgiften finns inte" });
+    await requireAccess(expense.trip_id, user.id);
+    await requireActiveTrip(expense.trip_id);
+    const body = await readJson(request);
+    const text = cleanText(body.body, "Kommentar", 500);
+    const result = await db.prepare("INSERT INTO expense_comments (expense_id, trip_id, body, created_by) VALUES (?, ?, ?, ?) RETURNING id")
+      .run(expense.id, expense.trip_id, text, user.id);
+    await audit(user.id, expense.trip_id, "comment.created", "comment", Number(result.lastInsertRowid), { expenseId: expense.id });
+    return json(response, 201, { trip: await loadTrip(expense.trip_id, user.id) });
+  }
+  match = url.pathname.match(/^\/api\/comments\/(\d+)$/);
+  if (request.method === "DELETE" && match) {
+    const comment = await db.prepare("SELECT * FROM expense_comments WHERE id = ?").get<any>(Number(match[1]));
+    if (!comment) return json(response, 404, { error: "Kommentaren finns inte" });
+    await requireRecordWriteAccess(comment.trip_id, user.id, comment.created_by);
+    await requireActiveTrip(comment.trip_id);
+    await db.transaction(async () => {
+      await audit(user.id, comment.trip_id, "comment.deleted", "comment", comment.id, { expenseId: comment.expense_id });
+      await db.prepare("DELETE FROM expense_comments WHERE id = ?").run(comment.id);
+    });
+    return json(response, 200, { trip: await loadTrip(comment.trip_id, user.id) });
   }
   match = url.pathname.match(/^\/api\/expenses\/(\d+)$/);
   if (request.method === "PATCH" && match) {

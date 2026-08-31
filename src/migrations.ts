@@ -400,6 +400,24 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [10, "email-settings-and-password-reset"],
     );
+    // Free-text comments on an expense, visible to the whole trip (not gated by edit permission,
+    // same as the read-only per-person share breakdown) so people can ask/clarify without editing
+    // the expense itself.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS expense_comments (
+        id BIGSERIAL PRIMARY KEY,
+        expense_id BIGINT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+        trip_id BIGINT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        body TEXT NOT NULL CHECK(char_length(body) BETWEEN 1 AND 500),
+        created_by BIGINT NOT NULL REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_expense_comments_expense ON expense_comments(expense_id, id);
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [11, "expense-comments"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

@@ -814,7 +814,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 10);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 11);
   // 1 from "Middag på Kajen" + 1 from the Swedish-characters test quick tab ("Ångbåtsbryggan").
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 2);
   // "Erik Gäst" (claims below) + "Först Ansluten" (joined via the original first invite to prove it
