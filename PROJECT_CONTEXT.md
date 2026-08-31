@@ -1,8 +1,8 @@
 # Kompis Split – levande projektkontext
 
 Senast uppdaterad: 2026-08-31
-Appversion: 1.27.1
-Databasschema: migration 11
+Appversion: 1.28.0
+Databasschema: migration 12
 
 Det här dokumentet är den korta tekniska minnesbilden för framtida utveckling. Det ska uppdateras i samma ändring när arkitektur, datamodell, drift, säkerhet, viktiga funktioner, releaser eller kända problem förändras. Lägg aldrig in lösenord, tokens, privata nycklar, riktiga telefonnummer, kvitton eller andra personuppgifter här.
 
@@ -109,7 +109,7 @@ Radera eller återskapa aldrig databasvolymen vid en vanlig uppdatering. En imag
 
 ## Databasmigreringar
 
-Aktuell högsta version är 11:
+Aktuell högsta version är 12:
 
 1. Grundschema för användare, resor, utgifter, betalningar, åtkomst och audit-logg.
 2. Global adminroll, möjlighet att inaktivera konton och frivilligt utgiftsdatum.
@@ -122,6 +122,7 @@ Aktuell högsta version är 11:
 9. Buggrapporter (`bug_reports`) med beskrivning, sidkontext, breadcrumbs och valfri skärmbild.
 10. E-postinställningar (Microsoft Graph, en rad) och lösenordsåterställningstoken.
 11. Fritextkommentarer på en utgift (`expense_comments`), synliga för hela resan oavsett redigeringsbehörighet.
+12. Valfri profilbild (`users.avatar_mime_type`/`avatar_content`), lagrad som bytes precis som kvitton och buggrapportsskärmdumpar.
 
 Nya schemaändringar ska få nästa migrationsnummer. Ändra inte en redan distribuerad migration och gör inga destruktiva volymoperationer.
 
@@ -138,6 +139,8 @@ Nya schemaändringar ska få nästa migrationsnummer. Ändra inte en redan distr
 - Snabbnoter behåller produktmängder på en gemensam rad, låter varje deltagare välja antal och erbjuder förifylld Swish-betalning till skaparen.
 - Kvittobilder komprimeras i webbläsaren (mål ~3200 px långsida, JPEG ~0,85) innan uppladdning och normaliseras igen med Sharp på servern innan lagring, oavsett vad klienten skickade.
 - Admin-only demoläge: en admin kan gå in i en isolerad, fiktiv datauppsättning (två resor, en snabbnota) utan att någonsin kunna läsa eller ändra riktiga användares data, och lämna läget igen utan att logga ut.
+- Valfri profilbild per konto (Mer-sidan), normaliserad och lagrad som bytes; faller tillbaka till initialer överallt annars.
+- Live kategoriförslag utifrån utgiftens titel när en ny utgift skapas, tills användaren själv väljer en kategori.
 - Synligt förenklat versionsnummer från `package.json`/`APP_VERSION`.
 
 ## Test- och releaseflöde
@@ -154,6 +157,10 @@ En push till `main` bygger och publicerar `latest` samt en oföränderlig `sha-*
 
 ## Senaste utvecklingsstatus
 
+- Version 1.28.0 levererar de två punkterna som medvetet sköts upp från 1.26.0:s buggomgång (profilbild och kategoriförslag), på uttrycklig begäran ("Gör resterande nu").
+  - **Profilbild** (migration 12): `users.avatar_mime_type`/`avatar_content`, bytes i Postgres precis som kvitton och buggrapportsskärmdumpar — ingen filsystems- eller objektlagring. `POST /api/users/me/avatar` validerar mime-typ/filens faktiska innehåll/bildmått med exakt samma hjälpfunktioner som kvittouppladdning redan använder, normaliserar med en ny `normalizeAvatarImage()` (`sharp`, `fit:"cover", position:"attention"`, 320×320, JPEG) — Sharps "attention"-beskärning hittar den mest detaljrika regionen utan riktig ansiktsigenkänning, ett rimligt startvärde för ett litet, runt avatarformat. `GET /api/users/:id/avatar` kräver bara inloggning, ingen resemedlemskapskontroll, eftersom det här är en liten privat vänkrets. `DELETE /api/users/me/avatar` återgår till initialer. `Avatar.tsx` fick en valfri `userId`-prop: när den finns försöker komponenten ladda fotot och faller tillbaka till initialer vid 404/fel (`onError`), samt en `refreshKey`-prop som tvingar en ny hämtning direkt efter uppladdning/borttagning (annars behåller React samma `<img src>` och webbläsaren skulle aldrig hämta om den). Alla tio ställen i kodbasen som redan renderade `<Avatar>` uppdaterade att skicka med `userId`/`participant.userId` — gästdeltagare utan konto (`userId: null`) visar fortfarande bara initialer, oförändrat. Ändringsytan är avsiktligt bred (tio filer) men varje ändring är en enrads propp-tillägg. Redigeras via en ny rad i "Mer" (kontoidentiteten), med "Lägg till bild"/"Byt bild"/"Ta bort" beroende på om ett foto faktiskt laddades (spårat via en `onPhotoStatus`-callback från `Avatar.tsx`, inte gissat).
+  - **Kategoriförslag**: `suggestedCategory()` i `receipt-ocr.ts` (används redan för kvittoskannad text) speglades till en ny `frontend/src/utils/categorySuggestion.ts` — inte ett nytt API-anrop, eftersom reglerna är rena, sällan ändrade nyckelordslistor och ett förslag som uppdateras direkt medan man skriver känns bättre utan nätverksfördröjning. `ExpenseDialog`s titelfält föreslår nu kategori live utifrån vad som skrivs (bara för nya utgifter, aldrig vid redigering av en befintlig), men bara fram tills användaren själv rör kategorivalet — då slutar förslaget skriva över, permanent för den öppna dialogen (`categoryTouched`-flagga). En liten text "Föreslagen utifrån namnet" visas under fältet medan ett förslag aktivt styr valet, så beteendet inte känns som magi.
+  - Ingen ändring av `simplifyDebts()`, splitlogiken eller OCR-pipelinen. Verifierat: `pnpm typecheck`/`pnpm lint` rena, hela testsviten grön (75 backend inklusive Postgres-integrationstestet — migrationsräknaren 11→12 uppdaterad igen, samma förväntade engångsjustering som varje ny migration kräver — plus 6 frontend). Manuellt verifierat i webbläsaren mot den lokala utvecklingsdatabasen: en riktig genererad PNG uppladdad via `POST /api/users/me/avatar`, den lagrade bilden hämtad tillbaka och bekräftad som en riktig JPEG (magic bytes `FF D8 FF`, `naturalWidth: 320`), fotot syns korrekt för samma deltagare på ett annat ställe i appen (`balance-row` i en resa), borttagning faller tillbaka till initialer med rätt knapptext, och kategoriförslaget testat både att det träffar rätt ("ICA Kvantum" → Mat och dryck) och att det slutar skriva över efter ett manuellt val.
 - Version 1.27.1 rättar en verklig layoutbugg i 1.27.0:s nya "Alla"-huvudkryssruta, hittad av användaren direkt i produktion (skärmbild: kryssrutan låg ovanför texten "Alla", båda centrerade, i stället för sida vid sida). Grundorsak: `.split-select-all` sätter `display: flex` men aldrig `flex-direction` — och elementet är en `<label>`, som en global regel (`label { display: flex; flex-direction: column; ... }`, till för vanliga fält-etiketter där texten ska stå ovanför inputen) redan satt `flex-direction: column` på. CSS:ens kaskad slår ihop reglerna egenskap för egenskap, inte regel för regel: eftersom `.split-select-all` aldrig själv angav `flex-direction` vann den globala `label`-regelns värde ändå, trots lägre specificitet, och kryssruta+text staplades vertikalt i stället för att stå i rad. Fixat med en explicit `flex-direction: row` (plus `justify-content: flex-start`) i `.split-select-all`. Genomsökte samtliga andra `<label className="...">`-användningar i kodbasen efter samma mönster (en egen klass med `display:flex` men utan egen `flex-direction`, med FLERA synliga flex-barn) — inga fler hittades (`.emoji-field`/`.grow` är avsiktligt kolumnorienterade vanliga fältetiketter, och `.receipt-camera-button`/`.button`-etiketterna har bara ett enda synligt flex-barn eftersom deras `<input>` är `hidden`, så riktningen syns aldrig där oavsett). Verifierat: `pnpm typecheck`/`pnpm lint` rena; layouten bekräftad via `getComputedStyle` (`flexDirection: "row"`) mot en färsk CSS-hämtning, eftersom den lokala webbläsarmiljön inte kunde rendera en riktig skärmdump i det här läget.
 - Version 1.27.0 är direkt uppföljande UX-feedback på 1.26.0, mottagen medan den byggdes/testades i webbläsaren.
   - **En verklig regression i 1.26.0:s egen fix upptäckt under verifiering, inte antagen.** Google Fonts-länken för Manrope (1.26.0:s fix för buggrapport #5) blockerades tyst av appens egen Content-Security-Policy (`style-src 'self' 'unsafe-inline'`, ingen `font-src` alls — föll tillbaka på `default-src 'self'`). En tidigare webbläsarverifiering hade av misstag läst `document.fonts.check()` som "sant" utan att kontrollera konsolen för CSP-fel; en riktig, fräsch flik med tom konsolhistorik avslöjade "blocked by Content-Security-Policy". Fixat genom att lägga till exakt två externa undantag i CSP:n — `style-src ... https://fonts.googleapis.com` och en ny `font-src 'self' https://fonts.gstatic.com` — inget annat externt ursprung tillåts någonstans i policyn. Verifierat i en fräsch flik: noll konsolfel, `document.fonts` visar faktiskt `status: "loaded"` för Manrope 600/700/800.

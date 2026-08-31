@@ -418,6 +418,16 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [11, "expense-comments"],
     );
+    // Optional profile picture. Stored as bytes in Postgres, same as every other image in this app
+    // (receipts, bug report screenshots) -- no filesystem/object storage. Null means "use initials".
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime_type TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_content BYTEA;
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [12, "user-avatars"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

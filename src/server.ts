@@ -9,7 +9,7 @@ import QRCode from "qrcode";
 import { applyMigrations } from "./migrations.js";
 import { closeDatabase, databaseReady, db } from "./database.js";
 import { EmailError, emailSettingsStatus, saveEmailSettings, sendMail } from "./email.js";
-import { closeReceiptOcr, maxReceiptInputPixels, normalizeReceiptImage, receiptInferenceReady, recognizeReceipt } from "./receipt-ocr.js";
+import { closeReceiptOcr, maxReceiptInputPixels, normalizeAvatarImage, normalizeReceiptImage, receiptInferenceReady, recognizeReceipt } from "./receipt-ocr.js";
 import { ocrBenchmarkAvailable, runOcrBenchmarkImage, runOcrBenchmarkParser, type OcrBenchmarkReport } from "./ocr-benchmark.js";
 import { allocateItemQuantities, calculateShares, simplifyDebts } from "./split.js";
 
@@ -32,6 +32,7 @@ const appVersion = String(process.env.APP_VERSION || "dev").replace(/[^a-zA-Z0-9
 // server; this is the hard backend cap (also covers PDFs, which aren't compressed client-side).
 // See DEPLOYMENT.md for the matching Nginx/Cloudflare body-size note.
 const receiptMaximumBytes = 20 * 1024 * 1024;
+const avatarMaximumBytes = 8 * 1024 * 1024;
 const receiptMaximumCount = 5;
 const receiptMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const receiptImageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -164,15 +165,15 @@ async function readJson(request: IncomingMessage): Promise<any> {
   catch { throw new Error("Ogiltig JSON"); }
 }
 
-async function readBytes(request: IncomingMessage, maximumBytes: number): Promise<Buffer> {
+async function readBytes(request: IncomingMessage, maximumBytes: number, label = "Kvittofilen"): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > maximumBytes) throw new HttpError(413, `Kvittofilen får vara högst ${Math.floor(maximumBytes / 1024 / 1024)} MB`);
+    if (size > maximumBytes) throw new HttpError(413, `${label} får vara högst ${Math.floor(maximumBytes / 1024 / 1024)} MB`);
     chunks.push(Buffer.from(chunk));
   }
-  if (!size) throw new Error("Kvittofilen är tom");
+  if (!size) throw new Error(`${label} är tom`);
   return Buffer.concat(chunks);
 }
 
@@ -223,14 +224,14 @@ function webpDimensions(content: Buffer) {
   return null;
 }
 
-function safeReceiptImageDimensions(mimeType: string, content: Buffer) {
+function safeReceiptImageDimensions(mimeType: string, content: Buffer, label = "Kvittofilens") {
   const dimensions = mimeType === "image/png" && content.length >= 24
     ? { width: content.readUInt32BE(16), height: content.readUInt32BE(20) }
     : mimeType === "image/jpeg" ? jpegDimensions(content)
       : mimeType === "image/webp" ? webpDimensions(content) : null;
-  if (!dimensions || dimensions.width < 20 || dimensions.height < 20) throw new HttpError(415, "Kvittofilens bildmått kunde inte läsas");
+  if (!dimensions || dimensions.width < 20 || dimensions.height < 20) throw new HttpError(415, `${label} bildmått kunde inte läsas`);
   if (dimensions.width > 14_000 || dimensions.height > 14_000 || dimensions.width * dimensions.height > maxReceiptInputPixels) {
-    throw new HttpError(413, `Kvittofotot är för stort. Välj en bild på högst ${Math.round(maxReceiptInputPixels / 1_000_000)} megapixlar.`);
+    throw new HttpError(413, `Bilden är för stor. Välj en bild på högst ${Math.round(maxReceiptInputPixels / 1_000_000)} megapixlar.`);
   }
 }
 
@@ -1210,7 +1211,30 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   }
   if (!user) return json(response, 401, { error: "Logga in för att fortsätta" });
 
-  let match;
+  let match = url.pathname.match(/^\/api\/users\/(\d+)\/avatar$/);
+  if (request.method === "GET" && match) {
+    const target = await db.prepare("SELECT avatar_mime_type, avatar_content FROM users WHERE id = ?").get<any>(Number(match[1]));
+    if (!target?.avatar_content) return json(response, 404, { error: "Ingen profilbild" });
+    response.writeHead(200, { ...securityHeaders(), "Content-Type": target.avatar_mime_type, "Cache-Control": "private, no-store" });
+    response.end(target.avatar_content); return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/users/me/avatar") {
+    const [contentType = ""] = String(request.headers["content-type"] || "").split(";", 1);
+    const mimeType = contentType.trim().toLowerCase();
+    if (!receiptImageMimeTypes.has(mimeType)) throw new HttpError(415, "Profilbilden måste vara JPG, PNG eller WebP");
+    const content = await readBytes(request, avatarMaximumBytes, "Bilden");
+    if (!receiptContentMatches(mimeType, content)) throw new HttpError(415, "Filens innehåll matchar inte det valda bildformatet");
+    safeReceiptImageDimensions(mimeType, content, "Bildens");
+    const normalized = await normalizeAvatarImage(content);
+    await db.prepare("UPDATE users SET avatar_mime_type = ?, avatar_content = ? WHERE id = ?").run(normalized.mimeType, normalized.content, user.id);
+    await audit(user.id, null, "user.avatar_updated", "user", user.id);
+    return json(response, 200, { ok: true });
+  }
+  if (request.method === "DELETE" && url.pathname === "/api/users/me/avatar") {
+    await db.prepare("UPDATE users SET avatar_mime_type = NULL, avatar_content = NULL WHERE id = ?").run(user.id);
+    await audit(user.id, null, "user.avatar_removed", "user", user.id);
+    return json(response, 200, { ok: true });
+  }
   if (request.method === "POST" && url.pathname === "/api/admin/demo/enter") {
     requireAdmin(user);
     const token = cookieValue(request, "kompis_session");
