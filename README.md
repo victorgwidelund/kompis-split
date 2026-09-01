@@ -14,6 +14,7 @@ En liten självhostad app för att dela resekostnader med vänner. Frontend är 
 - Admin-only demoläge: visa appen med fiktiva exempeldata utan att röra riktiga konton, resor eller kontakter
 - Aktiva och arkiverade resor samt återställningsbar papperskorg utan att ekonomiska poster försvinner
 - Lika, procentuell, exakt och viktad deterministisk fördelning
+- Filter och tydlig markering av vilka utgifter i en resa du själv är tillagd i
 - Mjuk radering, beständig audit-logg och versionsstyrda databasmigreringar
 - Frivilliga datum för både resor och utgifter
 - Egna, arkiverbara utgiftskategorier samt kvitton direkt under utgiften
