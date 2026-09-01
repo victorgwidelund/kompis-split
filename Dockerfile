@@ -2,7 +2,7 @@ FROM node:24.17.0-alpine3.23 AS build
 WORKDIR /app
 RUN npm install --global pnpm@11.16.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.build.json eslint.config.js ./
-RUN pnpm install --frozen-lockfile
+RUN i=0; until pnpm install --frozen-lockfile; do i=$((i+1)); [ $i -ge 3 ] && exit 1; echo "pnpm install misslyckades, försök $i/3..."; sleep 5; done
 COPY src ./src
 COPY frontend ./frontend
 COPY public ./public
@@ -14,7 +14,7 @@ ARG APP_VERSION=dev
 ENV NODE_ENV=production APP_VERSION=$APP_VERSION
 RUN npm install --global pnpm@11.16.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --prod --frozen-lockfile && pnpm store prune
+RUN i=0; until pnpm install --prod --frozen-lockfile; do i=$((i+1)); [ $i -ge 3 ] && exit 1; echo "pnpm install misslyckades, försök $i/3..."; sleep 5; done && pnpm store prune
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/frontend/dist ./public
 # The in-app admin benchmark is deliberately limited to public development fixtures. Legacy-regression
