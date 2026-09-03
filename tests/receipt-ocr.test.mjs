@@ -794,6 +794,27 @@ test('a quantity leading the line with "*" marking the unit price after the name
   assert.equal(suggestion.amount, "5334.00");
 });
 
+test("the unit-price marker is read even when OCR writes something other than the printed *", () => {
+  // Production OCR returned "4 KRUSIVICE + 85.00 340.00" for this receipt's "*" column, which used to
+  // drop every quantity back to 1. The marker is whatever the engine made of it -- or nothing at all --
+  // so it is optional here, and the arithmetic (quantity x unit == printed row total) is what actually
+  // proves the reading.
+  const quantitiesFor = (marker) => parseReceiptText(
+    `KVITTO\nBISTRO\n8 Biff Rydberg ${marker} 270.00 2160.00\n9 Fernet 2CL ${marker} 50.00 450.00\nTOTALT 2610,00`,
+    new Date("2026-09-01T00:00:00Z"),
+  ).items.map((item) => item.quantity);
+  for (const marker of ["*", "+", "x", "×", "·", "•", ""]) {
+    assert.deepEqual(quantitiesFor(marker), [8, 9], `marker ${JSON.stringify(marker)} lost the quantities`);
+  }
+  // "#" is deliberately NOT accepted as a marker: "# 270" is caught by the existing reference-number
+  // guard (#\s*\d+), which exists so a receipt's "#12345" never becomes an item. A hash is far more
+  // likely to be a reference number than a multiplication sign, so that guard wins on purpose.
+  assert.deepEqual(quantitiesFor("#"), []);
+  // A row whose arithmetic does not prove out must not have a quantity invented for it.
+  const unproven = parseReceiptText("KVITTO\nBISTRO\n8 Biff Rydberg + 270.00 999.00\nTOTALT 999,00", new Date("2026-09-01T00:00:00Z"));
+  assert.deepEqual(unproven.items.map((item) => item.quantity), [1]);
+});
+
 test('a "Notanr:" header line does not become a purchased item when its printed time looks like a price', () => {
   const suggestion = parseReceiptText(gothenburgRestaurantReceipt, new Date("2026-09-01T00:00:00Z"));
   assert.equal(suggestion.items.some((item) => /notanr/i.test(item.name)), false);

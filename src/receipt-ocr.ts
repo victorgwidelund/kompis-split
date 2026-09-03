@@ -338,6 +338,11 @@ function receiptTotal(lines: string[]) {
 // its own exclusion rule (see metadataLineWords etc.); this specifically targets the actual bug shape
 // seen twice now: an unrelated price merging onto a nearby header/footer line.
 const quantityNamePattern = /^\s*\d{1,2}\s*[xX]\s*\S.*[A-Za-zÅÄÖåäö]/;
+// Swedish receipts commonly fuse the multiplier to the product ("2xNachos" or "3*Pant burk").
+// Requiring whitespace after x/* silently turned those into a quantity-one item and lost the
+// printed unit price. Hoisted out of receiptItems() so the leading-count rescue below can ask
+// whether this pattern already handles a line before trying anything looser on it.
+const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s*|\s*\*\s*)/;
 
 function itemsSectionBounds(lines: string[]): { start: number; end: number } {
   // PaddleOCR sometimes emits every item name first, then a separate block of prices further down
@@ -436,12 +441,28 @@ function receiptItems(lines: string[]) {
     // with a menu-numbered name (see menuIndexAmbiguity above), so it is only trusted here when the
     // receipt's own arithmetic proves it: quantity x unit price must equal the printed row total to the
     // öre. Anything that does not reconcile falls through to the generic path untouched.
-    const leadingCountUnitTotal = /^\s*(\d{1,2})\s+(\p{L}[^*]*?)\s*\*\s*((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s+((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
+    // The unit-price marker is whatever the OCR engine made of the printed "*", which is not
+    // reliably a "*": on the receipt that motivated this branch the production engine wrote
+    // "4 KRUSIVICE + 85.00 340.00", and a marker it drops entirely is just as likely. So the
+    // marker is optional here and any of its usual look-alikes is accepted. That is safe only
+    // because the arithmetic below still has to prove the reading -- a wrong marker cannot
+    // invent a quantity when quantity x unit must equal the printed row total to the öre.
+    // Gating this on "quantityPattern can't already read the line" was tried and rejected: that
+    // pattern happily reads the "EX" of "1 EXTRE NEGROAMARO* 590.00 590.00" as a multiplier and
+    // hands back the name "TRE NEGROAMARO", so deferring to it reintroduced that corruption. The
+    // branch therefore runs on any line whose arithmetic proves out, and applies the same leading
+    // multiplier / standalone "à" name cleanups the generic path below does, so overlapping lines
+    // ("2 x Ostron à 29,00 58,00") come out identical either way.
+    const leadingCountUnitTotal = /^\s*(\d{1,2})\s+(\p{L}.*?)\s*[*+x×·•¥%^]?\s*((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s+((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
     if (leadingCountUnitTotal) {
       const quantity = Math.min(20, Math.max(1, Number(leadingCountUnitTotal[1])));
       const unitAmount = parseMoney(leadingCountUnitTotal[3]!);
       const rowAmount = parseMoney(leadingCountUnitTotal[4]!);
-      const name = leadingCountUnitTotal[2]!.replace(leadingNonLetterJunk, "").replace(trailingNonNameJunk, "").slice(0, 100);
+      const name = leadingCountUnitTotal[2]!
+        .replace(/^(?:[oO]?[xX][oO]?\s+)/, "")
+        .replace(/(^|\s)à(\s|$)/gi, " ")
+        .replace(/\s+/g, " ").trim()
+        .replace(leadingNonLetterJunk, "").replace(trailingNonNameJunk, "").slice(0, 100);
       const reconciles = unitAmount !== null && rowAmount !== null && Math.abs(unitAmount * quantity - rowAmount) < 0.005;
       if (reconciles && rowAmount! > 0 && (name.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2) {
         const key = `${name.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "")}|${quantity}|${rowAmount!.toFixed(2)}`;
@@ -451,10 +472,6 @@ function receiptItems(lines: string[]) {
     }
     const amounts = amountCandidates(line);
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
-    // Swedish receipts commonly fuse the multiplier to the product ("2xNachos" or
-    // "3*Pant burk"). Requiring whitespace after x/* silently turned those into a
-    // quantity-one item and lost the printed unit price.
-    const quantityPattern = /^\s*(?:[A-Za-z]{1,3}\s+)?(\d{1,2})(?:(?:[,.]0{1,2})\s+|\s*[A-Za-z]?[xX]{1,2}[oO]?\s*|\s*\*\s*)/;
     const quantityMatch = line.match(quantityPattern);
     if (!quantityMatch && amounts.length > 1 && /^\s*\d+[,.]\d{2}\b/.test(line)) continue;
     const quantity = Math.min(20, Math.max(1, Number(quantityMatch?.[1] || 1)));
