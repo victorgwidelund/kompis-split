@@ -70,7 +70,12 @@ const excludedTotalWords = /\bmoms\b|\bvat\b|\bväxel\b|\bchange\b|\brabatt\b|\b
 // serveringsavgift/service and tel/telefon/telephone added after a real example (a receipt's phone
 // number header and service charge line were both captured as purchased items) -- both are ordinary
 // receipt-header/footer content on genuine Swedish kvitton too, not specific to that one example.
-const metadataLineWords = /\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b|\btip\b|\bdricks\b|\bnetto(?:belopp)?\b|\bnet\s+amount\b|\bserveringsavgift\b|\bservice\b|\btelefon(?:nummer)?\b|\btel\b|\btelephone\b|\bphone\b/i;
+// nota/bord/kvitto/bong + nr/nummer are matched as whole compounds rather than by adding \bnota\b or
+// relaxing \bbord\b: "nota" and "bord" are ordinary Swedish words that can legitimately open a dish
+// name, while "Notanr"/"Bordnr" cannot. A real restaurant receipt printed "Notanr: 69960E 17.34",
+// where 17.34 is the printed TIME -- the existing \bbord\b did not match the compound "Bordnr" either,
+// so the whole header block was one unmatched pattern away from becoming a purchased 17,34 kr row.
+const metadataLineWords = /\b(?:nota|bord|kvitto|bong)(?:nr|nummer)\b|\bbord\b|\bkassa\b|\bkassör(?:en|ska)?\b|\bbeställning\b|\börder\b|\breferens\b|\btransaktions?[-\s]?id\b|\bantal\s+g[äa]ster\b|\bg[äa]ster\b|\bswish\b|\btip\b|\bdricks\b|\bnetto(?:belopp)?\b|\bnet\s+amount\b|\bserveringsavgift\b|\bservice\b|\btelefon(?:nummer)?\b|\btel\b|\btelephone\b|\bphone\b/i;
 // Discounts/coupons reduce the total rather than describing something purchased; letting them
 // become an "item" both mislabels them and throws off the exact-total reconciliation.
 const nonItemAdjustmentWords = /rabatt|kupong|coupon|kampanjpris|medlemspris/i;
@@ -215,6 +220,19 @@ function receiptDate(lines: string[], now: Date) {
       const year = shortYear < 100 ? 2000 + shortYear : shortYear;
       const month = monthNumbers[swedish[2]!.slice(0, 3).toLowerCase()]!;
       const value = validIsoDate(year, month, Number(swedish[1]!), now);
+      if (value) return value;
+    }
+  }
+  // Compact YYMMDD ("260829"), what Swedish cash registers print in the header next to the time, is
+  // deliberately a LAST pass over all lines rather than another branch inside the loop above: a bare
+  // six-digit run is ambiguous with receipt/table/org numbers, so it must never win over a line
+  // further down that carries a real, unambiguous date. validIsoDate does the actual disambiguation --
+  // it rejects an impossible month/day, anything in the future, and anything older than 20 years, which
+  // is what makes the surrounding digits on a genuine receipt safe (an org number's "556803" is month
+  // 68, "146050" is month 60, and a longer digit run never matches \b\d{6}\b in the first place).
+  for (const line of lines) {
+    for (const match of line.matchAll(/\b(\d{2})(\d{2})(\d{2})\b/g)) {
+      const value = validIsoDate(2000 + Number(match[1]), Number(match[2]), Number(match[3]), now);
       if (value) return value;
     }
   }
@@ -407,6 +425,27 @@ function receiptItems(lines: string[]) {
       if (amount && (name.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2) {
         const key = `${name.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "")}|1|${amount.toFixed(2)}`;
         if (!seen.has(key)) { seen.add(key); items.push({ name, quantity: 1, amount: amount.toFixed(2) }); if (items.length >= 60) break; }
+        continue;
+      }
+    }
+    // "8 Biff Rydberg * 270.00 2160.00" -- restaurant POS format where the quantity leads the line and
+    // the "*" marks the UNIT price after the name, rather than following the quantity ("8x Biff"). The
+    // shared quantityPattern below only accepts x/*/",00" immediately after the leading number, so this
+    // whole family silently fell back to quantity 1 (confirmed against a real receipt: 8 Biff Rydberg,
+    // 7 Vodka & Redbull and 9 Fernet all came back as 1). A bare leading number is genuinely ambiguous
+    // with a menu-numbered name (see menuIndexAmbiguity above), so it is only trusted here when the
+    // receipt's own arithmetic proves it: quantity x unit price must equal the printed row total to the
+    // öre. Anything that does not reconcile falls through to the generic path untouched.
+    const leadingCountUnitTotal = /^\s*(\d{1,2})\s+(\p{L}[^*]*?)\s*\*\s*((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s+((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
+    if (leadingCountUnitTotal) {
+      const quantity = Math.min(20, Math.max(1, Number(leadingCountUnitTotal[1])));
+      const unitAmount = parseMoney(leadingCountUnitTotal[3]!);
+      const rowAmount = parseMoney(leadingCountUnitTotal[4]!);
+      const name = leadingCountUnitTotal[2]!.replace(leadingNonLetterJunk, "").replace(trailingNonNameJunk, "").slice(0, 100);
+      const reconciles = unitAmount !== null && rowAmount !== null && Math.abs(unitAmount * quantity - rowAmount) < 0.005;
+      if (reconciles && rowAmount! > 0 && (name.match(/[A-Za-zÅÄÖåäö]/g) || []).length >= 2) {
+        const key = `${name.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "")}|${quantity}|${rowAmount!.toFixed(2)}`;
+        if (!seen.has(key)) { seen.add(key); items.push({ name, quantity, amount: rowAmount!.toFixed(2) }); if (items.length >= 60) break; }
         continue;
       }
     }
