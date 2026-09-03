@@ -743,6 +743,78 @@ test('a standalone "à" unit-price marker is stripped from every item name it ap
   ]);
 });
 
+// The three assertions below all come from one real restaurant receipt (Göteborg, Aug 2026) reported
+// by a user: every quantity came back as 1, the date field stayed empty, and the receipt's own
+// "Notanr:" header line became a purchased 17,34 kr row -- 17.34 being the printed TIME, not a price.
+const gothenburgRestaurantReceipt = `KVITTO
+Jakhchali Restaurang AB
+RESTAURANG HUMM
+Södra vägen 2
+412 52 GBG
+Org.nr:556803-6999 Tel: 031-132235
+Bordnr: 28 260829
+Notanr: 69960E 17.34
+KASSA : 001
+1 Pasta Tryffel * 245.00 245.00
+8 Biff Rydberg * 270.00 2160.00
+4 WISBY LAGER * 89.00 356.00
+1 Suröl * 95.00 95.00
+4 KRUSIVICE * 85.00 340.00
+1 GRÄNGES PILS * 79.00 79.00
+1 EXTRE NEGROAMARO* 590.00 590.00
+1 Cocktail * 144.00 144.00
+7 Vodka & Redbull * 125.00 875.00
+9 Fernet 2CL * 50.00 450.00
+TOTALT: 5334,00
+MOMS 25 % 2929.00 2343.20 585.80
+MOMS 12 % 2405.00 2147.44 257.56
+KORT EXTERN 5334.00-
+VÄLKOMMEN ATER!`;
+
+test('a quantity leading the line with "*" marking the unit price after the name is not silently read as 1', () => {
+  // "8 Biff Rydberg * 270.00 2160.00": the quantity marker follows the NAME, not the number, so the
+  // shared quantityPattern never matched and every row fell back to quantity 1. The leading number is
+  // only trusted when quantity x unit price equals the printed row total to the öre.
+  const suggestion = parseReceiptText(gothenburgRestaurantReceipt, new Date("2026-09-01T00:00:00Z"));
+  assert.deepEqual(suggestion.items, [
+    { name: "Pasta Tryffel", quantity: 1, amount: "245.00" },
+    { name: "Biff Rydberg", quantity: 8, amount: "2160.00" },
+    { name: "WISBY LAGER", quantity: 4, amount: "356.00" },
+    { name: "Suröl", quantity: 1, amount: "95.00" },
+    { name: "KRUSIVICE", quantity: 4, amount: "340.00" },
+    { name: "GRÄNGES PILS", quantity: 1, amount: "79.00" },
+    { name: "EXTRE NEGROAMARO", quantity: 1, amount: "590.00" },
+    { name: "Cocktail", quantity: 1, amount: "144.00" },
+    { name: "Vodka & Redbull", quantity: 7, amount: "875.00" },
+    { name: "Fernet 2CL", quantity: 9, amount: "450.00" },
+  ]);
+  // The rows must still add up to the printed total, which is the whole point of reading quantities.
+  const itemTotal = suggestion.items.reduce((sum, item) => sum + Math.round(Number(item.amount) * 100), 0);
+  assert.equal(itemTotal, 533_400);
+  assert.equal(suggestion.amount, "5334.00");
+});
+
+test('a "Notanr:" header line does not become a purchased item when its printed time looks like a price', () => {
+  const suggestion = parseReceiptText(gothenburgRestaurantReceipt, new Date("2026-09-01T00:00:00Z"));
+  assert.equal(suggestion.items.some((item) => /notanr/i.test(item.name)), false);
+  assert.equal(suggestion.items.some((item) => item.amount === "17.34"), false);
+});
+
+test("a compact YYMMDD register date is read when no unambiguous date format is printed", () => {
+  const suggestion = parseReceiptText(gothenburgRestaurantReceipt, new Date("2026-09-01T00:00:00Z"));
+  assert.equal(suggestion.expenseDate, "2026-08-29");
+});
+
+test("a compact YYMMDD date never overrides an unambiguous printed date, and impossible runs are ignored", () => {
+  // The six-digit pass runs only after every line has been checked for real date formats, so a receipt
+  // number that happens to parse as a date cannot win over the date the receipt actually prints.
+  const withRealDate = parseReceiptText("KAFE\nKvittonr 260829\nDatum 2026-08-31\nBulle 45,00\nTOTALT 45,00", new Date("2026-09-01T00:00:00Z"));
+  assert.equal(withRealDate.expenseDate, "2026-08-31");
+  // An org number ("556803" -> month 68) and a longer digit run must not be mistaken for a date.
+  const noDate = parseReceiptText("KAFE\nOrg.nr:556803-6999\nSkvnotanr : 0000000146050\nBulle 45,00\nTOTALT 45,00", new Date("2026-09-01T00:00:00Z"));
+  assert.equal(noDate.expenseDate, null);
+});
+
 test("two bundled Swedish OCR workers can process receipts concurrently", { timeout: 30_000 }, async () => {
   try {
     const blankImage = await sharp({ create: { width: 320, height: 120, channels: 3, background: "white" } }).png().toBuffer();
