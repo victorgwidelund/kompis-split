@@ -1,5 +1,6 @@
 const money = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", maximumFractionDigits: 2 });
 const dateFormat = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short", year: "numeric" });
+const dateTimeFormat = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 export const monthFormat = new Intl.DateTimeFormat("sv-SE", { month: "short", year: "2-digit" });
 
 export function formatMoney(ore: number): string {
@@ -18,6 +19,15 @@ export function formatDate(value: string | null | undefined, fallback = "Inga da
     ? new Date(text.replace(" ", "T") + (text.includes("Z") ? "" : "Z"))
     : new Date(`${text}T12:00:00`);
   return dateFormat.format(date);
+}
+
+export function formatDateTime(value: string | null | undefined, fallback = "Inget datum angivet"): string {
+  if (!value) return fallback;
+  const text = String(value);
+  const date = text.includes("T") || text.includes(" ")
+    ? new Date(text.replace(" ", "T") + (text.includes("Z") ? "" : "Z"))
+    : new Date(`${text}T12:00:00`);
+  return dateTimeFormat.format(date);
 }
 
 export function initials(name: string): string {
