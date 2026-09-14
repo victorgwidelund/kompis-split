@@ -428,6 +428,26 @@ export async function applyMigrations(): Promise<void> {
       "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
       [12, "user-avatars"],
     );
+    // Web Push: one subscription row per browser/device (a user can have several), plus a single
+    // per-account kill switch. Defaulting the switch to TRUE is safe -- a subscription can only ever
+    // exist after that specific browser's own permission prompt was accepted, so nothing is ever
+    // pushed to a device that hasn't explicitly opted in, regardless of this default.
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+    `);
+    await client.query(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+      [13, "push-notifications"],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

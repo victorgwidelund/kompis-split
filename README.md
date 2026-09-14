@@ -139,6 +139,8 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `OCR_MEMORY_LIMIT` | `1g` | Compose-minnesgräns för inference-tjänsten |
 | `OCR_CPU_LIMIT` | `8` | Compose CPU-gräns för inference-tjänsten |
 | `RECEIPT_OCR_WORKERS` | `1` | Tesseract-arbetare i den lokala reservvägen |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | tomma | Web Push-nycklar. Genereras en gång med `node -e "console.log(require('web-push').generateVAPIDKeys())"`. Lämnas de tomma stannar push-notiser helt inaktiverat — ingen krasch, växeln i appen döljs bara |
+| `VAPID_SUBJECT` | `mailto:admin@example.com` | Kontaktadress push-tjänsterna kan nå vid missbruk, krävs av Web Push-standarden |
 
 ## Lokal utveckling
 

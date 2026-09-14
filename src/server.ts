@@ -12,6 +12,7 @@ import { EmailError, emailSettingsStatus, saveEmailSettings, sendMail } from "./
 import { closeReceiptOcr, maxReceiptInputPixels, normalizeAvatarImage, normalizeReceiptImage, receiptInferenceReady, recognizeReceipt } from "./receipt-ocr.js";
 import { ocrBenchmarkAvailable, runOcrBenchmarkImage, runOcrBenchmarkParser, type OcrBenchmarkReport } from "./ocr-benchmark.js";
 import { allocateItemQuantities, calculateShares, simplifyDebts } from "./split.js";
+import { sendPushToUser, vapidPublicKey } from "./push.js";
 
 const scrypt = promisify(scryptCallback);
 function integerEnvironment(name: string, fallback: number, minimum: number, maximum: number) {
@@ -276,7 +277,7 @@ async function sessionUser(request: IncomingMessage) {
   const token = cookieValue(request, "kompis_session");
   if (!token) return null;
   return await db.prepare(`
-    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, s.demo_mode, s.demo_batch_id
+    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, u.notifications_enabled, s.demo_mode, s.demo_batch_id
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.is_disabled = FALSE
   `).get(sessionId(token)) || null;
@@ -309,7 +310,7 @@ async function quickTabViewer(request: IncomingMessage, quickTabId: number, user
 }
 
 function publicUser(user: any) {
-  return { id: user.id, email: user.email, name: user.display_name, swishPhone: user.swish_phone, isAdmin: Boolean(user.is_admin) };
+  return { id: user.id, email: user.email, name: user.display_name, swishPhone: user.swish_phone, isAdmin: Boolean(user.is_admin), notificationsEnabled: Boolean(user.notifications_enabled) };
 }
 
 function requireAdmin(user: any) {
@@ -530,7 +531,7 @@ async function adminOverview() {
       (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e JOIN trips t ON t.id = e.trip_id WHERE e.voided_at IS NULL AND t.deleted_at IS NULL) total_cents
   `).get<any>();
   const users = (await db.prepare(`
-    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, u.created_at,
+    SELECT u.id, u.email, u.display_name, u.swish_phone, u.is_admin, u.is_disabled, u.notifications_enabled, u.created_at,
       (SELECT COUNT(*) FROM trip_access ta JOIN trips t ON t.id = ta.trip_id WHERE ta.user_id = u.id AND t.deleted_at IS NULL) trip_count,
       (SELECT COUNT(*) FROM trips t WHERE t.created_by = u.id AND t.deleted_at IS NULL) created_trip_count
     FROM users u ORDER BY u.is_admin DESC, u.is_disabled, lower(u.display_name), u.id
@@ -597,13 +598,13 @@ async function unpaidRemindersFor(creditorUserId: number) {
   // personTotals) for quick tabs they own. Only registered debtors with a linked account are
   // reminded -- guests and unlinked participants have no email on file to send to. This is a
   // per-user action (any account can remind their own debtors), not an admin broadcast.
-  const perUser = new Map<number, { name: string; email: string; items: Array<{ label: string; amountCents: number }> }>();
+  const perUser = new Map<number, { userId: number; name: string; email: string; items: Array<{ label: string; amountCents: number }> }>();
   const addItem = async (userId: number | null, label: string, amountCents: number) => {
     if (!userId || userId === creditorUserId || amountCents <= 0) return;
     if (!perUser.has(userId)) {
       const account = await db.prepare("SELECT display_name, email FROM users WHERE id = ? AND is_disabled = FALSE").get<any>(userId);
       if (!account) return;
-      perUser.set(userId, { name: account.display_name, email: account.email, items: [] });
+      perUser.set(userId, { userId, name: account.display_name, email: account.email, items: [] });
     }
     perUser.get(userId)!.items.push({ label, amountCents });
   };
@@ -1013,7 +1014,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   }
 
   if (request.method === "GET" && url.pathname === "/api/session") {
-    return json(response, 200, { authenticated: Boolean(user), needsSetup: userCount === 0, version: appVersion, user: user ? publicUser(user) : null, demoMode: Boolean(user?.demo_mode) });
+    return json(response, 200, { authenticated: Boolean(user), needsSetup: userCount === 0, version: appVersion, user: user ? publicUser(user) : null, demoMode: Boolean(user?.demo_mode), vapidPublicKey });
   }
   if (request.method === "POST" && url.pathname === "/api/invitations/preview") {
     const body = await readJson(request);
@@ -1165,6 +1166,11 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       await audit(null, null, "quick_tab.guest_joined", "quick_tab_guest", id, { quickTabId: Number(invitation.quick_tab_id) });
       return id;
     });
+    const owner = await db.prepare(`
+      SELECT qta.user_id, qt.name FROM quick_tab_access qta JOIN quick_tabs qt ON qt.id = qta.quick_tab_id
+      WHERE qta.quick_tab_id = ? AND qta.role = 'owner'
+    `).get<any>(invitation.quick_tab_id);
+    if (owner?.user_id) void sendPushToUser(owner.user_id, { title: "Ny deltagare", body: `${name} gick med i ${owner.name}`, url: `/#quick-tab-${invitation.quick_tab_id}` }).catch(() => undefined);
     return json(response, 201, {
       quickTabId: Number(invitation.quick_tab_id), guest: { id: guestId, name, swishPhone },
     }, { "Set-Cookie": quickGuestCookie(Number(invitation.quick_tab_id), guestToken) });
@@ -1234,6 +1240,31 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     await db.prepare("UPDATE users SET avatar_mime_type = NULL, avatar_content = NULL WHERE id = ?").run(user.id);
     await audit(user.id, null, "user.avatar_removed", "user", user.id);
     return json(response, 200, { ok: true });
+  }
+  if (request.method === "POST" && url.pathname === "/api/push/subscribe") {
+    const body = await readJson(request);
+    const endpoint = cleanText(body.endpoint, "Endpoint", 1000);
+    const p256dh = cleanText(body?.keys?.p256dh, "Nyckel", 200);
+    const auth = cleanText(body?.keys?.auth, "Nyckel", 200);
+    // A device re-subscribing (browser data cleared, permission re-granted) gets a new endpoint from
+    // the push service, but the same endpoint can also legitimately move to a different account on a
+    // shared device -- upsert on the endpoint so either case just leaves one correct row.
+    await db.prepare(`
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)
+      ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id, p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth
+    `).run(user.id, endpoint, p256dh, auth);
+    return json(response, 201, { ok: true });
+  }
+  if (request.method === "POST" && url.pathname === "/api/push/unsubscribe") {
+    const body = await readJson(request);
+    const endpoint = String(body.endpoint || "");
+    if (endpoint) await db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?").run(endpoint, user.id);
+    return json(response, 200, { ok: true });
+  }
+  if (request.method === "POST" && url.pathname === "/api/notifications/settings") {
+    const body = await readJson(request);
+    await db.prepare("UPDATE users SET notifications_enabled = ? WHERE id = ?").run(Boolean(body.enabled), user.id);
+    return json(response, 200, { user: publicUser(await db.prepare("SELECT * FROM users WHERE id = ?").get(user.id)) });
   }
   if (request.method === "POST" && url.pathname === "/api/admin/demo/enter") {
     requireAdmin(user);
@@ -1328,6 +1359,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       } catch (error) {
         errors.push(`${summary.name}: ${error instanceof Error ? error.message : "okänt fel"}`);
       }
+      void sendPushToUser(summary.userId, { title: "Påminnelse", body: `${user.display_name} påminner om ${formatSek(totalCents)} obetalt`, url: "/" }).catch(() => undefined);
     }
     await audit(user.id, null, "reminders.sent", "user", null, { sent, total: summaries.length });
     return json(response, 200, { sent, total: summaries.length, errors });
@@ -1355,7 +1387,18 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const body = await readJson(request);
     const invitation = await invitationByToken(String(body.token || ""));
     if (!invitation) return json(response, 404, { error: "Inbjudan är ogiltig eller har gått ut" });
-    await joinInvitation(invitation, user.id);
+    const joined = await joinInvitation(invitation, user.id);
+    // The joiner just clicked this link and is already in the app -- a push to them would be a
+    // no-op. The useful direction is telling whoever shared the link that someone actually joined.
+    if (joined && invitation.invited_by && Number(invitation.invited_by) !== user.id) {
+      if (invitation.kind === "quick_tab") {
+        const tab = await db.prepare("SELECT name FROM quick_tabs WHERE id = ?").get<any>(invitation.quick_tab_id);
+        void sendPushToUser(Number(invitation.invited_by), { title: "Ny deltagare", body: `${user.display_name} gick med i ${tab?.name}`, url: `/#quick-tab-${invitation.quick_tab_id}` }).catch(() => undefined);
+      } else if (invitation.trip_id) {
+        const trip = await db.prepare("SELECT name FROM trips WHERE id = ?").get<any>(invitation.trip_id);
+        void sendPushToUser(Number(invitation.invited_by), { title: "Ny gruppmedlem", body: `${user.display_name} gick med i ${trip?.name}`, url: `/#trip-${invitation.trip_id}` }).catch(() => undefined);
+      }
+    }
     return json(response, 200, { tripId: invitation.trip_id || null, quickTabId: invitation.quick_tab_id || null });
   }
   if (request.method === "POST" && url.pathname === "/api/friend-invitations") {
@@ -1501,7 +1544,13 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       await db.prepare(`INSERT INTO quick_tab_payments (quick_tab_id, ${identityColumn}, marked_by) VALUES (?, ?, ?)`).run(quickTabId, targetId, user.id);
     }
     broadcastQuickTab(quickTabId);
-    return json(response, 200, { quickTab: await loadQuickTab(quickTabId, await quickTabViewer(request, quickTabId, user)) });
+    const updatedQuickTab = await loadQuickTab(quickTabId, await quickTabViewer(request, quickTabId, user));
+    // Only push on a fresh "paid" mark, not on undoing one -- a correction isn't news worth a
+    // notification, and only registered users (kind "u") have an account a push can reach.
+    if (kind === "u" && body.paid !== false && targetId !== user.id) {
+      void sendPushToUser(targetId, { title: "Betalning registrerad", body: `Du markerades som betald i ${updatedQuickTab?.name}`, url: `/#quick-tab-${quickTabId}` }).catch(() => undefined);
+    }
+    return json(response, 200, { quickTab: updatedQuickTab });
   }
   match = url.pathname.match(/^\/api\/admin\/quick-tabs\/(\d+)$/);
   if (request.method === "DELETE" && match) {
@@ -1715,7 +1764,9 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       await db.prepare("INSERT INTO participants (trip_id, name, swish_phone) VALUES (?, ?, ?)").run(tripId, cleanText(body.name, "Namn", 60), normalizePhone(body.swishPhone));
     }
     await audit(user.id, tripId, "participant.added", "participant", null);
-    return json(response, 201, { trip: await loadTrip(tripId, user.id) });
+    const updatedTrip = await loadTrip(tripId, user.id);
+    if (body.userId && Number(body.userId) !== user.id) void sendPushToUser(Number(body.userId), { title: "Ny grupp", body: `Du lades till i ${updatedTrip?.name || "en grupp"}`, url: `/#trip-${tripId}` }).catch(() => undefined);
+    return json(response, 201, { trip: updatedTrip });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/expenses$/);
   if (request.method === "POST" && match) {
@@ -1735,7 +1786,14 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       await audit(user.id, tripId, "expense.created", "expense", expenseId, { amountCents });
       return expenseId;
     });
-    return json(response, 201, { expenseId, trip: await loadTrip(tripId, user.id) });
+    const updatedTrip = await loadTrip(tripId, user.id);
+    for (const entry of entries) {
+      const participant = updatedTrip?.participants.find((item) => item.id === entry.participantId);
+      if (participant?.userId && participant.userId !== user.id) {
+        void sendPushToUser(participant.userId, { title: "Ny utgift", body: `${user.display_name} lade till ${body.title} · ${formatSek(amountCents)} i ${updatedTrip?.name}`, url: `/#trip-${tripId}` }).catch(() => undefined);
+      }
+    }
+    return json(response, 201, { expenseId, trip: updatedTrip });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/payments$/);
   if (request.method === "POST" && match) {
@@ -1746,7 +1804,15 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const result = await db.prepare("INSERT INTO payments (trip_id, from_id, to_id, amount_cents, note, created_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
       .run(tripId, fromId, toId, amountCents, body.note ? cleanText(body.note, "Anteckning", 120) : null, user.id);
     await audit(user.id, tripId, "payment.created", "payment", Number(result.lastInsertRowid), { amountCents });
-    return json(response, 201, { trip: await loadTrip(tripId, user.id) });
+    const updatedTrip = await loadTrip(tripId, user.id);
+    const fromParticipant = updatedTrip?.participants.find((item) => item.id === fromId);
+    const toParticipant = updatedTrip?.participants.find((item) => item.id === toId);
+    for (const notifyTarget of [fromParticipant, toParticipant]) {
+      if (notifyTarget?.userId && notifyTarget.userId !== user.id) {
+        void sendPushToUser(notifyTarget.userId, { title: "Betalning registrerad", body: `${fromParticipant?.name} betalade ${toParticipant?.name} ${formatSek(amountCents)} i ${updatedTrip?.name}`, url: `/#trip-${tripId}` }).catch(() => undefined);
+      }
+    }
+    return json(response, 201, { trip: updatedTrip });
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/receipts\/analyze$/);
   if (request.method === "POST" && match) {
@@ -1919,7 +1985,11 @@ function serveStatic(response: ServerResponse, pathname: string) {
   catch { filePath = join(publicDirectory, "index.html"); }
   const extension = extname(filePath);
   const isHtml = extension === ".html";
-  const isVersionedAsset = [".css", ".js"].includes(extension);
+  // The service worker file must never be immutably cached like other .js -- browsers only ever
+  // learn about a new version by re-fetching this exact file, so a long-lived cache would make a
+  // future SW update permanently unreachable for anyone who already has one installed.
+  const isServiceWorker = safePath === "sw.js";
+  const isVersionedAsset = !isServiceWorker && [".css", ".js"].includes(extension);
   const content = isHtml
     ? readFileSync(filePath, "utf8")
       .replace('href="/styles.css"', `href="/styles.css?v=${appVersion}"`)
@@ -1927,7 +1997,7 @@ function serveStatic(response: ServerResponse, pathname: string) {
   response.writeHead(200, {
     ...securityHeaders(),
     "Content-Type": mimeTypes[extension] || "application/octet-stream",
-    "Cache-Control": isHtml ? "no-store" : isVersionedAsset ? "public, max-age=31536000, immutable" : "public, max-age=3600",
+    "Cache-Control": isHtml || isServiceWorker ? "no-store" : isVersionedAsset ? "public, max-age=31536000, immutable" : "public, max-age=3600",
   });
   response.end(content);
 }

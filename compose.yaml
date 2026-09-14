@@ -79,6 +79,9 @@ services:
       RECEIPT_INFERENCE_TIMEOUT_MS: "${RECEIPT_INFERENCE_TIMEOUT_MS:-15000}"
       RECEIPT_NORMALIZED_FALLBACK: "false"
       RECEIPT_OCR_WORKERS: "${RECEIPT_OCR_WORKERS:-1}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:admin@example.com}"
     networks:
       - default
       - receipt-private

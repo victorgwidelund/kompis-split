@@ -15,7 +15,7 @@ export default defineConfig({
     {
       name: "kompis-split-static-assets",
       closeBundle() {
-        for (const file of ["styles.css", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png"]) {
+        for (const file of ["styles.css", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "sw.js"]) {
           copyFileSync(resolve(frontendRoot, "../public", file), resolve(frontendRoot, "dist", file));
         }
       },

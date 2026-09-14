@@ -19,9 +19,10 @@ import { ExpenseDialog } from "./features/trips/ExpenseDialog";
 import { CategoryDialog, InviteDialog, PaymentDialog, PersonDialog } from "./features/trips/TripDialogs";
 import { TripPage, type PaymentPreset, type TripDialog } from "./features/trips/TripPage";
 import { useIsMobile } from "./hooks/useIsMobile";
+import { registerServiceWorker } from "./pushNotifications";
 import type { AdminResponse, Category, DashboardResponse, Expense, InvitationPreview, InvitationResult, OcrBenchmarkJob, QuickTab, QuickTabSummary, ReminderResult, SessionResponse, StatisticsResponse, Trip, User, View } from "./types/models";
 
-const guestUser: User = { id: 0, email: "", name: "Gäst", swishPhone: null, isAdmin: false };
+const guestUser: User = { id: 0, email: "", name: "Gäst", swishPhone: null, isAdmin: false, notificationsEnabled: false };
 
 function hashView(): View {
   const trip = location.hash.match(/^#trip-(\d+)$/); if (trip) return { page: "trip", id: Number(trip[1]) };
@@ -46,7 +47,10 @@ function resetPasswordToken(): string {
 
 export default function App() {
   const isMobile = useIsMobile();
-  const [loading, setLoading] = useState(true); const [user, setUser] = useState<User | null>(null); const [guestMode, setGuestMode] = useState(false); const [needsSetup, setNeedsSetup] = useState(false); const [version, setVersion] = useState("dev"); const [token, setToken] = useState(inviteToken); const [invitation, setInvitation] = useState<InvitationPreview | null>(null); const [authMode, setAuthMode] = useState<AuthMode>("login"); const [demoMode, setDemoMode] = useState(false); const [resetToken, setResetToken] = useState(resetPasswordToken);
+  const [loading, setLoading] = useState(true); const [user, setUser] = useState<User | null>(null); const [guestMode, setGuestMode] = useState(false); const [needsSetup, setNeedsSetup] = useState(false); const [version, setVersion] = useState("dev"); const [token, setToken] = useState(inviteToken); const [invitation, setInvitation] = useState<InvitationPreview | null>(null); const [authMode, setAuthMode] = useState<AuthMode>("login"); const [demoMode, setDemoMode] = useState(false); const [resetToken, setResetToken] = useState(resetPasswordToken); const [vapidPublicKey, setVapidPublicKey] = useState<string | null>(null);
+  // Push only ever makes sense for a real, non-demo account -- registering a subscription for a
+  // demo session would be pointless (the whole point of demo mode is that nothing there is real).
+  useEffect(() => { if (user && !guestMode && !demoMode) void registerServiceWorker(); }, [user, guestMode, demoMode]);
   const initialToken = useRef(token);
   const initialResetToken = useRef(resetToken);
   const [view, setView] = useState<View>({ page: "dashboard" }); const [dashboard, setDashboard] = useState<DashboardResponse | null>(null); const [quickTabs, setQuickTabs] = useState<QuickTabSummary[]>([]); const [categories, setCategories] = useState<Category[]>([]); const [trip, setTrip] = useState<Trip | null>(null); const [quickTab, setQuickTab] = useState<QuickTab | null>(null); const [statistics, setStatistics] = useState<StatisticsResponse | null>(null); const [admin, setAdmin] = useState<AdminResponse | null>(null);
@@ -61,7 +65,7 @@ export default function App() {
     try {
       let preview: InvitationPreview | null = null;
       if (initialToken.current) { try { preview = (await api<{ invitation: InvitationPreview }>("/api/invitations/preview", { method: "POST", body: { token: initialToken.current } })).invitation; setInvitation(preview); } catch (error) { notify(error instanceof Error ? error.message : "Inbjudan är ogiltig"); setToken(""); history.replaceState(null, "", location.pathname); } }
-      const session = await api<SessionResponse>("/api/session"); setVersion(session.version || "dev"); setNeedsSetup(session.needsSetup); setDemoMode(Boolean(session.demoMode));
+      const session = await api<SessionResponse>("/api/session"); setVersion(session.version || "dev"); setNeedsSetup(session.needsSetup); setDemoMode(Boolean(session.demoMode)); setVapidPublicKey(session.vapidPublicKey);
       if (session.authenticated && session.user) {
         let target: View | undefined;
         if (initialToken.current) {
@@ -124,7 +128,7 @@ export default function App() {
     {view.page === "quick-tabs" && <QuickTabsListPage quickTabs={quickTabs} onNavigate={(next) => void navigate(next)} onNewQuickTab={() => setGlobalDialog("quick")} />}
     {view.page === "friends" && dashboard && <FriendsPage contacts={dashboard.contacts} onBack={() => void navigate({ page: "more" })} onInviteFriend={() => setGlobalDialog("friend")} />}
     {view.page === "statistics" && statistics && <StatisticsPage data={statistics} onBack={() => void navigate({ page: "dashboard" })} onRefresh={() => void api<StatisticsResponse>("/api/statistics").then(setStatistics)} />}
-    {view.page === "more" && user && <MorePage user={user} version={version} onNavigate={(next) => void navigate(next)} onReportBug={() => setGlobalDialog("bug")} onLogout={() => void api("/api/logout", { method: "POST", body: {} }).then(() => location.reload())} notify={notify} />}
+    {view.page === "more" && user && <MorePage user={user} version={version} vapidPublicKey={vapidPublicKey} onUserUpdate={setUser} onNavigate={(next) => void navigate(next)} onReportBug={() => setGlobalDialog("bug")} onLogout={() => void api("/api/logout", { method: "POST", body: {} }).then(() => location.reload())} notify={notify} />}
     {view.page === "guide" && user && <GuidePage isAdmin={user.isAdmin} onBack={() => void navigate(isMobile ? { page: "more" } : { page: "dashboard" })} />}
     {view.page === "admin" && admin && user && <AdminPage data={admin} currentUserId={user.id} demoMode={demoMode} onEnterDemo={() => void enterDemo()} onBack={() => void navigate(isMobile ? { page: "more" } : { page: "dashboard" })} onRefresh={() => void reloadAdmin()} onOpenTrip={(id) => void navigate({ page: "trip", id })} onUserUpdate={(id, update) => void api(`/api/admin/users/${id}`, { method: "PATCH", body: update }).then(reloadAdmin).then(() => notify("Kontot uppdaterades"))} onTripArchive={(id, archived) => void api(`/api/trips/${id}/archive`, { method: "POST", body: { archived } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen uppdaterades"))} onTripRestore={(id) => void api(`/api/trips/${id}/trash`, { method: "POST", body: { deleted: false } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen återställdes"))} onQuickTabDelete={(id) => void api(`/api/admin/quick-tabs/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Snabbnotan togs bort"))} onBugReportResolve={(id, resolved) => void api(`/api/admin/bug-reports/${id}/resolve`, { method: "POST", body: { resolved } }).then(reloadAdmin).then(() => notify(resolved ? "Markerad som löst" : "Markerad som olöst"))} onBugReportDelete={(id) => void api(`/api/admin/bug-reports/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Buggrapporten togs bort"))} onEmailSettingsSave={(values) => api("/api/admin/email-settings", { method: "POST", body: values }).then(reloadAdmin).then(() => notify("E-postinställningarna sparades")) as Promise<void>} onEmailSettingsTest={(recipientEmail) => api<{ recipient: string }>("/api/admin/email-settings/test", { method: "POST", body: { recipientEmail } }).then((result) => `Testmail skickat till ${result.recipient}`)} onOcrBenchmarkRun={(mode) => api<{ available: boolean; job: OcrBenchmarkJob }>("/api/admin/ocr-benchmark", { method: "POST", body: { mode } })} onOcrBenchmarkStatus={() => api<{ available: boolean; job: OcrBenchmarkJob | null }>("/api/admin/ocr-benchmark")} />}
   </Shell>
