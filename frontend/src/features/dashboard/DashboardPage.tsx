@@ -15,7 +15,7 @@ interface Props {
   onNewTrip: () => void;
   onNewQuickTab: () => void;
   onInviteFriend: () => void;
-  onRemindUnpaid: () => Promise<ReminderResult>;
+  onRemindUnpaid: (tripId?: number) => Promise<ReminderResult>;
   notify: (message: string) => void;
 }
 
@@ -35,7 +35,7 @@ export function DashboardPage({ user, dashboard, quickTabs, categories, onNaviga
   const category = (slug: string) => categories.find((item) => item.slug === slug) || { emoji: "🧾", name: slug };
   const scrollToTrips = () => { panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); panelRef.current?.focus({ preventScroll: true }); };
   const remindUnpaid = async () => {
-    if (!confirm("Skicka en påminnelse via mail till alla som är skyldiga dig pengar?")) return;
+    if (!confirm("Skicka en påminnelse via mail och push till alla som är skyldiga dig pengar?")) return;
     setReminding(true);
     try {
       const result = await onRemindUnpaid();
@@ -44,7 +44,7 @@ export function DashboardPage({ user, dashboard, quickTabs, categories, onNaviga
     finally { setReminding(false); }
   };
   const firstName = user.name.split(/\s+/)[0];
-  const balanceCard = <article className="hero-stat cobalt home-balance-card"><span className="stat-icon">↗</span><p>Ditt nettosaldo</p><strong className={net < 0 ? "negative" : ""}>{formatMoney(Math.abs(net))}</strong><small>{net > 0 ? "Du får tillbaka totalt" : net < 0 ? "Du är skyldig totalt" : "Du ligger jämnt"}</small>{net > 0 && <button type="button" className="stat-cta" disabled={reminding} onClick={() => void remindUnpaid()} title="Skicka en mailpåminnelse till alla som är skyldiga dig pengar">{reminding ? "Skickar…" : "🔔 Påminn om obetalt"}</button>}</article>;
+  const balanceCard = <article className="hero-stat cobalt home-balance-card"><span className="stat-icon">↗</span><p>Ditt nettosaldo</p><strong className={net < 0 ? "negative" : ""}>{formatMoney(Math.abs(net))}</strong><small>{net > 0 ? "Du får tillbaka totalt" : net < 0 ? "Du är skyldig totalt" : "Du ligger jämnt"}</small>{net > 0 && <button type="button" className="stat-cta" disabled={reminding} onClick={() => void remindUnpaid()} title="Skicka en påminnelse via mail och push till alla som är skyldiga dig pengar">{reminding ? "Skickar…" : "🔔 Påminn om obetalt"}</button>}</article>;
 
   if (isMobile) {
     return <section className="home-dashboard mobile-home">

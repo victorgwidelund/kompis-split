@@ -657,6 +657,22 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.match(reminderEmail.body.message.subject, /Victor/, "the subject must identify who is asking for the money");
     assert.match(reminderEmail.body.message.body.content, /Påminnelsetest — till dig: 100,00 kr/);
 
+    // A reminder can also be scoped to one group instead of the caller's whole debt picture --
+    // same aggregation, narrowed by tripId, with access to that trip enforced via requireAccess.
+    const scopedEmailsBefore = capturedEmails.length;
+    const scopedRemindersSent = await request("/api/remind-unpaid", { method: "POST", cookie: ownerCookie, body: { tripId: reminderTripId } });
+    assert.equal(scopedRemindersSent.response.status, 200, JSON.stringify(scopedRemindersSent.payload));
+    assert.ok(scopedRemindersSent.payload.sent >= 1, "the trip-scoped reminder must still find Anna's debt on that trip");
+    const scopedReminderEmail = capturedEmails.slice(scopedEmailsBefore).find((item) => item.body.message.toRecipients[0].emailAddress.address === "anna@example.test");
+    assert.ok(scopedReminderEmail, "Anna must receive a trip-scoped reminder email");
+    assert.match(scopedReminderEmail.body.message.subject, /Påminnelsetest/, "a trip-scoped subject must name the group");
+    // A global admin (ownerCookie/Victor here) bypasses trip membership entirely via requireAccess,
+    // so the "no access" case only bites for a non-admin -- Anna, who was never invited to this trip.
+    const foreignTrip = await request("/api/trips", { method: "POST", cookie: ownerCookie, body: { name: "Bara Victors resa" } });
+    assert.equal(foreignTrip.response.status, 201, JSON.stringify(foreignTrip.payload));
+    const scopedToForeignTrip = await request("/api/remind-unpaid", { method: "POST", cookie: memberCookie, body: { tripId: foreignTrip.payload.trip.id } });
+    assert.equal(scopedToForeignTrip.response.status, 403, "the caller must not be able to scope a reminder to a trip they don't belong to");
+
     // Push notifications: subscribe, confirm the row landed, toggle the account-level setting off
     // and back on, then unsubscribe and confirm the row is gone. No VAPID keys are configured for
     // this test process, so sendPushToUser stays a no-op throughout (already exercised implicitly by
