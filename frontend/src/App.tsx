@@ -117,19 +117,21 @@ export default function App() {
   const enterDemo = async () => { try { await api("/api/admin/demo/enter", { method: "POST", body: {} }); history.replaceState(null, "", location.pathname); location.reload(); } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte starta demoläget"); } };
   const exitDemo = async () => { try { await api("/api/admin/demo/exit", { method: "POST", body: {} }); history.replaceState(null, "", location.pathname); location.reload(); } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte avsluta demoläget"); } };
   const [pushPromptVisible, setPushPromptVisible] = useState(false);
-  // Offered once per browser, only while the permission is still unasked -- if it's already
-  // "denied" the in-app prompt can't do anything (only the browser's own settings can), and if
-  // it's already "granted" the person went through Inställningar or a previous prompt already.
+  // Deliberately nags every session, not just once -- keeps reappearing on every fresh load
+  // (and reappears mid-session if Inställningar's toggle gets switched off again) until push is
+  // actually fully on: browser permission granted AND the account flag on. "Inte nu" only clears
+  // local state, so it comes back next reload rather than being suppressed forever.
   useEffect(() => {
     if (!user || guestMode || demoMode || !vapidPublicKey || !pushSupported()) return;
-    if (Notification.permission !== "default") return;
-    if (localStorage.getItem("kompis-push-prompt-dismissed") === "1") return;
+    if (Notification.permission === "granted" && user.notificationsEnabled) return;
     setPushPromptVisible(true);
   }, [user, guestMode, demoMode, vapidPublicKey]);
-  const dismissPushPrompt = () => { localStorage.setItem("kompis-push-prompt-dismissed", "1"); setPushPromptVisible(false); };
+  const dismissPushPrompt = () => setPushPromptVisible(false);
   const acceptPushPrompt = async () => {
     dismissPushPrompt();
-    if (!vapidPublicKey || !(await enablePush(vapidPublicKey))) return notify("Kunde inte aktivera push-notiser");
+    if (!vapidPublicKey) return;
+    if (Notification.permission === "denied") return notify("Notiser är blockerade för sidan i webbläsaren. Ändra det i webbläsarens inställningar för att aktivera.");
+    if (!(await enablePush(vapidPublicKey))) return notify("Kunde inte aktivera push-notiser");
     try { const result = await api<{ user: User }>("/api/notifications/settings", { method: "POST", body: { enabled: true } }); setUser(result.user); } catch { /* subscription is saved either way; the account flag can be fixed later in Inställningar */ }
     notify("Push-notiser aktiverade");
   };
