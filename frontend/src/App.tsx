@@ -19,7 +19,7 @@ import { ExpenseDialog } from "./features/trips/ExpenseDialog";
 import { CategoryDialog, InviteDialog, PaymentDialog, PersonDialog } from "./features/trips/TripDialogs";
 import { TripPage, type PaymentPreset, type TripDialog } from "./features/trips/TripPage";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { registerServiceWorker } from "./pushNotifications";
+import { enablePush, pushSupported, registerServiceWorker } from "./pushNotifications";
 import type { AdminResponse, Category, DashboardResponse, Expense, InvitationPreview, InvitationResult, OcrBenchmarkJob, QuickTab, QuickTabSummary, ReminderResult, SessionResponse, StatisticsResponse, Trip, User, View } from "./types/models";
 
 const guestUser: User = { id: 0, email: "", name: "Gäst", swishPhone: null, isAdmin: false, notificationsEnabled: false };
@@ -116,13 +116,32 @@ export default function App() {
   const openTripDialog = (dialog: TripDialog, expense?: Expense, payment?: PaymentPreset, readOnly?: boolean) => { setEditingExpense(expense || null); setEditingExpenseReadOnly(Boolean(readOnly)); setPaymentPreset(payment || null); setTripDialog(dialog); };
   const enterDemo = async () => { try { await api("/api/admin/demo/enter", { method: "POST", body: {} }); history.replaceState(null, "", location.pathname); location.reload(); } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte starta demoläget"); } };
   const exitDemo = async () => { try { await api("/api/admin/demo/exit", { method: "POST", body: {} }); history.replaceState(null, "", location.pathname); location.reload(); } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte avsluta demoläget"); } };
+  const [pushPromptVisible, setPushPromptVisible] = useState(false);
+  // Offered once per browser, only while the permission is still unasked -- if it's already
+  // "denied" the in-app prompt can't do anything (only the browser's own settings can), and if
+  // it's already "granted" the person went through Inställningar or a previous prompt already.
+  useEffect(() => {
+    if (!user || guestMode || demoMode || !vapidPublicKey || !pushSupported()) return;
+    if (Notification.permission !== "default") return;
+    if (localStorage.getItem("kompis-push-prompt-dismissed") === "1") return;
+    setPushPromptVisible(true);
+  }, [user, guestMode, demoMode, vapidPublicKey]);
+  const dismissPushPrompt = () => { localStorage.setItem("kompis-push-prompt-dismissed", "1"); setPushPromptVisible(false); };
+  const acceptPushPrompt = async () => {
+    dismissPushPrompt();
+    if (!vapidPublicKey || !(await enablePush(vapidPublicKey))) return notify("Kunde inte aktivera push-notiser");
+    try { const result = await api<{ user: User }>("/api/notifications/settings", { method: "POST", body: { enabled: true } }); setUser(result.user); } catch { /* subscription is saved either way; the account flag can be fixed later in Inställningar */ }
+    notify("Push-notiser aktiverade");
+  };
   if (loading) return <div className="login-screen"><div className="login-card"><div className="brand-mark">KS</div><p className="eyebrow">Kompis Split</p><h1>Laddar…</h1></div></div>;
   if (!user && !guestMode) return <><AuthScreen mode={authMode} needsSetup={needsSetup} invitation={invitation} version={version} onModeChange={setAuthMode} onSubmit={authenticate} /><Toast message={toast} /></>;
   const shellUser = user || guestUser;
+  const remindUnpaid = (tripId?: number) => api<ReminderResult>("/api/remind-unpaid", { method: "POST", body: { tripId } });
   return <>{demoMode && <div className="demo-banner" role="status"><strong>DEMOLÄGE</strong> – fiktiva uppgifter, ändringar sparas inte permanent <button type="button" className="button ghost small-button" onClick={() => void exitDemo()}>Avsluta demoläge</button></div>}
+  {pushPromptVisible && <div className="push-prompt" role="status"><span>🔔 Vill du få push-notiser om nya utgifter, betalningar och grupper?</span><div className="push-prompt-actions"><button type="button" className="button ghost small-button" onClick={() => void acceptPushPrompt()}>Aktivera</button><button type="button" className="button ghost small-button" onClick={dismissPushPrompt}>Inte nu</button></div></div>}
   <Shell user={shellUser} version={version} trips={dashboard?.trips || []} view={view} guestMode={guestMode} onNavigate={(next) => void navigate(next)} onNewTrip={() => setGlobalDialog("trip")} onNewQuickTab={() => setGlobalDialog("quick")} onLogout={() => void api("/api/logout", { method: "POST", body: {} }).then(() => location.reload())} onReportBug={() => setGlobalDialog("bug")}>
-    {view.page === "dashboard" && user && dashboard && <DashboardPage user={user} dashboard={dashboard} quickTabs={quickTabs} categories={categories} onNavigate={(next) => void navigate(next)} onNewTrip={() => setGlobalDialog("trip")} onNewQuickTab={() => setGlobalDialog("quick")} onInviteFriend={() => setGlobalDialog("friend")} onRemindUnpaid={() => api<ReminderResult>("/api/remind-unpaid", { method: "POST", body: {} })} notify={notify} />}
-    {view.page === "trip" && user && trip && <TripPage trip={trip} user={user} categories={categories} onBack={() => void navigate({ page: "dashboard" })} onRefresh={refreshTrip} onOpenDialog={openTripDialog} notify={notify} />}
+    {view.page === "dashboard" && user && dashboard && <DashboardPage user={user} dashboard={dashboard} quickTabs={quickTabs} categories={categories} onNavigate={(next) => void navigate(next)} onNewTrip={() => setGlobalDialog("trip")} onNewQuickTab={() => setGlobalDialog("quick")} onInviteFriend={() => setGlobalDialog("friend")} onRemindUnpaid={() => remindUnpaid()} notify={notify} />}
+    {view.page === "trip" && user && trip && <TripPage trip={trip} user={user} categories={categories} onBack={() => void navigate({ page: "dashboard" })} onRefresh={refreshTrip} onOpenDialog={openTripDialog} onRemindUnpaid={remindUnpaid} notify={notify} />}
     {view.page === "groups" && dashboard && <GroupsPage trips={dashboard.trips} onNavigate={(next) => void navigate(next)} onNewTrip={() => setGlobalDialog("trip")} />}
     {view.page === "quick-tab" && quickTab && <QuickTabPage tab={quickTab} initialInvitation={quickInvitation} guestMode={guestMode} onBack={() => void navigate({ page: "dashboard" })} onRefresh={refreshQuick} onChanged={setQuickTab} notify={notify} />}
     {view.page === "quick-tabs" && <QuickTabsListPage quickTabs={quickTabs} onNavigate={(next) => void navigate(next)} onNewQuickTab={() => setGlobalDialog("quick")} />}

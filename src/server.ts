@@ -591,13 +591,16 @@ async function adminOverview() {
   };
 }
 
-async function unpaidRemindersFor(creditorUserId: number) {
+async function unpaidRemindersFor(creditorUserId: number, scopeTripId?: number) {
   // Aggregates two independent debt concepts into one reminder per debtor who owes money
   // specifically to the calling user: trip settlements (simplifyDebts, the same computation
   // loadTrip uses) where they're the creditor, and unpaid quick-tab shares (loadQuickTab's
   // personTotals) for quick tabs they own. Only registered debtors with a linked account are
   // reminded -- guests and unlinked participants have no email on file to send to. This is a
   // per-user action (any account can remind their own debtors), not an admin broadcast.
+  // scopeTripId narrows this to a single group's settlements (quick tabs excluded), for the
+  // per-group reminder button on TripPage -- the caller's access to that trip is checked before
+  // this is called.
   const perUser = new Map<number, { userId: number; name: string; email: string; items: Array<{ label: string; amountCents: number }> }>();
   const addItem = async (userId: number | null, label: string, amountCents: number) => {
     if (!userId || userId === creditorUserId || amountCents <= 0) return;
@@ -609,11 +612,17 @@ async function unpaidRemindersFor(creditorUserId: number) {
     perUser.get(userId)!.items.push({ label, amountCents });
   };
 
-  const trips = await db.prepare(`
-    SELECT DISTINCT t.id, t.name FROM trips t
-    JOIN participants p ON p.trip_id = t.id
-    WHERE t.deleted_at IS NULL AND t.is_demo = FALSE AND p.user_id = ?
-  `).all<any>(creditorUserId);
+  const trips = scopeTripId
+    ? await db.prepare(`
+        SELECT DISTINCT t.id, t.name FROM trips t
+        JOIN participants p ON p.trip_id = t.id
+        WHERE t.deleted_at IS NULL AND t.is_demo = FALSE AND p.user_id = ? AND t.id = ?
+      `).all<any>(creditorUserId, scopeTripId)
+    : await db.prepare(`
+        SELECT DISTINCT t.id, t.name FROM trips t
+        JOIN participants p ON p.trip_id = t.id
+        WHERE t.deleted_at IS NULL AND t.is_demo = FALSE AND p.user_id = ?
+      `).all<any>(creditorUserId);
   for (const trip of trips) {
     const participantRows = await db.prepare("SELECT id, name, user_id FROM participants WHERE trip_id = ?").all<any>(trip.id);
     const expenseRows = await db.prepare("SELECT id, payer_id, amount_cents FROM expenses WHERE trip_id = ? AND voided_at IS NULL").all<any>(trip.id);
@@ -639,7 +648,7 @@ async function unpaidRemindersFor(creditorUserId: number) {
     }
   }
 
-  const tabs = await db.prepare("SELECT id, name FROM quick_tabs WHERE is_demo = FALSE AND created_by = ?").all<any>(creditorUserId);
+  const tabs = scopeTripId ? [] : await db.prepare("SELECT id, name FROM quick_tabs WHERE is_demo = FALSE AND created_by = ?").all<any>(creditorUserId);
   for (const tab of tabs) {
     const loaded = await loadQuickTab(Number(tab.id), { kind: "user", id: creditorUserId, key: `u:${creditorUserId}`, role: "owner" });
     for (const person of loaded.personTotals) {
@@ -1344,24 +1353,34 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   if (request.method === "POST" && url.pathname === "/api/remind-unpaid") {
     // Available to any account, not just admins -- this only ever reaches people who owe money
     // to the caller specifically (unpaidRemindersFor scopes everything to creditorUserId), never
-    // anyone else's debts.
+    // anyone else's debts. An optional tripId narrows the reminder to one group (requireAccess
+    // checks the caller actually belongs to it) instead of the caller's whole debt picture.
     if (!reminderAllowed(Number(user.id))) throw new HttpError(429, "Vänta en stund innan du skickar fler påminnelser.");
-    const summaries = await unpaidRemindersFor(Number(user.id));
+    const body = await readJson(request);
+    const tripId = body?.tripId ? Number(body.tripId) : undefined;
+    let tripName: string | null = null;
+    if (tripId) {
+      await requireAccess(tripId, Number(user.id));
+      const tripRow = await db.prepare("SELECT name FROM trips WHERE id = ? AND deleted_at IS NULL").get<any>(tripId);
+      if (!tripRow) throw new HttpError(404, "Gruppen hittades inte");
+      tripName = tripRow.name;
+    }
+    const summaries = await unpaidRemindersFor(Number(user.id), tripId);
     let sent = 0;
     const errors: string[] = [];
     for (const summary of summaries) {
       const totalCents = summary.items.reduce((sum, item) => sum + item.amountCents, 0);
       const lines = summary.items.map((item) => `- ${item.label}: ${formatSek(item.amountCents)}`).join("\n");
       try {
-        await sendMail(summary.email, `Påminnelse från ${user.display_name} — Kompis Split`,
-          `Hej ${summary.name}!\n\n${user.display_name} vill påminna om följande obetalda belopp i Kompis Split:\n\n${lines}\n\nTotalt: ${formatSek(totalCents)}\n\nLogga in på Kompis Split för att se detaljer och betala med Swish.`);
+        await sendMail(summary.email, `Påminnelse från ${user.display_name}${tripName ? ` om ${tripName}` : ""} — Kompis Split`,
+          `Hej ${summary.name}!\n\n${user.display_name} vill påminna om följande obetalda belopp${tripName ? ` i ${tripName}` : ""} i Kompis Split:\n\n${lines}\n\nTotalt: ${formatSek(totalCents)}\n\nLogga in på Kompis Split för att se detaljer och betala med Swish.`);
         sent += 1;
       } catch (error) {
         errors.push(`${summary.name}: ${error instanceof Error ? error.message : "okänt fel"}`);
       }
-      void sendPushToUser(summary.userId, { title: "Påminnelse", body: `${user.display_name} påminner om ${formatSek(totalCents)} obetalt`, url: "/" }).catch(() => undefined);
+      void sendPushToUser(summary.userId, { title: "Påminnelse", body: `${user.display_name} påminner om ${formatSek(totalCents)} obetalt${tripName ? ` i ${tripName}` : ""}`, url: tripId ? `/#trip-${tripId}` : "/" }).catch(() => undefined);
     }
-    await audit(user.id, null, "reminders.sent", "user", null, { sent, total: summaries.length });
+    await audit(user.id, null, "reminders.sent", "user", null, { sent, total: summaries.length, tripId: tripId ?? null });
     return json(response, 200, { sent, total: summaries.length, errors });
   }
   match = url.pathname.match(/^\/api\/admin\/users\/(\d+)$/);
