@@ -4,6 +4,7 @@ export interface User {
   name: string;
   swishPhone: string | null;
   isAdmin: boolean;
+  notificationsEnabled: boolean;
 }
 
 export interface InvitationPreview {
@@ -19,6 +20,7 @@ export interface SessionResponse {
   version: string;
   user?: User;
   demoMode: boolean;
+  vapidPublicKey: string | null;
 }
 
 export interface Category {

@@ -232,6 +232,11 @@ fieldset { padding: 0; border: 0; }legend { margin-bottom: 9px; color: #4d514c; 
 .more-avatar-button:disabled { cursor: not-allowed; opacity: .7; }
 .more-avatar-actions { display: flex; gap: 12px; margin-top: 4px; }
 .more-avatar-actions .text-button { font-size: 11px; }
+.more-notifications { padding: 10px 4px 18px; border-bottom: 1px solid var(--line); }
+.more-notification-toggle { display: flex; flex-direction: row; align-items: center; gap: 9px; margin: 6px 0; font-size: 13px; font-weight: 700; cursor: pointer; }
+.more-notification-toggle input { width: 19px; height: 19px; accent-color: var(--coral); }
+.more-notification-toggle input:disabled { cursor: not-allowed; opacity: .6; }
+.more-notifications small { display: block; line-height: 1.4; }
 .more-menu { display: flex; flex-direction: column; }
 .more-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 18px; gap: 12px; align-items: center; width: 100%; min-height: 56px; padding: 8px 4px; border: 0; border-top: 1px solid var(--line); background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .more-menu .more-row:first-child { border-top: 0; }

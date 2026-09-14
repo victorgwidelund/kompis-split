@@ -657,6 +657,30 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.match(reminderEmail.body.message.subject, /Victor/, "the subject must identify who is asking for the money");
     assert.match(reminderEmail.body.message.body.content, /Påminnelsetest — till dig: 100,00 kr/);
 
+    // Push notifications: subscribe, confirm the row landed, toggle the account-level setting off
+    // and back on, then unsubscribe and confirm the row is gone. No VAPID keys are configured for
+    // this test process, so sendPushToUser stays a no-op throughout (already exercised implicitly by
+    // every action above that wires it in) -- this only verifies the CRUD endpoints themselves.
+    const subscribeResult = await request("/api/push/subscribe", {
+      method: "POST", cookie: ownerCookie,
+      body: { endpoint: "https://push.example.test/abc123", keys: { p256dh: "test-p256dh-key", auth: "test-auth-key" } },
+    });
+    assert.equal(subscribeResult.response.status, 201, JSON.stringify(subscribeResult.payload));
+    const storedSubscription = await inspect.query("SELECT user_id, p256dh, auth FROM push_subscriptions WHERE endpoint = $1", ["https://push.example.test/abc123"]);
+    assert.equal(storedSubscription.rows.length, 1, "subscribing must persist exactly one row for this endpoint");
+    assert.equal(storedSubscription.rows[0].p256dh, "test-p256dh-key");
+    const disableNotifications = await request("/api/notifications/settings", { method: "POST", cookie: ownerCookie, body: { enabled: false } });
+    assert.equal(disableNotifications.response.status, 200, JSON.stringify(disableNotifications.payload));
+    assert.equal(disableNotifications.payload.user.notificationsEnabled, false);
+    const disabledInDb = await inspect.query("SELECT notifications_enabled FROM users WHERE id = $1", [storedSubscription.rows[0].user_id]);
+    assert.equal(disabledInDb.rows[0].notifications_enabled, false);
+    const reEnableNotifications = await request("/api/notifications/settings", { method: "POST", cookie: ownerCookie, body: { enabled: true } });
+    assert.equal(reEnableNotifications.payload.user.notificationsEnabled, true, "the setting must be able to flip back on");
+    const unsubscribeResult = await request("/api/push/unsubscribe", { method: "POST", cookie: ownerCookie, body: { endpoint: "https://push.example.test/abc123" } });
+    assert.equal(unsubscribeResult.response.status, 200, JSON.stringify(unsubscribeResult.payload));
+    const afterUnsubscribe = await inspect.query("SELECT 1 FROM push_subscriptions WHERE endpoint = $1", ["https://push.example.test/abc123"]);
+    assert.equal(afterUnsubscribe.rows.length, 0, "unsubscribing must remove the row");
+
     // Forgot/reset password: identical generic response whether the address exists or not (no user
     // enumeration), a working end-to-end reset via the mocked email's real link, single-use tokens,
     // and every existing session for that user invalidated by a successful reset.
@@ -814,7 +838,7 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM expense_receipts")).rows[0].count), 0);
   assert.equal((await verification.query("SELECT voided_at IS NOT NULL voided FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].voided, true);
   assert.ok((await verification.query("SELECT expense_date FROM expenses WHERE title = 'Middag uppdaterad'")).rows[0].expense_date);
-  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 12);
+  assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM schema_migrations")).rows[0].count), 13);
   // 1 from "Middag på Kajen" + 1 from the Swedish-characters test quick tab ("Ångbåtsbryggan").
   assert.equal(Number((await verification.query("SELECT COUNT(*) count FROM quick_tabs")).rows[0].count), 2);
   // "Erik Gäst" (claims below) + "Först Ansluten" (joined via the original first invite to prove it

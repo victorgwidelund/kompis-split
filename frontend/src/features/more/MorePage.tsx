@@ -5,10 +5,13 @@ import { AdminIcon, BugIcon, ChevronRightIcon, GroupsIcon, GuideIcon, LogoutIcon
 import type { User, View } from "../../types/models";
 import { shortVersion } from "../../utils/format";
 import { isHeicFile, maxOriginalReceiptBytes, prepareReceiptFile } from "../receipts/imagePrep";
+import { disablePush, enablePush, pushSupported } from "../../pushNotifications";
 
 interface Props {
   user: User;
   version: string;
+  vapidPublicKey: string | null;
+  onUserUpdate: (user: User) => void;
   onNavigate: (view: View) => void;
   onReportBug: () => void;
   onLogout: () => void;
@@ -25,10 +28,11 @@ function MoreRow({ icon, label, onClick }: { icon: React.ReactNode; label: strin
   );
 }
 
-export function MorePage({ user, version, onNavigate, onReportBug, onLogout, notify }: Props) {
+export function MorePage({ user, version, vapidPublicKey, onUserUpdate, onNavigate, onReportBug, onLogout, notify }: Props) {
   const [avatarVersion, setAvatarVersion] = useState(0);
   const [hasPhoto, setHasPhoto] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [notificationsBusy, setNotificationsBusy] = useState(false);
   const avatarInput = useRef<HTMLInputElement>(null);
   const changeAvatar = async (file?: File) => {
     if (!file) return;
@@ -50,6 +54,24 @@ export function MorePage({ user, version, onNavigate, onReportBug, onLogout, not
     catch (error) { notify(error instanceof Error ? error.message : "Kunde inte ta bort profilbilden"); }
     finally { setAvatarBusy(false); }
   };
+  const browserPermission = pushSupported() ? Notification.permission : "unsupported";
+  const toggleNotifications = async (enabled: boolean) => {
+    setNotificationsBusy(true);
+    try {
+      if (enabled) {
+        if (!vapidPublicKey) return notify("Push-notiser är inte konfigurerat på den här servern.");
+        if (!pushSupported()) return notify("Push-notiser stöds inte i den här webbläsaren.");
+        if (Notification.permission === "denied") return notify("Notiser är blockerade för sidan i webbläsaren. Ändra det i webbläsarens inställningar för att aktivera.");
+        if (!(await enablePush(vapidPublicKey))) return notify("Kunde inte aktivera push-notiser.");
+      } else {
+        await disablePush();
+      }
+      const result = await api<{ user: User }>("/api/notifications/settings", { method: "POST", body: { enabled } });
+      onUserUpdate(result.user);
+      notify(enabled ? "Push-notiser aktiverade" : "Push-notiser inaktiverade");
+    } catch (error) { notify(error instanceof Error ? error.message : "Kunde inte uppdatera notisinställningen"); }
+    finally { setNotificationsBusy(false); }
+  };
   return (
     <section className="page-view more-view">
       <header className="page-heading"><div><p className="eyebrow">Konto och mer</p><h1>Mer</h1></div></header>
@@ -66,6 +88,18 @@ export function MorePage({ user, version, onNavigate, onReportBug, onLogout, not
           </div>
         </div>
       </div>
+      <section className="more-notifications">
+        <p className="eyebrow">Notiser</p>
+        <label className="more-notification-toggle">
+          <input type="checkbox" checked={user.notificationsEnabled} disabled={notificationsBusy || !vapidPublicKey} onChange={(event) => void toggleNotifications(event.target.checked)} />
+          <span>Push-notiser</span>
+        </label>
+        <small className="muted">
+          {!vapidPublicKey ? "Inte konfigurerat på den här servern."
+            : browserPermission === "denied" ? "Blockerat i webbläsaren — ändra det i webbläsarens inställningar för att aktivera."
+              : "Få en notis när du läggs till i en grupp, någon lägger till en utgift du är med i, en betalning markeras, eller du blir påmind om obetalt."}
+        </small>
+      </section>
       <nav className="more-menu" aria-label="Fler funktioner">
         <MoreRow icon={<GroupsIcon />} label="Vänner" onClick={() => onNavigate({ page: "friends" })} />
         <MoreRow icon={<GuideIcon />} label="Användarguide" onClick={() => onNavigate({ page: "guide" })} />
