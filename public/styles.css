@@ -18,7 +18,7 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--paper); color: var(--ink); }
+body { margin: 0; min-width: 320px; min-height: 100vh; min-height: 100dvh; background: var(--paper); color: var(--ink); }
 button, input, select { font: inherit; }
 button { color: inherit; }
 .hidden { display: none !important; }
@@ -45,7 +45,7 @@ h2 { margin-bottom: 4px; font-size: 25px; }
 .icon-button { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 12px; background: transparent; cursor: pointer; }
 .icon-button.dark { background: var(--ink); color: white; }
 
-.app-shell { min-height: 100vh; }
+.app-shell { min-height: 100vh; min-height: 100dvh; }
 .app-shell.guest-mode .sidebar, .app-shell.guest-mode .mobile-header { display: none; }
 .app-shell.guest-mode .main { margin-left: 0; padding-top: 28px; }
 .app-shell.guest-mode #quick-tab-back { display: none; }
@@ -75,7 +75,7 @@ h2 { margin-bottom: 4px; font-size: 25px; }
 .security-dot { width: 8px; height: 8px; border-radius: 50%; background: #42a66b; box-shadow: 0 0 0 4px rgba(66,166,107,.12); }
 .app-version { color: var(--muted); font: 700 9px/1.2 "Manrope", sans-serif; letter-spacing: .04em; }.sidebar-version { margin-top: 10px; padding-left: 18px; }.auth-version { align-self: center; margin-top: 18px; }.mobile-version { display: none; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.5); }
 
-.main { min-height: 100vh; margin-left: 260px; padding: 0 clamp(26px, 5vw, 74px) 70px; }
+.main { min-height: 100vh; min-height: 100dvh; margin-left: 260px; padding: 0 clamp(26px, 5vw, 74px) 70px; }
 .mobile-header { display: none; }
 .home-dashboard { max-width: 1180px; margin: auto; padding-top: 56px; }.dashboard-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 34px; }.dashboard-heading h1 { margin: 0 0 10px; }.dashboard-heading p:last-child { margin: 0; color: var(--muted); }.home-stats .member-stat strong { font: 800 clamp(30px, 4vw, 43px) "Manrope", sans-serif; letter-spacing: -.05em; }.home-grid { grid-template-columns: 1.25fr .9fr; }.trip-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.trip-card-grid.compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }.trip-card { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; min-height: 112px; padding: 18px; border: 1px solid var(--line); border-radius: 17px; background: var(--white); text-align: left; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease; }.trip-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }.trip-card .trip-emoji { width: 44px; height: 44px; }.trip-card-copy { min-width: 0; }.trip-card strong, .trip-card small, .trip-card em { display: block; }.trip-card strong { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }.trip-card small { margin: 5px 0 10px; color: var(--muted); }.trip-card em { font-size: 12px; font-style: normal; font-weight: 700; }.dashboard-expense { width: 100%; border-right: 0; border-bottom: 0; border-left: 0; background: transparent; text-align: left; cursor: pointer; }.archive-panel { margin-top: 15px; }.archive-note { margin: 10px 0 0; color: var(--muted); }
 .friends-panel { margin-top: 15px; }.friends-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.friend-card { display: grid; grid-template-columns: 44px 1fr; gap: 11px; align-items: center; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--white); }.friend-card .avatar { width: 44px; height: 44px; margin: 0; border: 0; }.friend-card strong, .friend-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.friend-card small { margin-top: 2px; color: var(--muted); font-size: 10px; }
