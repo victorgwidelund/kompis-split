@@ -135,6 +135,29 @@ export default function App() {
     try { const result = await api<{ user: User }>("/api/notifications/settings", { method: "POST", body: { enabled: true } }); setUser(result.user); } catch { /* subscription is saved either way; the account flag can be fixed later in Inställningar */ }
     notify("Push-notiser aktiverade");
   };
+  const viewRef = useRef(view);
+  const tripRef = useRef(trip);
+  const quickTabRef = useRef(quickTab);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  useEffect(() => { tripRef.current = trip; }, [trip]);
+  useEffect(() => { quickTabRef.current = quickTab; }, [quickTab]);
+  // A backgrounded tab keeps its last-fetched data in memory forever otherwise -- tapping a push
+  // notification (or just switching back from another app) resumes the SAME stale React state
+  // instead of re-fetching, so a brand-new expense someone else just added looks "missing" until a
+  // manual reload. `pageshow` also covers iOS Safari's back-forward-cache restore, which fires
+  // neither `visibilitychange` nor a fresh mount.
+  useEffect(() => {
+    if (!user || guestMode || demoMode) return;
+    const refreshOnResume = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshDashboard().catch(() => undefined);
+      if (viewRef.current.page === "trip" && tripRef.current) void loadTrip(tripRef.current.id).catch(() => undefined);
+      if (viewRef.current.page === "quick-tab" && quickTabRef.current) void loadQuickTab(quickTabRef.current.id).catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", refreshOnResume);
+    window.addEventListener("pageshow", refreshOnResume);
+    return () => { document.removeEventListener("visibilitychange", refreshOnResume); window.removeEventListener("pageshow", refreshOnResume); };
+  }, [user, guestMode, demoMode, refreshDashboard, loadTrip, loadQuickTab]);
   if (loading) return <div className="login-screen"><div className="login-card"><div className="brand-mark">KS</div><p className="eyebrow">Kompis Split</p><h1>Laddar…</h1></div></div>;
   if (!user && !guestMode) return <><AuthScreen mode={authMode} needsSetup={needsSetup} invitation={invitation} version={version} onModeChange={setAuthMode} onSubmit={authenticate} /><Toast message={toast} /></>;
   const shellUser = user || guestUser;
