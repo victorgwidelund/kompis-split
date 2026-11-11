@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { BrandMark } from "./BrandMark";
 import { BottomNav } from "./BottomNav";
 import type { TripSummary, User, View } from "../types/models";
 import { shortVersion } from "../utils/format";
@@ -60,7 +61,7 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand brand-button" onClick={handleBrandClick}><span className="brand-mark">KS</span><span>Kompis<br /><strong>Split</strong></span></button>
+        <button className="brand brand-button" onClick={handleBrandClick}><BrandMark /><span>Kompis<br /><strong>Split</strong></span></button>
         <button className="button dark wide" onClick={onNewTrip}><span>＋</span> Ny grupp</button>
         <button className="button coral-button wide" onClick={onNewQuickTab}><span>⚡</span> Snabbnota</button>
         <div className="side-heading"><span>Aktiva grupper</span><span className="count">{active.length}</span></div>
@@ -72,7 +73,7 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
       </aside>
       <main className="main">
         <header className="mobile-header">
-          <button className="brand brand-button" onClick={handleBrandClick}><span className="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></button>
+          <button className="brand brand-button" onClick={handleBrandClick}><BrandMark /><span>Kompis <strong>Split</strong></span></button>
         </header>
         {children}
       </main>
