@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api/client";
+import { BrandMark } from "./components/BrandMark";
 import { BugReportDialog } from "./components/BugReportDialog";
 import { FriendInviteDialog, NewTripDialog } from "./components/GlobalDialogs";
 import { Shell } from "./components/Shell";
@@ -163,7 +164,7 @@ export default function App() {
   const [newsOpen, setNewsOpen] = useState(false);
   useEffect(() => { if (user && !guestMode && !demoMode && hasUnseenNews()) setNewsOpen(true); }, [user, guestMode, demoMode]);
   const closeNews = () => { markNewsSeen(); setNewsOpen(false); };
-  if (loading) return <div className="login-screen"><div className="login-card"><div className="brand-mark">KS</div><p className="eyebrow">Kompis Split</p><h1>Laddar…</h1></div></div>;
+  if (loading) return <div className="login-screen"><div className="login-card"><BrandMark /><p className="eyebrow">Kompis Split</p><h1>Laddar…</h1></div></div>;
   if (!user && !guestMode) return <><AuthScreen mode={authMode} needsSetup={needsSetup} invitation={invitation} version={version} onModeChange={setAuthMode} onSubmit={authenticate} /><Toast message={toast} /></>;
   const shellUser = user || guestUser;
   const remindUnpaid = (tripId?: number) => api<ReminderResult>("/api/remind-unpaid", { method: "POST", body: { tripId } });

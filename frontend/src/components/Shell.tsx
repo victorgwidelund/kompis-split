@@ -1,7 +1,10 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BrandMark } from "./BrandMark";
 import { BottomNav } from "./BottomNav";
 import type { TripSummary, User, View } from "../types/models";
+import { hammarbyMessages, makeRainDrops, randomFrom, type RainDrop } from "../utils/easterEggs";
 import { shortVersion } from "../utils/format";
+import { Rain } from "./Rain";
 
 interface ShellProps {
   user: User;
@@ -17,25 +20,36 @@ interface ShellProps {
   children: React.ReactNode;
 }
 
-// A small hidden nod for the initiated: click the logo five times quickly. Purely decorative.
-const hammarbyMessages = [
-  "Hej Bajare! 💚🤍 Kom igen Hammarby!",
-  "Dags för en kall öl? 🍺",
-  "Håll ut! ✊💚",
-  "Grönvitt hjärta, delade notor 💚🤍",
-  "Bajen i hjärtat, jämnt i plånboken 💚",
-];
+const moneyPieces = ["💸", "🪙", "💵", "🪙"] as const;
+const bajenPieces = ["💚", "🤍"] as const;
 
 export function Shell({ user, version, trips, view, guestMode, onNavigate, onNewTrip, onNewQuickTab, onLogout, onReportBug, children }: ShellProps) {
-  const [easterEgg, setEasterEgg] = useState<string | null>(null);
+  // Hidden nods for the initiated: tap the logo five times quickly for a message and a money shower,
+  // or type "bajen" anywhere outside a text field. Purely decorative.
+  const [easterEgg, setEasterEgg] = useState<{ message: string; drops: RainDrop[]; key: number } | null>(null);
   const brandClicks = useRef<number[]>([]);
+  const celebrate = useCallback((message: string, pieces: readonly string[]) => {
+    const key = Date.now();
+    setEasterEgg({ message, drops: makeRainDrops(pieces), key });
+    window.setTimeout(() => setEasterEgg((current) => current?.key === key ? null : current), 3400);
+  }, []);
+  useEffect(() => {
+    let typed = "";
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']") || event.key.length !== 1) return;
+      typed = (typed + event.key.toLowerCase()).slice(-5);
+      if (typed === "bajen") { typed = ""; celebrate("Hammarby! 💚🤍 Söder är vår", bajenPieces); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [celebrate]);
   const handleBrandClick = () => {
     const now = Date.now();
     brandClicks.current = [...brandClicks.current.filter((time) => now - time < 2500), now];
     if (brandClicks.current.length >= 5) {
       brandClicks.current = [];
-      setEasterEgg(hammarbyMessages[Math.floor(Math.random() * hammarbyMessages.length)] ?? null);
-      window.setTimeout(() => setEasterEgg(null), 3200);
+      celebrate(randomFrom(hammarbyMessages), moneyPieces);
     }
     onNavigate({ page: "dashboard" });
   };
@@ -60,7 +74,7 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand brand-button" onClick={handleBrandClick}><span className="brand-mark">KS</span><span>Kompis<br /><strong>Split</strong></span></button>
+        <button className="brand brand-button" onClick={handleBrandClick}><BrandMark /><span>Kompis<br /><strong>Split</strong></span></button>
         <button className="button dark wide" onClick={onNewTrip}><span>＋</span> Ny grupp</button>
         <button className="button coral-button wide" onClick={onNewQuickTab}><span>⚡</span> Snabbnota</button>
         <div className="side-heading"><span>Aktiva grupper</span><span className="count">{active.length}</span></div>
@@ -72,12 +86,12 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
       </aside>
       <main className="main">
         <header className="mobile-header">
-          <button className="brand brand-button" onClick={handleBrandClick}><span className="brand-mark">KS</span><span>Kompis <strong>Split</strong></span></button>
+          <button className="brand brand-button" onClick={handleBrandClick}><BrandMark /><span>Kompis <strong>Split</strong></span></button>
         </header>
         {children}
       </main>
       <BottomNav view={view} onNavigate={onNavigate} />
-      {easterEgg && <div className="hammarby-toast" role="status">{easterEgg}</div>}
+      {easterEgg && <><Rain key={easterEgg.key} drops={easterEgg.drops} /><div className="hammarby-toast" role="status">{easterEgg.message}</div></>}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BrandMark } from "../../components/BrandMark";
 import type { InvitationPreview } from "../../types/models";
 import { shortVersion } from "../../utils/format";
 
@@ -37,7 +38,7 @@ export function AuthScreen({ mode, needsSetup, invitation, version, onModeChange
     <section className="login-screen" aria-labelledby="auth-title">
       <div className="login-art" aria-hidden="true"><span className="orbit orbit-one" /><span className="orbit orbit-two" /><div className="receipt-card"><p>Helg i Sälen</p><strong>4 286 kr</strong><small>Allt uträknat.</small></div></div>
       <div className="login-card">
-        <div className="brand-mark">KS</div><p className="eyebrow">Kompis Split</p><h1 id="auth-title">Pengarna lösta.<br />Vänskapen kvar.</h1><p className="muted">{subtitle}</p>
+        <BrandMark /><p className="eyebrow">Kompis Split</p><h1 id="auth-title">Pengarna lösta.<br />Vänskapen kvar.</h1><p className="muted">{subtitle}</p>
         {summary && <div className="invite-summary">{summary}</div>}
         <form className="auth-form" onSubmit={submit}>
           {mode === "setup" && <label>Installationslösenord<input name="setupPassword" type="password" autoComplete="one-time-code" required /></label>}
