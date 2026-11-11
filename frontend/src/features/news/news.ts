@@ -5,6 +5,17 @@ export interface NewsEntry { id: string; date: string; title: string; items: str
 
 export const newsEntries: NewsEntry[] = [
   {
+    id: "2026-11-11-kvittoraderna",
+    date: "11 november 2026",
+    title: "Smartare kvittoläsning",
+    items: [
+      "Inget under \"Totalt\" blir längre en rad – butiksnummer, telefonnummer, moms och kortinfo hålls borta.",
+      "Rätt namn på rätt pris även när kvittot är böjt eller fotat snett.",
+      "Antal läses rätt i fler format, till exempel \"2st 55 kr\" och \"(2 89,00)\".",
+      "Notan får restaurangens namn i stället för staden från adressraden.",
+    ],
+  },
+  {
     id: "2026-11-11-snabbnota",
     date: "11 november 2026",
     title: "Kvittoskanningen fungerar på riktigt",
