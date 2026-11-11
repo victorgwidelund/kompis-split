@@ -124,11 +124,22 @@ VRAM.
 | Model startup | ~0.50–0.66 s |
 | Idle working set | ~191 MiB |
 | Post-scan working set | ~214 MiB |
-| Observed benchmark peak | ~332 MiB |
-| Compose memory limit | 1 GiB |
+| Observed benchmark peak | ~332 MiB (small synthetic corpus images only) |
+| Real phone photo peak, production Unraid | ~650–700 MiB at ~1170×2530, ~1.15–1.2 GiB at 2250×3000 |
+| Sustained/queued peak, production Unraid | ~1.9 GiB (22 photos in one process), ~2.1 GiB (5 concurrent) |
+| Compose memory limit | 3 GiB (was 1 GiB until v1.32.1 — see below) |
 | GPU / VRAM | 0 / 0 |
 | Single-scan CPU | ~3.36 cores average in one measured 637 ms scan |
 | Default CPU limit | 8 cores |
+
+The original 1 GiB limit was sized from the benchmark peak, but every benchmark image is a small
+synthetic receipt; none resembles a phone photo. In production every real photo exceeded the limit, the
+kernel OOM-killed the service mid-scan, Docker restarted it within seconds (so `/ready` stayed green),
+and the app fell back to Tesseract — 3–20 s per photo with far lower confidence, which together with the
+upload pushed Snabbnota past the browser's timeout. Measured on 11 production photos in v1.32.1: with
+enough memory RapidOCR completes every one in 1.0–2.3 s end to end. CI now runs the service at the
+Compose memory limit with repeated 2250×3000 scans (`tests/receipt-inference-smoke.py`), which fails at
+1 GiB and passes at 3 GiB. Remeasure memory with real photos, not the corpus, before lowering it.
 
 `receipt-inference` exposes internal `/health`, strict `/ready`, and Prometheus-text `/metrics` with
 request, rejection, failure, active-job, queue and inference aggregates. Neither service logs images,

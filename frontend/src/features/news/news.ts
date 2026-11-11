@@ -5,6 +5,16 @@ export interface NewsEntry { id: string; date: string; title: string; items: str
 
 export const newsEntries: NewsEntry[] = [
   {
+    id: "2026-11-11-snabbnota",
+    date: "11 november 2026",
+    title: "Kvittoskanningen fungerar på riktigt",
+    items: [
+      "Att skanna ett kvitto i Snabbnota eller på en utgift tar nu ett par sekunder i stället för att hänga sig och ge upp efter 30 sekunder.",
+      "Felet låg i servern: kvittoläsaren fick för lite minne för riktiga mobilfoton och startades om mitt i varje skanning.",
+      "Om något ändå går fel får du ett begripligt meddelande i stället för \"Fetch is aborted\".",
+    ],
+  },
+  {
     id: "2026-11-11",
     date: "11 november 2026",
     title: "Nyheter, enklare att lägga till vänner och era buggrapporter",
