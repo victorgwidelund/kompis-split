@@ -129,6 +129,54 @@ OCR-tolerant `a` variant, for that one word.
   rarely-hit fallback. Fully reverted, nothing shipped. A real corner-detection + single consistent
   perspective transform (not independent per-row stretching) would avoid this specific failure mode,
   but is a materially bigger undertaking than tuning the existing heuristic.
+- **(v1.32.2) Cropping the photo to the receipt before RapidOCR.** Measured the *ideal* crop — each
+  of the 11 real production photos cut to the bounding box of its own OCR text plus a 40 px margin, then
+  re-read — so a real paper detector could only do the same or worse. Mean line confidence was
+  unchanged (e.g. 97.9→97.9, 99.4→99.4), every total stayed right, and one receipt *lost* its only item
+  row because the re-read grouped its rows differently. The only gain was speed (2.1→1.0 s on the
+  smallest-fill photo, ~30–50 % on 2250×3000 frames). Not shipped: no accuracy gain and a measured loss.
+
+## Real production photos (v1.32.2)
+
+The corpus above is synthetic and small (~40 KB images); it scores 100 % in both modes and could not
+show what real phone photos get wrong. v1.32.2 was therefore driven by the 11 real receipt photos stored
+in production (with the owner's permission), read through the production RapidOCR service, each checked
+by hand for its true total, rows, quantities and merchant. The OCR evidence and hand-checked answers are
+kept outside the repository. Parser changes, all measured on that set and against both corpus splits:
+
+| Real photos (11) | Before | After |
+| --- | ---: | ---: |
+| Total correct | 10/11 | 11/11 |
+| Merchant correct (6 receipts with a printed name) | 3/6 | 6/6 |
+| Junk rows on the 7 real receipts | 6 | 0 |
+| Rows found with the right name, amount and quantity | 37/40 | 40/40 |
+| Flagged needs-review | 7/11 | 4/11 |
+
+The remaining junk rows and review flags are on three banking-app screenshots attached to expenses (no
+items exist; only their total is used, and it is right) and one illegible photo. Fixes, each with a
+minimal synthetic regression test in `tests/receipt-ocr.test.mjs` / `receipt-structured.test.mjs` that
+fails on the old parser:
+
+- Nothing at or after the total line becomes an item. The items section was only used to gate cross-line
+  merges, so any footer line ending in a price-like number became a row (`TelNr: 08-425 500 30` → a
+  425 500 kr item).
+- `Tot` is a total word, and so are PP-OCR's misreadings of TOTALT (`IOTALT`, `T0TALT`). Without them the
+  receipt had no total line, the footer leaked in, and the total fell back to the largest number anywhere
+  — a receipt number or org. number.
+- `Belopp` (card amount) and the EMV fields `TSI`/`CVM`/`ATC`/`ARQC` are never items.
+- Counts written as `2st 55 kr`, `2 st à 55,00` (same line or the line below) or `(2 89,00)` set the
+  quantity only when count × unit price equals the printed row total.
+- A curved photo can put the whole price column a row lower than the names. `alignPriceColumn` tries the
+  vertical offsets the boxes suggest and keeps one only if it pairs strictly more prices with names *and*
+  the total label still pairs with the largest amount; without that check a dense footer label column let
+  a wrong offset win by one and tore an upside-down receipt's total from its amount.
+- The postal-code line (`116 40 Stockholm`) is never the merchant, and a 1 inside a lowercase word is read
+  as l (`Matsa1`), so a name printed twice counts as a repeat.
+- A volume (`2CL`) no longer overwrites the structured quantity (`9 Fernet 2CL` was 2).
+
+Both corpus splits are unchanged at 100 % in parser mode, and the image-mode dev run through the
+production RapidOCR service is identical before and after (item F1 100 %, totals 100 %, name similarity
+97.6 %, median 466 ms).
 
 ## Results
 

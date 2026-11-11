@@ -58,3 +58,12 @@ test("fused Swedish multipliers preserve quantity, name, unit price and line tot
   assert.equal(receipt.items[0].lineTotalOre, 18122);
   assert.equal(validation.arithmeticDeltaOre, 0);
 });
+
+test("a volume is the product's size, not how many were bought", () => {
+  const { receipt } = parseStructuredReceipt(`RESTAURANG HUMM
+9 Fernet 2CL* 50.00 450.00
+TOTALT: 450.00`, 95);
+  assert.equal(receipt.items[0].quantity, 9);
+  assert.equal(receipt.items[0].unit, "st");
+  assert.equal(receipt.items[0].lineTotalOre, 45000);
+});

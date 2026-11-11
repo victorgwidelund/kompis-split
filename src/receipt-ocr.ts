@@ -57,7 +57,12 @@ const ignoredMerchantWords = /^(kassa)?kvitto$|^g[äa]stnota$|^välkommen|^tack 
 // corpus ("Frukostbuffé" became "Frukostbuff" after an otherwise-correct quantity/price match).
 const leadingNonLetterJunk = /^[^\p{L}]+/u;
 const trailingNonNameJunk = /[^\p{L}\p{N})&'. -]+$/u;
-const totalWords = /att\s+betala|betalt|kortbelopp|belopp\s+sek|totalt?|f[öo]tatt|summa/i;
+// "Tot SEK 472.00" is a real abbreviated total (Brödernas); without it the receipt had no total line,
+// so the total fell back to the largest number anywhere (its receipt number) and "Tot" became an item.
+// The second alternative also catches the total word as PP-OCR misreads it on real photos: the leading
+// T as I/l/1/| and the O as 0 ("IOTALT 178,00" on an upside-down receipt). Missing it left the receipt
+// without a total line, so the footer leaked into the items and the total came from an org. number.
+const totalWords = /att\s+betala|betalt|kortbelopp|belopp\s+sek|totalt?|\b[til1|][o0]talt?\b|\btot\b|f[öo]tatt|summa/i;
 // Word-boundaried for the same reason metadataLineWords is (see below): an unanchored "vat" matched
 // "Mineralvatten" (mineral water) and "moms" or "vat" as bare substrings could equally catch other
 // legitimate Swedish product names -- confirmed via the OCR benchmark corpus, where "Mineralvatten"
@@ -244,6 +249,9 @@ function merchantName(lines: string[]) {
   lines.slice(0, 14).forEach((line, index) => {
     if (line.length < 2 || line.length > 60 || ignoredMerchantWords.test(line)) return;
     if (amountCandidates(line).length) return;
+    // "116 40 Stockholm" is the postal address. Its digits used to be trimmed as leading junk before
+    // scoring, leaving a clean-looking city that beat the real name ("Nota på Stockholm/Göteborg").
+    if (/^\s*(?:SE-?)?\d{3}\s?\d{2}\s+\p{L}/iu.test(line)) return;
     const letters = (line.match(/[A-Za-zÅÄÖåäö]/g) || []).length;
     const digits = (line.match(/\d/g) || []).length;
     if (letters < 3 || digits > letters) return;
@@ -251,7 +259,10 @@ function merchantName(lines: string[]) {
     // chain is legitimately named that way ("7-Eleven"), and stripping it left an admin-facing title of
     // just "Eleven".
     const keepsLeadingDigits = /^\d{1,2}-[A-Za-zÅÄÖåäö]/.test(line);
-    const text = (keepsLeadingDigits ? line : line.replace(leadingNonLetterJunk, "")).replace(trailingNonNameJunk, "").slice(0, 60);
+    // PP-OCR reads a lowercase l inside a word as 1 ("Matsa1" for "Matsal"); repairing it lets the two
+    // printings of the name count as a repeat below.
+    const repaired = line.replace(/(?<=\p{Ll}{2})1(?=\p{Ll}|\b)/gu, "l");
+    const text = (keepsLeadingDigits ? repaired : repaired.replace(leadingNonLetterJunk, "")).replace(trailingNonNameJunk, "").slice(0, 60);
     if (text) candidates.push({ text, index });
   });
   // A merchant's name is often printed twice near the top of a Swedish receipt (once in the header,
@@ -331,12 +342,11 @@ function receiptTotal(lines: string[]) {
 
 // A receipt always has the same shape: header (merchant, address, table/terminal info) → items →
 // tax/subtotal → total → payment details. Rather than growing an ever-longer list of header/footer
-// keywords one real receipt at a time, find the items section structurally and only let the riskier
-// cross-line merge heuristics (which glue a name on one line to a price from another) fire inside it.
-// Same-line name+price pairs are unaffected — that path never "guesses" a pairing, so it's not
-// section-gated. A misread header/footer line that already contains its own price would still need
-// its own exclusion rule (see metadataLineWords etc.); this specifically targets the actual bug shape
-// seen twice now: an unrelated price merging onto a nearby header/footer line.
+// keywords one real receipt at a time, find the items section structurally: nothing at or after the
+// total line becomes an item, and the riskier cross-line merges only fire inside the section. Footers
+// are full of number-bearing lines (phone/org/terminal numbers, VAT tables, card and "Belopp" lines);
+// letting same-line name+price pairs through there turned e.g. "TelNr: 08-425 500 30" under the total
+// of a real restaurant receipt into a 425 500 kr item.
 const quantityNamePattern = /^\s*\d{1,2}\s*[xX]\s*\S.*[A-Za-zÅÄÖåäö]/;
 // Swedish receipts commonly fuse the multiplier to the product ("2xNachos" or "3*Pant burk").
 // Requiring whitespace after x/* silently turned those into a quantity-one item and lost the
@@ -362,9 +372,9 @@ function receiptItems(lines: string[]) {
   const { start: sectionStart, end: sectionEnd } = itemsSectionBounds(lines);
   const items: Array<{ name: string; quantity: number; amount: string }> = [];
   const itemLines: string[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
+  for (let index = 0; index < sectionEnd; index += 1) {
     const line = lines[index]!;
-    const inItemsSection = index >= sectionStart && index < sectionEnd;
+    const inItemsSection = index >= sectionStart;
     const separatedNames: string[] = [];
     let cursor = index;
     while (inItemsSection && cursor < lines.length && /^\s*\d{1,2}\s*[xX]\s*\S.*[A-Za-zÅÄÖåäö]/.test(lines[cursor]!) && !amountCandidates(lines[cursor]!).length) {
@@ -395,8 +405,35 @@ function receiptItems(lines: string[]) {
     } else itemLines.push(line);
   }
   const seen = new Set<string>();
-  for (const line of itemLines) {
-    if (totalWords.test(line) || excludedTotalWords.test(line) || metadataLineWords.test(line) || nonItemAdjustmentWords.test(line) || looksLikeSystemCode(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
+  // "2st 55 kr" / "2 st à 55,00": count and unit price, with the row total printed elsewhere -- either
+  // on the same line after it or on the item line just above. The count is only trusted when count x
+  // unit price equals that row total; "kr" is also accepted as OCR's "ki".
+  const countUnitPrice = /(?:^|\s)(\d{1,2})\s*st\.?\s*(?:[àa@x×*]\s*)?((?:\d{1,3}(?:[ .]\d{3})*|\d+)(?:[,.]\d{2})?)\s*(?:k[rli]|sek|:-)?/iu;
+  const provenCount = (text: string, rowAmount: number) => {
+    const match = countUnitPrice.exec(text);
+    const count = match ? Number(match[1]) : 0;
+    const unit = match ? parseMoney(match[2]!.includes(",") || match[2]!.includes(".") ? match[2]! : `${match[2]},00`) : null;
+    return unit && count >= 2 && count <= 20 && Math.abs(unit * count - rowAmount) < 0.005 ? count : null;
+  };
+  const countOnlyLine = /^\s*\d{1,2}\s*st\.?\s*(?:[àa@x×*]\s*)?(?:\d{1,3}(?:[ .]\d{3})*|\d+)(?:[,.]\d{2})?\s*(?:k[rli]|sek|:-)?\s*$/iu;
+  for (const [lineIndex, line] of itemLines.entries()) {
+    if (countOnlyLine.test(line)) continue;
+    // "Ostron Flambadou 2st 55 kr 110.00": the count/unit sits between name and row total.
+    const inlineCount = /^(.*\p{L})\s+\d{1,2}\s*st\.?\s*(?:[àa@x×*]\s*)?(?:\d{1,3}(?:[ .]\d{3})*|\d+)(?:[,.]\d{2})?\s*(?:k[rli]|sek|:-)?\s+((?:\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2})\s*(?:kr|sek)?\s*$/iu.exec(line);
+    if (inlineCount) {
+      const amount = parseMoney(inlineCount[2]!);
+      const quantity = amount ? provenCount(line.slice(inlineCount[1]!.length), amount) : null;
+      const name = inlineCount[1]!.replace(leadingNonLetterJunk, "").replace(trailingNonNameJunk, "").slice(0, 100);
+      if (amount && quantity && (name.match(/\p{L}/gu) || []).length >= 2) {
+        const key = `${name.toLocaleLowerCase("sv-SE").replace(/[^a-z0-9åäö]/g, "")}|${quantity}|${amount.toFixed(2)}`;
+        if (!seen.has(key)) { seen.add(key); items.push({ name, quantity, amount: amount.toFixed(2) }); if (items.length >= 60) break; }
+        continue;
+      }
+    }
+    const nextLine = itemLines[lineIndex + 1] ?? "";
+    // "Belopp" is the card-payment amount line; TSI/CVM/ATC/ARQC join AID/TVR as card-terminal (EMV)
+    // fields, which some printers put above the items where the section bound can't exclude them.
+    if (totalWords.test(line) || excludedTotalWords.test(line) || metadataLineWords.test(line) || nonItemAdjustmentWords.test(line) || looksLikeSystemCode(line) || /moms|org\.?\s*nr|kort|visa|mastercard|datum|kvitto|summa|subtotal|delsumma|betalt|godkänt|\bbelopp\b|\bköp\b|terminal|kontroll(enhet)?|ctuid|\baid\b|\btvr\b|\btsi\b|\bcvm\b|\batc\b|\barqc\b|\bref\.?|\bpsn\b|#\s*\d+|\bstkk\b|\b(?:mån|tis|ons|tor|fre|lör|sön)\b/i.test(line)) continue;
     // "Öl 2 st 158,00" -- quantity written AFTER the name ("name N st price") instead of before it. The
     // shared quantityPattern below only ever looks at the START of a line, so this row-total format
     // (confirmed missed entirely on every corpus fixture using it: quantity silently fell back to 1 and
@@ -474,8 +511,18 @@ function receiptItems(lines: string[]) {
     if (!amounts.length || !/\d[,.]\d{2}\s*(?:kr|sek)?\s*$/i.test(line)) continue;
     const quantityMatch = line.match(quantityPattern);
     if (!quantityMatch && amounts.length > 1 && /^\s*\d+[,.]\d{2}\b/.test(line)) continue;
-    const quantity = Math.min(20, Math.max(1, Number(quantityMatch?.[1] || 1)));
+    let quantity = Math.min(20, Math.max(1, Number(quantityMatch?.[1] || 1)));
     let amount = amounts.at(-1)!;
+    // "Krusevice (2 89,00) 178,00": a parenthesised unit price with the count either missing or
+    // misread (a real receipt came back as "(3 89,00)"). The row total is the trustworthy number, so
+    // the count is only taken from the receipt's own arithmetic: total / unit price, whole and 2..20.
+    const parenthesisedUnit = /\(\s*(?:\d{1,2}\s*[x×*à]?\s*)?((?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2})\s*\)/i.exec(line);
+    if (!quantityMatch && parenthesisedUnit) {
+      const unitAmount = parseMoney(parenthesisedUnit[1]!);
+      const derived = unitAmount ? Math.round((amount / unitAmount) * 100) / 100 : 0;
+      if (Number.isInteger(derived) && derived >= 2 && derived <= 20) quantity = derived;
+    }
+    if (quantity === 1 && countOnlyLine.test(nextLine)) quantity = provenCount(nextLine, amount) ?? quantity;
     if (quantity > 1 && amounts.length > 1) {
       const unitAmount = amounts.at(-2)!;
       const calculatedRowAmount = unitAmount * quantity;
@@ -483,7 +530,7 @@ function receiptItems(lines: string[]) {
     }
     const name = line
       .replace(quantityPattern, "")
-      .replace(/\(\s*\d+[,.]\d{2}\s*\)/g, " ")
+      .replace(/\([^()]*\d[,.]\d{2}[^()]*\)/g, " ")
       .replace(/(?<!\d)(\d{1,3}(?:[ ,.]\d{3})*|\d+)[,.]\d{2}(?!\d)/g, " ")
       .replace(/\(\s*\)/g, " ")
       .replace(/\b(?:kr|sek|st)\b/gi, " ")
@@ -679,7 +726,10 @@ export function parseStructuredReceipt(text: string, ocrConfidence = 0, now = ne
     const unitPriceMatch = /(?:\bx\b|\*|à)\s*((?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2})/i.exec(rawLine);
     const multipackMatch = /\b(\d{1,2})\s*[x*]\s*(\d+(?:[,.]\d+)?)\s*(kg|g|ml|cl|l)\b/i.exec(rawLine);
     const unit = quantityUnit?.[2]?.toLowerCase() as ReceiptItemUnit | undefined;
-    const numericQuantity = quantityUnit ? Number(quantityUnit[1]!.replace(",", ".")) : item.quantity;
+    // A volume ("Fernet 2CL", "Lager 50cl") is the product's size, not how many were bought -- only a
+    // count (st) or a weight replaces the parsed quantity. "9 Fernet 2CL" used to come back as 2.
+    const isVolume = unit === "cl" || unit === "ml" || unit === "l";
+    const numericQuantity = quantityUnit && !isVolume ? Number(quantityUnit[1]!.replace(",", ".")) : item.quantity;
     const isWeight = unit === "kg" || unit === "g";
     const weightGrams = isWeight && Number.isFinite(numericQuantity) ? Math.round(numericQuantity * (unit === "kg" ? 1000 : 1)) : null;
     const kind = /\b(?:pant|returpack)\b/i.test(item.name) ? "pant" : /\b(?:serviceavgift|serveringsavgift|avgift)\b/i.test(item.name) ? "fee" : "product";
@@ -689,7 +739,7 @@ export function parseStructuredReceipt(text: string, ocrConfidence = 0, now = ne
       normalizedName: item.name.normalize("NFKC").replace(/\s+/g, " ").trim(),
       kind,
       quantity: Number.isFinite(numericQuantity) ? numericQuantity : null,
-      unit: unit ?? (item.quantity >= 1 ? "st" : null),
+      unit: (isVolume ? undefined : unit) ?? (item.quantity >= 1 ? "st" : null),
       unitPriceOre: unitPriceMatch ? Math.abs(explicitMoneyValuesOre(unitPriceMatch[1]!).at(-1) ?? 0) || null
         : explicitAmounts.length > 1 && item.quantity > 1 ? explicitAmounts.at(-2)! : null,
       lineTotalOre,
@@ -951,6 +1001,69 @@ function median(values: number[]) {
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
 
+const priceOnlyText = /^\s*(?:sek|kr)?\s*-?(?:\d{1,3}(?:[ .]\d{3})*|\d+)[ ,.]\d{2}\s*(?:kr|sek|:-)?\s*$/i;
+
+// On a curved or tilted phone photo the right-hand price column can sit a whole line lower (or
+// higher) than the names it belongs to -- one global deskew angle can't fix bent paper. A real
+// restaurant receipt came back with every price one row down: the first dish got no price, the second
+// took the first one's, and so on, so people would have claimed rows by the wrong names. Try the
+// vertical offsets the evidence itself suggests and keep the one that pairs the most prices with name
+// lines in order, provided the total row stays paired with the receipt's largest amount. That check is
+// what stops a wrong offset: with a label on every footer row (Belopp/Kort/Ref…) some offset always
+// pairs one more price, but it tears the total away from its amount. A shift is only applied when it
+// pairs strictly more than no shift does, so a straight receipt (or one with wrapped two-line names,
+// where several offsets tie) is left exactly as it was.
+function alignPriceColumn(projected: Array<{ line: ReceiptOcrEvidenceLine; x: number; y: number; height: number }>, typicalHeight: number) {
+  const priceBoxes = projected.filter(({ line }) => priceOnlyText.test(line.text));
+  if (priceBoxes.length < 3) return;
+  // Only the right-hand amount column; a VAT table's middle columns would otherwise drag it left.
+  const columnX = median(priceBoxes.map(({ x }) => x));
+  const prices = priceBoxes.filter(({ x }) => x >= columnX - 2.5 * typicalHeight).sort((left, right) => left.y - right.y);
+  if (prices.length < 3) return;
+  const priceColumn = Math.min(...prices.map(({ x }) => x));
+  const labels = projected.filter(({ line, x }) => x < priceColumn && /\p{L}/u.test(line.text) && !priceOnlyText.test(line.text))
+    .sort((left, right) => left.y - right.y);
+  if (labels.length < 3) return;
+  const tolerance = 0.5 * typicalHeight;
+  const totalLabels = labels.filter(({ line }) => totalWords.test(line.text) && !excludedTotalWords.test(line.text));
+  // The total is the largest amount on the receipt; pairing the label with any nearby price isn't
+  // enough (a curved receipt put the tip row's price within reach of "Total").
+  const amountOf = (text: string) => amountCandidates(text).at(-1) ?? 0;
+  const totalPrice = prices.reduce((largest, price) => amountOf(price.line.text) > amountOf(largest.line.text) ? price : largest);
+  const totalPaired = (offset: number) => totalLabels.some((label) => Math.abs(totalPrice.y - offset - label.y) <= tolerance);
+  if (!totalLabels.length) return;
+  const paired = (offset: number) => {
+    let count = 0;
+    let next = 0;
+    for (const price of prices) {
+      let best = -1;
+      for (let index = next; index < labels.length; index += 1) {
+        const distance = Math.abs(price.y - offset - labels[index]!.y);
+        if (distance <= tolerance && (best < 0 || distance < Math.abs(price.y - offset - labels[best]!.y))) best = index;
+        if (labels[index]!.y > price.y - offset + tolerance) break;
+      }
+      if (best >= 0) { count += 1; next = best + 1; }
+    }
+    return count;
+  };
+  const candidates = new Set<number>();
+  for (const price of prices) {
+    for (const label of labels) {
+      const offset = price.y - label.y;
+      if (Math.abs(offset) <= 1.6 * typicalHeight) candidates.add(Math.round(offset / 2) * 2);
+    }
+  }
+  const unshifted = paired(0);
+  let bestOffset = 0;
+  let bestCount = unshifted;
+  for (const offset of [...candidates].sort((left, right) => Math.abs(left) - Math.abs(right))) {
+    if (!totalPaired(offset)) continue;
+    const count = paired(offset);
+    if (count > bestCount) { bestCount = count; bestOffset = offset; }
+  }
+  if (bestOffset !== 0) for (const price of prices) price.y -= bestOffset;
+}
+
 function geometryRows(lines: ReceiptOcrEvidenceLine[], rowFactor = 0.45) {
   if (!lines.length) return [] as ReceiptOcrEvidenceLine[][];
   const angles = lines.map(({ box }) => {
@@ -972,6 +1085,7 @@ function geometryRows(lines: ReceiptOcrEvidenceLine[], rowFactor = 0.45) {
     return { line, x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2, height: Math.max(...ys) - Math.min(...ys) };
   });
   const typicalHeight = Math.max(1, median(projected.map(({ height }) => height)));
+  alignPriceColumn(projected, typicalHeight);
   const groups: Array<{ y: number; height: number; lines: typeof projected }> = [];
   for (const line of projected.sort((left, right) => left.y - right.y || left.x - right.x)) {
     let best: typeof groups[number] | null = null;

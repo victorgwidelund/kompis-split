@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { closeReceiptOcr, combineReceiptPasses, paddleOcrReceiptRequest, parseOllamaReceipt, parseReceiptText, prepareReceiptImages, recognizeReceipt } from "../dist/receipt-ocr.js";
+import { closeReceiptOcr, combineReceiptPasses, paddleOcrReceiptRequest, parseOllamaReceipt, parseReceiptText, prepareReceiptImages, rapidOcrEvidenceText, recognizeReceipt } from "../dist/receipt-ocr.js";
 
 test("PaddleOCR receipt requests use the documented OCR prompt without forced JSON", () => {
   const request = paddleOcrReceiptRequest(Buffer.from("test-image"));
@@ -847,4 +847,101 @@ test("two bundled Swedish OCR workers can process receipts concurrently", { time
   } finally {
     await closeReceiptOcr();
   }
+});
+
+// --- Real-photo fixes (v1.32.2). Each fixture is a minimal made-up receipt reproducing a failure seen
+// on real Snabbnota photos in production, not a copy of a real receipt.
+
+test("nothing printed under the total becomes an item, even a footer line ending in a price-like number", () => {
+  const suggestion = parseReceiptText(`Matsal
+Bord 606 - Gäster 4
+1.00 Falafel Plate 215.00
+1.00 TT Eko Lager 75.00
+Total 290.00
+Att Betala 290.00
+TelNr: 08-425 500 30
+OrgNr: 556773-1228`);
+  assert.equal(suggestion.amount, "290.00");
+  assert.deepEqual(suggestion.items.map((item) => [item.name, item.amount]), [["Falafel Plate", "215.00"], ["TT Eko Lager", "75.00"]]);
+});
+
+test("an abbreviated Tot line is the total, and the receipt number never is", () => {
+  const suggestion = parseReceiptText(`Brödernas Globen AB
+Kvitto Nr: 60842
+2 Fries 42.00 84.00
+2 Greven 135.00 270.00
+Tot SEK 354.00
+354.00 < KORT`);
+  assert.equal(suggestion.amount, "354.00");
+  assert.deepEqual(suggestion.items.map((item) => [item.name, item.quantity, item.amount]), [["Fries", 2, "84.00"], ["Greven", 2, "270.00"]]);
+});
+
+test("a TOTALT misread by OCR still ends the items, and card Belopp lines are never items", () => {
+  const suggestion = parseReceiptText(`Medis Kök & Bar
+KVITTO
+Krusevice (3 89,00) 178,00
+IOTALT 178,00
+Belopp 178,00 SEK
+Kort
+Belopp 178,00`);
+  assert.equal(suggestion.amount, "178.00");
+  assert.deepEqual(suggestion.items, [{ name: "Krusevice", quantity: 2, amount: "178.00" }]);
+});
+
+test("card-terminal fields printed above the items are not items", () => {
+  const suggestion = parseReceiptText(`AID. A0000000041010
+TVR: 0000048001
+TSI E800
+Dinner 22
+1.00 Coca Cola Zero 50.00
+Total 50.00`);
+  assert.deepEqual(suggestion.items.map((item) => item.name), ["Coca Cola Zero"]);
+});
+
+test("a count and unit price in st format sets the quantity only when the arithmetic proves it", () => {
+  assert.deepEqual(parseReceiptText("Kvitto\nOstron Flambadou 2st 55 kr 110.00\nTotal 110.00").items, [{ name: "Ostron Flambadou", quantity: 2, amount: "110.00" }]);
+  assert.deepEqual(parseReceiptText("Kvitto\nRäkor 110.00\n2 st à 55,00\nTotal 110.00").items, [{ name: "Räkor", quantity: 2, amount: "110.00" }]);
+  // 2 x 50 is not 110, so the line is read as one row and the count is not invented.
+  assert.equal(parseReceiptText("Kvitto\nRäkor 110.00\n2 st à 50,00\nTotal 110.00").items[0].quantity, 1);
+  assert.equal(parseReceiptText("Kvitto\nKrusevice (3 89,00) 170,00\nTotal 170,00").items[0].quantity, 1);
+});
+
+test("the postal address line is never the merchant, and an OCR 1 inside the name is read as l", () => {
+  assert.equal(parseReceiptText(`Matsa1
+Nytorget 4
+116 40 Stockholm
+Matsal
+1.00 Falafel Plate 215.00
+Total 215.00`).title, "Matsal");
+  assert.notEqual(parseReceiptText(`Södra Vägen 22
+412 54 Göteborg
+Dinner 22
+1.00 Glas Chablis 175.00
+Total 175.00`).title, "Göteborg");
+});
+
+const ocrBox = (text, x, y, width, height = 60) => ({ text, confidence: 0.98, box: [[x, y], [x + width, y], [x + width, y + height], [x, y + height]] });
+
+test("a price column sitting a row lower on a curved photo is paired with the right names", () => {
+  // Every price is 40 px below its name with ~65 px line spacing -- grouped as-is, each price joins
+  // the NEXT name, so the first dish gets nothing and the rest get their neighbour's price.
+  const names = ["Pizza", "Pasta", "Öl", "Total"];
+  const prices = ["100,00", "120,00", "60,00", "280,00"];
+  const lines = [ocrBox("Restaurang Test", 100, 0, 400),
+    ...names.map((name, row) => ocrBox(name, 100, 100 + row * 65, 220)),
+    ...prices.map((price, row) => ocrBox(price, 600, 140 + row * 65, 160))];
+  const suggestion = parseReceiptText(rapidOcrEvidenceText(lines));
+  assert.equal(suggestion.amount, "280.00");
+  assert.deepEqual(suggestion.items.map((item) => [item.name, item.amount]), [["Pizza", "100.00"], ["Pasta", "120.00"], ["Öl", "60.00"]]);
+});
+
+test("a straight receipt with a wrapped two-line name is not shifted", () => {
+  const lines = [ocrBox("Restaurang Test", 100, 0, 400),
+    ocrBox("Latus, Langhe Rosso", 100, 100, 300), ocrBox("950,00", 600, 100, 160),
+    ocrBox("Flaska", 100, 165, 120),
+    ocrBox("Negroni", 100, 230, 160), ocrBox("149,00", 600, 230, 160),
+    ocrBox("Total", 100, 295, 120), ocrBox("1099,00", 600, 295, 160)];
+  const suggestion = parseReceiptText(rapidOcrEvidenceText(lines));
+  assert.equal(suggestion.amount, "1099.00");
+  assert.deepEqual(suggestion.items.map((item) => [item.name, item.amount]), [["Latus, Langhe Rosso", "950.00"], ["Negroni", "149.00"]]);
 });
