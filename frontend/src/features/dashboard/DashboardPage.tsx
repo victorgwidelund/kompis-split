@@ -4,6 +4,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { GroupRow } from "../../components/GroupRow";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import type { Category, DashboardResponse, QuickTabSummary, ReminderResult, TripSummary, User, View } from "../../types/models";
+import { isBajen } from "../../utils/easterEggs";
 import { formatDate, formatMoney } from "../../utils/format";
 
 interface Props {
@@ -21,7 +22,7 @@ interface Props {
 
 function TripCard({ trip, index, onOpen }: { trip: TripSummary; index: number; onOpen: () => void }) {
   const balance = Number(trip.myBalanceCents || 0);
-  return <button className="trip-card" onClick={onOpen}><span className="trip-emoji">{["✦", "⌁", "◇", "◉"][index % 4]}</span><span className="trip-card-copy"><strong>{trip.name}</strong><small>{trip.participantCount} {trip.participantCount === 1 ? "person" : "personer"} · {formatMoney(trip.totalCents)}</small><em className={balance > 0 ? "positive" : balance < 0 ? "negative" : ""}>{balance > 0 ? `Får tillbaka ${formatMoney(balance)}` : balance < 0 ? `Skyldig ${formatMoney(-balance)}` : "Jämnt saldo"}</em></span></button>;
+  return <button className={`trip-card${isBajen(trip.name) ? " bajen-stripes" : ""}`} onClick={onOpen}><span className="trip-emoji">{["✦", "⌁", "◇", "◉"][index % 4]}</span><span className="trip-card-copy"><strong>{trip.name}</strong><small>{trip.participantCount} {trip.participantCount === 1 ? "person" : "personer"} · {formatMoney(trip.totalCents)}</small><em className={balance > 0 ? "positive" : balance < 0 ? "negative" : ""}>{balance > 0 ? `Får tillbaka ${formatMoney(balance)}` : balance < 0 ? `Skyldig ${formatMoney(-balance)}` : "Jämnt saldo"}</em></span></button>;
 }
 
 export function DashboardPage({ user, dashboard, quickTabs, categories, onNavigate, onNewTrip, onNewQuickTab, onInviteFriend, onRemindUnpaid, notify }: Props) {

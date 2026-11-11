@@ -5,6 +5,15 @@ export interface NewsEntry { id: string; date: string; title: string; items: str
 
 export const newsEntries: NewsEntry[] = [
   {
+    id: "2026-11-11-pengaregn",
+    date: "11 november 2026",
+    title: "Ny logga – och lite hemligheter 💚🤍",
+    items: [
+      "Kompis Split har fått en ny logga: två skålande grönvita glas medan det regnar pengar. Lägg till appen på hemskärmen igen så får du den nya ikonen.",
+      "Det har gömts ett par Bajen- och ölöverraskningar i appen. Vi säger inte var. 🍻",
+    ],
+  },
+  {
     id: "2026-11-11-kvittoraderna",
     date: "11 november 2026",
     title: "Smartare kvittoläsning",

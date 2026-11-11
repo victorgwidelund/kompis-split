@@ -270,3 +270,8 @@ fieldset { padding: 0; border: 0; }legend { margin-bottom: 9px; color: #4d514c; 
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
 .news-entry { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); }.news-entry.latest { border-color: rgba(255,109,77,.35); background: rgba(255,109,77,.07); }.news-entry .eyebrow { margin-bottom: 6px; }.news-entry h3 { margin: 0 0 10px; font-size: 18px; line-height: 1.25; }.news-entry ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-left: 20px; line-height: 1.45; }
+.rain { position: fixed; inset: 0; z-index: 190; overflow: hidden; pointer-events: none; }.rain span { position: absolute; top: -48px; line-height: 1; animation: rain-fall linear forwards; }
+@keyframes rain-fall { from { transform: translateY(0) rotate(0deg); opacity: 1; } 85% { opacity: 1; } to { transform: translateY(calc(100dvh + 96px)) rotate(var(--spin, 360deg)); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rain { display: none; } }
+.bajen-stripes { background-image: repeating-linear-gradient(90deg, #00843d 0 10px, #fff 10px 20px); background-size: 100% 4px; background-repeat: no-repeat; background-position: left bottom; }
+.beer-tab-badge { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 2px 9px; border-radius: 99px; background: var(--sun); color: var(--ink); font-size: 11px; font-weight: 800; letter-spacing: 0; vertical-align: middle; }
