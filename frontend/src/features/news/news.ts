@@ -5,6 +5,15 @@ export interface NewsEntry { id: string; date: string; title: string; items: str
 
 export const newsEntries: NewsEntry[] = [
   {
+    id: "2026-11-11-farger",
+    date: "11 november 2026",
+    title: "Grönvitt hela vägen 💚",
+    items: [
+      "Appen har bytt korall och svart mot grönt, mörkgrönt och guld som passar den nya loggan.",
+      "Skulder är fortfarande röda och pengar du får tillbaka gröna, så det syns direkt vad som gäller.",
+    ],
+  },
+  {
     id: "2026-11-11-pengaregn",
     date: "11 november 2026",
     title: "Ny logga – och lite hemligheter 💚🤍",

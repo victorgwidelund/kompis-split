@@ -76,7 +76,7 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
       <aside className="sidebar">
         <button className="brand brand-button" onClick={handleBrandClick}><BrandMark /><span>Kompis<br /><strong>Split</strong></span></button>
         <button className="button dark wide" onClick={onNewTrip}><span>＋</span> Ny grupp</button>
-        <button className="button coral-button wide" onClick={onNewQuickTab}><span>⚡</span> Snabbnota</button>
+        <button className="button green-button wide" onClick={onNewQuickTab}><span>⚡</span> Snabbnota</button>
         <div className="side-heading"><span>Aktiva grupper</span><span className="count">{active.length}</span></div>
         <nav className="trip-list" aria-label="Aktiva grupper">{active.length ? active.map(tripLink) : <small className="side-empty">Inga aktiva grupper</small>}</nav>
         {!!archived.length && <div className="archive-section"><div className="side-heading"><span>Arkiv</span><span className="count">{archived.length}</span></div><nav className="trip-list archive-list" aria-label="Arkiverade grupper">{archived.map(tripLink)}</nav></div>}

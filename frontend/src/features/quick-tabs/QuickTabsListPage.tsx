@@ -32,7 +32,7 @@ export function QuickTabsListPage({ quickTabs, onNavigate, onNewQuickTab }: Prop
       <header className="page-heading">
         <div><p className="eyebrow">Dela ett kvitto direkt</p><h1>Snabbnota</h1></div>
       </header>
-      <button className="button coral-button wide scan-cta" onClick={onNewQuickTab}>📷 Skanna ny nota</button>
+      <button className="button green-button wide scan-cta" onClick={onNewQuickTab}>📷 Skanna ny nota</button>
       <fieldset className="segmented two">
         <legend className="visually-hidden">Filtrera snabbnotor</legend>
         <label><input type="radio" name="quick-tab-filter" checked={filter === "active"} onChange={() => setFilter("active")} /><span>Aktiva ({active.length})</span></label>
