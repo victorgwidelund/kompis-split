@@ -5,6 +5,7 @@ import type { TripSummary, User, View } from "../types/models";
 import { hammarbyMessages, makeRainDrops, randomFrom, type RainDrop } from "../utils/easterEggs";
 import { shortVersion } from "../utils/format";
 import { Rain } from "./Rain";
+import { useViewportResync } from "../hooks/useViewportResync";
 
 interface ShellProps {
   user: User;
@@ -44,6 +45,7 @@ export function Shell({ user, version, trips, view, guestMode, onNavigate, onNew
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [celebrate]);
+  useViewportResync();
   const handleBrandClick = () => {
     const now = Date.now();
     brandClicks.current = [...brandClicks.current.filter((time) => now - time < 2500), now];
