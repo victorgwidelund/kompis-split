@@ -11,6 +11,8 @@ import { FriendsPage } from "./features/friends/FriendsPage";
 import { GroupsPage } from "./features/groups/GroupsPage";
 import { GuidePage } from "./features/guide/GuidePage";
 import { MorePage } from "./features/more/MorePage";
+import { hasUnseenNews, markNewsSeen } from "./features/news/news";
+import { NewsDialog } from "./features/news/NewsDialog";
 import { QuickTabDialog } from "./features/quick-tabs/QuickTabDialog";
 import { QuickTabPage } from "./features/quick-tabs/QuickTabPage";
 import { QuickTabsListPage } from "./features/quick-tabs/QuickTabsListPage";
@@ -158,6 +160,9 @@ export default function App() {
     window.addEventListener("pageshow", refreshOnResume);
     return () => { document.removeEventListener("visibilitychange", refreshOnResume); window.removeEventListener("pageshow", refreshOnResume); };
   }, [user, guestMode, demoMode, refreshDashboard, loadTrip, loadQuickTab]);
+  const [newsOpen, setNewsOpen] = useState(false);
+  useEffect(() => { if (user && !guestMode && !demoMode && hasUnseenNews()) setNewsOpen(true); }, [user, guestMode, demoMode]);
+  const closeNews = () => { markNewsSeen(); setNewsOpen(false); };
   if (loading) return <div className="login-screen"><div className="login-card"><div className="brand-mark">KS</div><p className="eyebrow">Kompis Split</p><h1>Laddar…</h1></div></div>;
   if (!user && !guestMode) return <><AuthScreen mode={authMode} needsSetup={needsSetup} invitation={invitation} version={version} onModeChange={setAuthMode} onSubmit={authenticate} /><Toast message={toast} /></>;
   const shellUser = user || guestUser;
@@ -172,7 +177,7 @@ export default function App() {
     {view.page === "quick-tabs" && <QuickTabsListPage quickTabs={quickTabs} onNavigate={(next) => void navigate(next)} onNewQuickTab={() => setGlobalDialog("quick")} />}
     {view.page === "friends" && dashboard && <FriendsPage contacts={dashboard.contacts} onBack={() => void navigate({ page: "more" })} onInviteFriend={() => setGlobalDialog("friend")} />}
     {view.page === "statistics" && statistics && <StatisticsPage data={statistics} onBack={() => void navigate({ page: "dashboard" })} onRefresh={() => void api<StatisticsResponse>("/api/statistics").then(setStatistics)} />}
-    {view.page === "more" && user && <MorePage user={user} version={version} vapidPublicKey={vapidPublicKey} onUserUpdate={setUser} onNavigate={(next) => void navigate(next)} onReportBug={() => setGlobalDialog("bug")} onLogout={() => void api("/api/logout", { method: "POST", body: {} }).then(() => location.reload())} notify={notify} />}
+    {view.page === "more" && user && <MorePage user={user} version={version} vapidPublicKey={vapidPublicKey} onUserUpdate={setUser} onNavigate={(next) => void navigate(next)} onReportBug={() => setGlobalDialog("bug")} onOpenNews={() => setNewsOpen(true)} onLogout={() => void api("/api/logout", { method: "POST", body: {} }).then(() => location.reload())} notify={notify} />}
     {view.page === "guide" && user && <GuidePage isAdmin={user.isAdmin} onBack={() => void navigate(isMobile ? { page: "more" } : { page: "dashboard" })} />}
     {view.page === "admin" && admin && user && <AdminPage data={admin} currentUserId={user.id} demoMode={demoMode} onEnterDemo={() => void enterDemo()} onBack={() => void navigate(isMobile ? { page: "more" } : { page: "dashboard" })} onRefresh={() => void reloadAdmin()} onOpenTrip={(id) => void navigate({ page: "trip", id })} onUserUpdate={(id, update) => void api(`/api/admin/users/${id}`, { method: "PATCH", body: update }).then(reloadAdmin).then(() => notify("Kontot uppdaterades"))} onTripArchive={(id, archived) => void api(`/api/trips/${id}/archive`, { method: "POST", body: { archived } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen uppdaterades"))} onTripRestore={(id) => void api(`/api/trips/${id}/trash`, { method: "POST", body: { deleted: false } }).then(() => Promise.all([reloadAdmin(), refreshDashboard()])).then(() => notify("Gruppen återställdes"))} onQuickTabDelete={(id) => void api(`/api/admin/quick-tabs/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Snabbnotan togs bort"))} onBugReportResolve={(id, resolved) => void api(`/api/admin/bug-reports/${id}/resolve`, { method: "POST", body: { resolved } }).then(reloadAdmin).then(() => notify(resolved ? "Markerad som löst" : "Markerad som olöst"))} onBugReportDelete={(id) => void api(`/api/admin/bug-reports/${id}`, { method: "DELETE" }).then(reloadAdmin).then(() => notify("Buggrapporten togs bort"))} onEmailSettingsSave={(values) => api("/api/admin/email-settings", { method: "POST", body: values }).then(reloadAdmin).then(() => notify("E-postinställningarna sparades")) as Promise<void>} onEmailSettingsTest={(recipientEmail) => api<{ recipient: string }>("/api/admin/email-settings/test", { method: "POST", body: { recipientEmail } }).then((result) => `Testmail skickat till ${result.recipient}`)} onOcrBenchmarkRun={(mode) => api<{ available: boolean; job: OcrBenchmarkJob }>("/api/admin/ocr-benchmark", { method: "POST", body: { mode } })} onOcrBenchmarkStatus={() => api<{ available: boolean; job: OcrBenchmarkJob | null }>("/api/admin/ocr-benchmark")} />}
   </Shell>
@@ -180,6 +185,7 @@ export default function App() {
   <QuickTabDialog open={globalDialog === "quick"} onClose={() => setGlobalDialog(null)} notify={notify} onCreated={async (created, createdInvitation) => { setQuickTab(created); setQuickInvitation(createdInvitation); setView({ page: "quick-tab", id: created.id }); history.replaceState(null, "", `${location.pathname}#quick-tab-${created.id}`); await refreshDashboard(); notify("Snabbnotan är live – dela länken med gänget"); }} />
   <FriendInviteDialog key={globalDialog === "friend" ? "friend-open" : "friend-closed"} open={globalDialog === "friend"} onClose={() => setGlobalDialog(null)} notify={notify} />
   <BugReportDialog open={globalDialog === "bug"} version={version} onClose={() => setGlobalDialog(null)} notify={notify} />
+  <NewsDialog open={newsOpen} onClose={closeNews} />
   {trip && user && <><InviteDialog open={tripDialog === "invite"} tripId={trip.id} onClose={() => setTripDialog(null)} notify={notify} /><PersonDialog open={tripDialog === "person"} trip={trip} onClose={() => setTripDialog(null)} onSaved={refreshTrip} notify={notify} /><ExpenseDialog open={tripDialog === "expense"} trip={trip} categories={categories} expense={editingExpense} user={user} readOnly={editingExpenseReadOnly} onClose={() => setTripDialog(null)} onSaved={refreshTrip} onManageCategories={() => setCategoryOpen(true)} notify={notify} /><CategoryDialog open={categoryOpen} categories={categories} user={user} onClose={() => setCategoryOpen(false)} onChanged={setCategories} notify={notify} /><PaymentDialog key={paymentPreset ? `${paymentPreset.fromId}-${paymentPreset.toId}-${paymentPreset.amountCents}` : "none"} open={tripDialog === "payment"} trip={trip} preset={paymentPreset} onClose={() => setTripDialog(null)} onSaved={refreshTrip} /></>}
   <Toast message={toast} /></>;
 }

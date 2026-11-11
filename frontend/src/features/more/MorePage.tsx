@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { api, upload } from "../../api/client";
 import { Avatar } from "../../components/Avatar";
-import { AdminIcon, BugIcon, ChevronRightIcon, GroupsIcon, GuideIcon, LogoutIcon } from "../../components/icons";
+import { AdminIcon, BugIcon, ChevronRightIcon, GroupsIcon, GuideIcon, LogoutIcon, NewsIcon } from "../../components/icons";
 import type { User, View } from "../../types/models";
 import { shortVersion } from "../../utils/format";
 import { isHeicFile, maxOriginalReceiptBytes, prepareReceiptFile } from "../receipts/imagePrep";
@@ -14,6 +14,7 @@ interface Props {
   onUserUpdate: (user: User) => void;
   onNavigate: (view: View) => void;
   onReportBug: () => void;
+  onOpenNews: () => void;
   onLogout: () => void;
   notify: (message: string) => void;
 }
@@ -28,7 +29,7 @@ function MoreRow({ icon, label, onClick }: { icon: React.ReactNode; label: strin
   );
 }
 
-export function MorePage({ user, version, vapidPublicKey, onUserUpdate, onNavigate, onReportBug, onLogout, notify }: Props) {
+export function MorePage({ user, version, vapidPublicKey, onUserUpdate, onNavigate, onReportBug, onOpenNews, onLogout, notify }: Props) {
   const [avatarVersion, setAvatarVersion] = useState(0);
   const [hasPhoto, setHasPhoto] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -101,6 +102,7 @@ export function MorePage({ user, version, vapidPublicKey, onUserUpdate, onNaviga
         </small>
       </section>
       <nav className="more-menu" aria-label="Fler funktioner">
+        <MoreRow icon={<NewsIcon />} label="Nyheter" onClick={onOpenNews} />
         <MoreRow icon={<GroupsIcon />} label="Vänner" onClick={() => onNavigate({ page: "friends" })} />
         <MoreRow icon={<GuideIcon />} label="Användarguide" onClick={() => onNavigate({ page: "guide" })} />
         <MoreRow icon={<BugIcon />} label="Rapportera en bugg" onClick={onReportBug} />
