@@ -43,7 +43,7 @@ Node.js och PostgreSQL behöver inte installeras på Unraid; allt körs i Compos
    RECEIPT_INFERENCE_TIMEOUT_MS=15000
    OCR_INTRA_OP_THREADS=8
    OCR_QUEUE_CAPACITY=4
-   OCR_MEMORY_LIMIT=1g
+   OCR_MEMORY_LIMIT=3g
    OCR_CPU_LIMIT=8
    RECEIPT_OCR_WORKERS=1
    ```
@@ -136,7 +136,7 @@ Reseinbjudningar kan användas av flera vänner enligt serverns gräns och ger �
 | `RECEIPT_INFERENCE_TIMEOUT_MS` | `15000` | Total tidsgräns för lokal OCR innan Tesseract-reserven används |
 | `OCR_INTRA_OP_THREADS` | `8` | ONNX/OpenMP-trådar per aktiv OCR-körning |
 | `OCR_QUEUE_CAPACITY` | `4` | Hård kögräns; överlast avvisas snabbt i stället för att bygga en obegränsad kö |
-| `OCR_MEMORY_LIMIT` | `1g` | Compose-minnesgräns för inference-tjänsten |
+| `OCR_MEMORY_LIMIT` | `3g` | Compose-minnesgräns för inference-tjänsten. Ett riktigt mobilfoto kräver ~1,2 GB per skanning och ~2 GB vid flera i kö — sätt aldrig under 3g |
 | `OCR_CPU_LIMIT` | `8` | Compose CPU-gräns för inference-tjänsten |
 | `RECEIPT_OCR_WORKERS` | `1` | Tesseract-arbetare i den lokala reservvägen |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | tomma | Web Push-nycklar. Genereras en gång med `node -e "console.log(require('web-push').generateVAPIDKeys())"`. Lämnas de tomma stannar push-notiser helt inaktiverat — ingen krasch, växeln i appen döljs bara |

@@ -3,7 +3,7 @@ import { api, upload } from "../../api/client";
 import { DialogHeader, Modal } from "../../components/Modal";
 import type { InvitationResult, OcrResponse, QuickTab, OcrSuggestionItem } from "../../types/models";
 import { kronorToOre, formatMoney } from "../../utils/format";
-import { receiptAiStatus, validateReceiptImage } from "../receipts/ocr";
+import { receiptAiStatus, scanFailureMessage, scanTimeout, validateReceiptImage } from "../receipts/ocr";
 import { prepareReceiptFile } from "../receipts/imagePrep";
 
 type EditableItem = { key: string; name: string; quantity: string; amount: string };
@@ -39,9 +39,9 @@ export function QuickTabDialog({ open, onClose, onCreated, notify }: { open: boo
     }
     if (controller.signal.aborted || generation !== scanGeneration.current) return;
     setReceipt(prepared); setStatusClass("reading"); setStatus("Den lokala OCR-tjänsten läser och kontrollerar kvittoraderna …");
+    const timeout = scanTimeout(controller);
     try {
-      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
-      const payload = await upload<OcrResponse>("/api/quick-tabs/analyze", prepared, {}, signal);
+      const payload = await upload<OcrResponse>("/api/quick-tabs/analyze", prepared, {}, controller.signal);
       if (generation !== scanGeneration.current) return;
       const suggestion = payload.suggestion || {}; const suggested = suggestion.items || [];
       const rows = suggested.map((item: OcrSuggestionItem) => ({ key: crypto.randomUUID(), name: item.name || "", quantity: String(item.quantity || 1), amount: String(item.amount || "") }));
@@ -51,7 +51,10 @@ export function QuickTabDialog({ open, onClose, onCreated, notify }: { open: boo
       const engine = payload.source === "rapidocr" ? "lokal dokument-OCR" : "lokal reserv-OCR";
       setStatusClass(payload.needsReview ? "warning" : "success");
       setStatus(rows.length ? `${rows.length} kvittorader hittades med ${engine}.${receiptAiStatus(payload.ai)}${payload.needsReview ? " Summorna skiljer sig – kontrollera raderna extra noga." : " Kontrollera namn, antal och summor."}` : "Inga säkra rader hittades. Lägg till rätterna manuellt.");
-    } catch (caught) { if (controller.signal.aborted || generation !== scanGeneration.current) return; setStatusClass("warning"); setStatus(`${caught instanceof Error && caught.name !== "TimeoutError" ? caught.message : "Kvittoanalysen tog för lång tid"} Du kan fortfarande fylla i raderna manuellt.`); }
+    } catch (caught) {
+      if ((controller.signal.aborted && !timeout.expired()) || generation !== scanGeneration.current) return;
+      setStatusClass("warning"); setStatus(`${scanFailureMessage(caught, timeout.expired())} Du kan fortfarande fylla i raderna manuellt.`);
+    } finally { timeout.clear(); }
   };
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (busy) return; setError(""); setBusy(true);

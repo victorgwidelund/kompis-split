@@ -54,8 +54,13 @@ jobs:
             exit "$status"
           }
           trap cleanup EXIT
-          docker run --detach --name receipt-inference-test --network none kompis-split-receipt-inference:test
+          # Same memory limit as the Compose default, so a limit too small for real phone photos fails
+          # here instead of silently OOM-killing every production scan (as 1g did until v1.32.1).
+          memory_limit=$(sed -n 's/.*OCR_MEMORY_LIMIT:-\([0-9]*[a-z]*\)}.*/\1/p' compose.yaml)
+          [ -n "$memory_limit" ]
+          docker run --detach --name receipt-inference-test --network none --memory "$memory_limit" kompis-split-receipt-inference:test
           docker cp tests/ocr-benchmark/corpus/dev/grocery_clean_dev1.jpg receipt-inference-test:/tmp/receipt.jpg
+          docker cp tests/receipt-inference-smoke.py receipt-inference-test:/tmp/smoke.py
           ready=false
           for attempt in $(seq 1 30); do
             if docker exec receipt-inference-test python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)"; then
@@ -67,6 +72,8 @@ jobs:
           done
           [ "$ready" = true ]
           docker exec receipt-inference-test python -c "import pathlib,urllib.request,json; data=pathlib.Path('/tmp/receipt.jpg').read_bytes(); request=urllib.request.Request('http://127.0.0.1:8080/v1/ocr',data=data,headers={'Content-Type':'application/octet-stream'}); result=json.load(urllib.request.urlopen(request,timeout=20)); assert result['engine'].startswith('rapidocr-3.9.2/'); assert len(result['lines']) > 0"
+          docker exec receipt-inference-test python /tmp/smoke.py /tmp/receipt.jpg 4
+          [ "$(docker inspect --format '{{.State.OOMKilled}}' receipt-inference-test)" = false ]
       - name: Validate Docker Compose
         env:
           APP_PASSWORD: compose-validation-password

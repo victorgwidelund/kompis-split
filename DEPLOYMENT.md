@@ -208,8 +208,12 @@ direkt kopplade till proxytopologin:
 - `receipt-inference` publicerar ingen hostport och ansluts bara till det
   `internal: true`-märkta nätet `receipt-private`. Appen tillåter endast den
   explicit konfigurerade interna värden.
-- Ingen GPU krävs. Standardgränsen är 8 CPU-kärnor, 1 GiB RAM, en samtidig
-  inference och högst fyra väntande jobb. Full kö ger 429; appen har 15 s
+- Ingen GPU krävs. Standardgränsen är 8 CPU-kärnor, 3 GiB RAM, en samtidig
+  inference och högst fyra väntande jobb. Sänk inte RAM-gränsen under 3 GiB:
+  ett riktigt mobilfoto (~3000 px) kräver ~1,2 GB per skanning och ~2 GB med
+  kö. Med 1 GiB dödades tjänsten av OOM-killern vid varje riktig skanning fram
+  till v1.32.1 (syns som `oom`/`die 137` i `docker events`), medan `/ready`
+  fortfarande var grön eftersom Docker startade om den direkt. Full kö ger 429; appen har 15 s
   timeout och går då över till sin lokala Tesseract-reserv.
 - `/health` visar processstatus, `/ready` kräver laddad och verifierad modell,
   och `/metrics` ger aggregerade räknare/tider utan OCR-text eller kvittodata.
