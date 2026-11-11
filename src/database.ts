@@ -3,6 +3,9 @@ import pg, { type PoolClient, type QueryResultRow } from "pg";
 
 pg.types.setTypeParser(20, Number);
 pg.types.setTypeParser(1700, Number);
+// DATE stays the plain "YYYY-MM-DD" string. pg's default turns it into a Date at local midnight, which
+// serialises as a timestamp that <input type="date"> rejects and that shifts a day outside UTC.
+pg.types.setTypeParser(1082, (value: string) => value);
 
 if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error("DATABASE_URL eller PGHOST saknas");
 

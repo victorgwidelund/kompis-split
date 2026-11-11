@@ -1816,9 +1816,15 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
   }
   match = url.pathname.match(/^\/api\/trips\/(\d+)\/payments$/);
   if (request.method === "POST" && match) {
-    const tripId = Number(match[1]); await requireAccess(tripId, user.id); await requireActiveTrip(tripId); const body = await readJson(request);
+    const tripId = Number(match[1]); const role = await requireAccess(tripId, user.id); await requireActiveTrip(tripId); const body = await readJson(request);
     const fromId = Number(body.fromId); const toId = Number(body.toId); await assertTripParticipant(tripId, fromId); await assertTripParticipant(tripId, toId);
     if (fromId === toId) throw new Error("Betalare och mottagare måste vara olika");
+    // Only the payer or the recipient marks their own payment. Group admins keep the ability because
+    // guests have no account and could otherwise never be marked as paid.
+    if (!["owner", "admin"].includes(role)) {
+      const parties = await db.prepare("SELECT user_id FROM participants WHERE id IN (?, ?)").all<any>(fromId, toId);
+      if (!parties.some((party) => Number(party.user_id) === Number(user.id))) throw new HttpError(403, "Bara den som betalar eller tar emot kan markera betalningen");
+    }
     const amountCents = parseAmount(body.amount);
     const result = await db.prepare("INSERT INTO payments (trip_id, from_id, to_id, amount_cents, note, created_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
       .run(tripId, fromId, toId, amountCents, body.note ? cleanText(body.note, "Anteckning", 120) : null, user.id);

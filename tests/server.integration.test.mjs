@@ -252,6 +252,9 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     assert.equal(edited.payload.trip.expenses[0].title, "Middag uppdaterad");
     assert.equal(edited.payload.trip.expenses[0].payerId, memberParticipant.id);
     assert.deepEqual(edited.payload.trip.expenses[0].shares.map((share) => share.amountCents), [6001, 6000]);
+    // Dates go out exactly as stored -- a timestamp here leaves the edit dialog's <input type="date"> blank.
+    assert.equal(edited.payload.trip.expenses[0].expenseDate, "2026-12-11");
+    assert.equal(edited.payload.trip.startDate, "2026-12-10");
 
     const statistics = await request("/api/statistics", { cookie: ownerCookie });
     assert.equal(statistics.response.status, 200, JSON.stringify(statistics.payload));
@@ -474,7 +477,10 @@ test("accounts, invitations, authorization, archive and audit preserve the ledge
     const allowedContact = await request("/api/contacts", { method: "POST", cookie: memberCookie, body: { userId: erikId } });
     assert.equal(allowedContact.response.status, 201, JSON.stringify(allowedContact.payload));
 
-    // payments: any trip member can record one; only its creator or a manager can void it.
+    // payments: only the payer, the recipient or a group manager can record one (bug report #10);
+    // only its creator or a manager can void it.
+    const erikCannotMarkOthersPaid = await request(`/api/trips/${tripId}/payments`, { method: "POST", cookie: erikCookie, body: { fromId: memberParticipant.id, toId: ownerParticipant.id, amount: "25.00" } });
+    assert.equal(erikCannotMarkOthersPaid.response.status, 403, "a member outside the payment must not be able to mark it paid");
     const payment = await request(`/api/trips/${tripId}/payments`, { method: "POST", cookie: memberCookie, body: { fromId: memberParticipant.id, toId: ownerParticipant.id, amount: "25.00", note: "Swish" } });
     assert.equal(payment.response.status, 201, JSON.stringify(payment.payload));
     assert.equal(payment.payload.trip.payments[0].amountCents, 2500);

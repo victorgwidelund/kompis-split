@@ -13,4 +13,5 @@ export function GuideIcon() { return <svg {...base}><circle cx="12" cy="12" r="9
 export function BugIcon() { return <svg {...base}><rect x="8" y="8" width="8" height="10" rx="4" /><path d="M12 8V5.5M9 6l1.5 1.7M15 6l-1.5 1.7M4 12h4M16 12h4M5 17l3.2-1.6M19 17l-3.2-1.6M5 8.5l3 1.7M19 8.5l-3 1.7" /></svg>; }
 export function AdminIcon() { return <svg {...base}><path d="M12 3.5 5 6v6c0 4 3 6.8 7 8.5 4-1.7 7-4.5 7-8.5V6l-7-2.5Z" /><path d="m9.5 12 1.7 1.7L15 10" /></svg>; }
 export function LogoutIcon() { return <svg {...base}><path d="M9 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h3" /><path d="M15 8l4 4-4 4M19 12H9" /></svg>; }
+export function NewsIcon() { return <svg {...base}><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.5l-1.9-5.7L4.5 10.9 10.1 9 12 3.5Z" /><path d="M18.5 16.5v4M16.5 18.5h4" /></svg>; }
 export function ChevronRightIcon() { return <svg {...base} width={18} height={18}><path d="m9 6 6 6-6 6" /></svg>; }

@@ -7,6 +7,7 @@ import { formatDate, formatMoney, kronorToOre } from "../../utils/format";
 import { receiptAiStatus, validateReceiptImage } from "../receipts/ocr";
 import { prepareReceiptFile } from "../receipts/imagePrep";
 import { suggestCategoryFromText } from "../../utils/categorySuggestion";
+import { splitInputsFromShares } from "../../utils/splitInputs";
 
 type SplitMode = "equal" | "percentage" | "exact" | "shares";
 interface Values { title: string; amount: string; payerId: string; expenseDate: string; category: string; splitMode: SplitMode }
@@ -15,12 +16,13 @@ export function ExpenseDialog({ open, trip, categories, expense, user, readOnly 
   // Default "Betalat av" to whoever is actually adding the expense, not just the trip's first
   // participant -- otherwise it silently stays on the trip creator for everyone else.
   const defaultPayerId = trip.participants.find((participant) => participant.userId === user.id)?.id ?? trip.participants[0]?.id;
-  const initial = useMemo<Values>(() => ({ title: expense?.title || "", amount: expense ? (expense.amountCents / 100).toFixed(2).replace(".", ",") : "", payerId: String(expense?.payerId || defaultPayerId || ""), expenseDate: expense?.expenseDate || "", category: expense?.category || "other", splitMode: expense ? expense.splitMode : "equal" }), [expense, defaultPayerId]);
+  const rebuiltSplit = useMemo(() => expense ? splitInputsFromShares(expense.splitMode, expense.amountCents, expense.shares) : null, [expense]);
+  const initial = useMemo<Values>(() => ({ title: expense?.title || "", amount: expense ? (expense.amountCents / 100).toFixed(2).replace(".", ",") : "", payerId: String(expense?.payerId || defaultPayerId || ""), expenseDate: expense?.expenseDate || "", category: expense?.category || "other", splitMode: (rebuiltSplit?.mode as SplitMode | undefined) ?? "equal" }), [expense, defaultPayerId, rebuiltSplit]);
   const [values, setValues] = useState(initial); const [selected, setSelected] = useState<Set<number>>(new Set()); const [splitValues, setSplitValues] = useState<Record<number, string>>({}); const [receipt, setReceipt] = useState<File | null>(null); const [preview, setPreview] = useState(""); const [status, setStatus] = useState("Du granskar alltid förslagen innan utgiften sparas."); const [statusClass, setStatusClass] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [commentDraft, setCommentDraft] = useState(""); const [commentBusy, setCommentBusy] = useState(false); const [categoryTouched, setCategoryTouched] = useState(false);
   const scanController = useRef<AbortController | null>(null); const scanGeneration = useRef(0); const selectAllRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (!open) return; setValues(initial); const chosen = new Set(expense?.shares.map((share) => share.participantId) || trip.participants.map((participant) => participant.id)); setSelected(chosen); const next: Record<number, string> = {}; expense?.shares.forEach((share) => { next[share.participantId] = (share.amountCents / 100).toFixed(2).replace(".", ","); }); setSplitValues(next); setReceipt(null); setPreview(""); setStatus("Du granskar alltid förslagen innan utgiften sparas."); setStatusClass(""); setError(""); setCommentDraft(""); setCategoryTouched(Boolean(expense));
-  }, [open, initial, expense, trip.participants]);
+    if (!open) return; setValues(initial); const chosen = new Set(expense?.shares.map((share) => share.participantId) || trip.participants.map((participant) => participant.id)); setSelected(chosen); setSplitValues(rebuiltSplit?.values ?? {}); setReceipt(null); setPreview(""); setStatus("Du granskar alltid förslagen innan utgiften sparas."); setStatusClass(""); setError(""); setCommentDraft(""); setCategoryTouched(Boolean(expense));
+  }, [open, initial, expense, trip.participants, rebuiltSplit]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
   useEffect(() => { if (selectAllRef.current) selectAllRef.current.indeterminate = selected.size > 0 && selected.size < trip.participants.length; }, [selected, trip.participants.length]);
   const activeCategories = categories.filter((category) => !category.archivedAt || category.slug === values.category);
